@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Pre-API-31 backup rules. We exclude the downloaded NNUE net and any cached
+   engine binaries from backup — they're large, redownloadable, and device-specific.
+-->
+<full-backup-content>
+    <exclude domain="file" path="engine/" />
+    <exclude domain="sharedpref" path="engine_prefs.xml" />
+</full-backup-content>

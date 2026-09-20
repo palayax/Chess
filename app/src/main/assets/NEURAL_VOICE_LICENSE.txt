@@ -1,0 +1,59 @@
+On-device neural narration ("Natural voice") — engine and voice model licenses.
+
+===============================================================================
+sherpa-onnx (inference engine)
+===============================================================================
+Project: sherpa-onnx (k2-fsa)
+Source: https://github.com/k2-fsa/sherpa-onnx
+License: Apache License 2.0 — see APACHE_2.0_LICENSE.txt for the full text.
+
+This app links sherpa-onnx's prebuilt Android AAR (native code + Kotlin API) to run text-to-speech
+models entirely on-device. No text or audio is ever sent to a server for this voice.
+
+===============================================================================
+Voice model — "Piper" tier (default)
+===============================================================================
+Model: vits-piper-en_US-ljspeech-medium (int8-quantized), distributed via sherpa-onnx's
+  "tts-models" GitHub release.
+Architecture/training code: Piper (rhasspy), MIT License.
+Training data: the LJ Speech Dataset — https://keithito.com/LJ-Speech-Dataset/
+  Quoted directly from that page: "This dataset is in the public domain in the US (and most
+  likely other countries as well)." / "The audio was recorded in 2016-17 by the LibriVox project
+  and is also in the public domain." / "The texts were published between 1884 and 1964, and are
+  in the public domain." / "There are no restrictions on its use."
+  The archive's own MODEL_CARD (bundled inside vits-piper-en_US-ljspeech-medium-int8.tar.bz2,
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ljspeech-medium-int8.tar.bz2)
+  independently states "License: public domain" for this exact voice.
+
+Most other Piper English voices are NOT usable in a commercially-redistributed, GPLv3 app: per
+Piper's own model cards, most voices were trained on or fine-tuned from recordings licensed for
+non-commercial/research use only. This voice was deliberately chosen instead of, specifically:
+  - "lessac"/"lessac-medium": trained on the 2013 Blizzard Challenge "lessac_blizzard2013"
+    corpus, whose license
+    (https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) restricts
+    use to non-commercial research and forbids redistributing derived models — confirmed by
+    reading that license page directly. (An unrelated "License: mit" tag shown on some mirror
+    pages describes the exported file format/tooling, not the training recordings' own terms, and
+    does not override the dataset license.)
+  - "amy"/"amy-low": fine-tuned from the U.S. English Lessac voice (per Piper's own model card
+    and https://github.com/MycroftAI/mimic3-voices), so it inherits the same Blizzard 2013
+    restriction as "lessac" above.
+Other English voices in this release (e.g. "ryan") were not individually re-audited for this
+app — ljspeech was chosen because it is the one Piper English voice whose entire training-data
+chain was independently confirmed, from a primary source, to be unrestricted public domain.
+
+===============================================================================
+Voice model — "Kokoro" tier (best quality, optional download)
+===============================================================================
+Model: Kokoro-82M, int8-quantized (kokoro-int8-en-v0_19), distributed via sherpa-onnx's
+  "tts-models" GitHub release.
+Source: https://huggingface.co/hexgrad/Kokoro-82M
+License: Apache License 2.0 — confirmed via the LICENSE file bundled inside this exact model
+  archive (full text also in APACHE_2.0_LICENSE.txt).
+
+===============================================================================
+Downloading
+===============================================================================
+Neither voice model ships inside this app's installer. Each is downloaded on request, verified by
+SHA-256 against a value pinned in this app's source code, and stored in this app's private,
+per-app storage on your device — see Settings > Narration voice.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares the languages the app supports to the platform's per-app language picker
+  (Settings > Apps > Palaya Chess > Language, Android 13+). Keep in step with `AppLanguage`.
+  When Hebrew lands, add <locale android:name="he"/> here — the tag is "he"; only the RESOURCE
+  directory has to be the legacy "values-iw" (see AppLanguage's doc).
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+</locale-config>

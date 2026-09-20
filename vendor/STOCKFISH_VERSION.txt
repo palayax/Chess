@@ -1,0 +1,14 @@
+Stockfish source vendored for the :engine module.
+
+  Repository: https://github.com/official-stockfish/Stockfish
+  Tag:        sf_19
+  Commit:     edb0d9db6731067ec50ce619ff372b463bc4dd5d
+  Fetched:    2026-09-17
+
+Fetch reproducibly with: scripts/fetch_stockfish.sh
+(re-fetches this exact tag/commit into vendor/Stockfish/, which is gitignored).
+
+NNUE network required by this build (see src/evaluate.h EvalFileDefaultName):
+  nn-1a298aa575a0.nnue  (78,944,870 bytes)
+  Downloaded at runtime by NetworkProvider from
+  https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue

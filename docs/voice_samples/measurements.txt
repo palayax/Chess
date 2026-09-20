@@ -1,0 +1,17 @@
+piper_baseline_ljspeech            duration= 13903 ms  rate=22050 Hz  rms=  1578.8  peak= 13692  words=36  effectiveWpm=166  bytes=613176
+kokoro_00_af                       duration= 13942 ms  rate=24000 Hz  rms=  1819.1  peak= 14415  words=36  effectiveWpm=166  bytes=669300
+kokoro_01_af_bella                 duration= 13737 ms  rate=24000 Hz  rms=  1838.6  peak= 13790  words=36  effectiveWpm=169  bytes=659458
+kokoro_02_af_nicole                duration= 17912 ms  rate=24000 Hz  rms=  1804.4  peak= 19827  words=36  effectiveWpm=127  bytes=859840
+kokoro_03_af_sarah                 duration= 14110 ms  rate=24000 Hz  rms=  1879.8  peak= 13381  words=36  effectiveWpm=164  bytes=677362
+kokoro_04_af_sky                   duration= 13132 ms  rate=24000 Hz  rms=  1426.9  peak=  9082  words=36  effectiveWpm=177  bytes=630408
+kokoro_05_am_adam                  duration= 13379 ms  rate=24000 Hz  rms=  2338.8  peak= 17048  words=36  effectiveWpm=173  bytes=642260
+kokoro_06_am_michael               duration= 15039 ms  rate=24000 Hz  rms=  1495.8  peak= 21961  words=36  effectiveWpm=153  bytes=721954
+kokoro_07_bf_emma                  duration= 13660 ms  rate=24000 Hz  rms=  2039.5  peak= 15722  words=36  effectiveWpm=170  bytes=655748
+kokoro_08_bf_isabella              duration= 13853 ms  rate=24000 Hz  rms=  2724.8  peak= 19301  words=36  effectiveWpm=167  bytes=664996
+kokoro_09_bm_george                duration= 15451 ms  rate=24000 Hz  rms=  1990.8  peak= 11456  words=36  effectiveWpm=149  bytes=741710
+kokoro_10_bm_lewis                 duration= 14584 ms  rate=24000 Hz  rms=  1371.2  peak= 15287  words=36  effectiveWpm=158  bytes=700084
+pace_kokoro_01_ls0_90              duration= 11222 ms  rate=24000 Hz  rms=  1737.9  peak= 12025  words=36  effectiveWpm=210  bytes=538720
+pace_kokoro_01_ls1_00              duration= 12011 ms  rate=24000 Hz  rms=  1777.9  peak= 12462  words=36  effectiveWpm=195  bytes=576590
+pace_kokoro_01_ls1_10              duration= 12589 ms  rate=24000 Hz  rms=  1818.8  peak= 13134  words=36  effectiveWpm=185  bytes=604362
+pace_kokoro_01_ls1_20              duration= 13737 ms  rate=24000 Hz  rms=  1838.6  peak= 13790  words=36  effectiveWpm=169  bytes=659458
+pace_kokoro_01_ls1_30              duration= 15827 ms  rate=24000 Hz  rms=  1816.2  peak= 13623  words=36  effectiveWpm=145  bytes=759752

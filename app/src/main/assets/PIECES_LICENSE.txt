@@ -1,0 +1,34 @@
+Chess piece artwork: the Cburnett piece set.
+
+Author: Cburnett (Wikimedia Commons)
+Source: https://commons.wikimedia.org/wiki/Category:PNG_chess_pieces/Standard_transparent
+Individual files (via the Wikimedia Commons API):
+  https://commons.wikimedia.org/wiki/File:Chess_klt45.svg  (white king)
+  https://commons.wikimedia.org/wiki/File:Chess_qlt45.svg  (white queen)
+  https://commons.wikimedia.org/wiki/File:Chess_rlt45.svg  (white rook)
+  https://commons.wikimedia.org/wiki/File:Chess_blt45.svg  (white bishop)
+  https://commons.wikimedia.org/wiki/File:Chess_nlt45.svg  (white knight)
+  https://commons.wikimedia.org/wiki/File:Chess_plt45.svg  (white pawn)
+  https://commons.wikimedia.org/wiki/File:Chess_kdt45.svg  (black king)
+  https://commons.wikimedia.org/wiki/File:Chess_qdt45.svg  (black queen)
+  https://commons.wikimedia.org/wiki/File:Chess_rdt45.svg  (black rook)
+  https://commons.wikimedia.org/wiki/File:Chess_bdt45.svg  (black bishop)
+  https://commons.wikimedia.org/wiki/File:Chess_ndt45.svg  (black knight)
+  https://commons.wikimedia.org/wiki/File:Chess_pdt45.svg  (black pawn)
+
+License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+  https://creativecommons.org/licenses/by-sa/3.0/
+
+Modifications from the original artwork (as required by CC BY-SA 3.0's "indicate changes"
+term): the path geometry was hand-transcribed from SVG path data into Kotlin/Compose Path
+draw calls and uniformly rescaled; a small number of purely decorative stroke-only accents
+present in the originals (e.g. the queen's neckline arcs, the knight's nostril highlight) were
+omitted; and stroke-only detail lines that are important for reading the piece (the bishop's
+mitre slit and waist bands, the knight's eye) were reproduced as carved holes in the filled
+silhouette rather than as separate colored strokes, to fit this app's single-path-per-piece
+rendering model. The outer silhouette and proportions of each piece are otherwise unchanged
+from the Cburnett originals.
+
+Because this file's contents are themselves a derivative of Cburnett's CC BY-SA 3.0 work, this
+whole modified piece set is likewise licensed CC BY-SA 3.0 — see the license URL above for full
+terms, including attribution and share-alike requirements for further reuse.

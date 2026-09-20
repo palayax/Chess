@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors ui.theme.Color.kt — kept in sync for the XML-driven splash/launcher theme only.
+         All in-Compose theming reads from ui.theme.Color.kt / ChessAnalyzerTheme, not from here. -->
+    <color name="chrome_dark">#302E2B</color>
+    <color name="surface_dark">#262421</color>
+    <color name="elevated_dark">#3C3A37</color>
+    <color name="green_primary">#81B64C</color>
+    <color name="green_hover">#A3D160</color>
+    <color name="board_light">#EBECD0</color>
+    <color name="board_dark">#739552</color>
+    <color name="highlight_yellow">#F7F769</color>
+    <color name="last_move">#BACA44</color>
+    <color name="on_dark">#FFFFFF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+
+    <!-- Launcher icon background. The Palaya mark is blue/red on white in the source brand
+         art (brand/palaya-logo.png); white keeps the mark true to brand and gives the best
+         contrast for the dragon's dark outlines at small launcher sizes. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

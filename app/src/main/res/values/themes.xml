@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. Compose owns real theming (ui.theme.ChessAnalyzerTheme);
+         this XML theme only covers the window background / status bar before Compose
+         takes over, and any system dialogs. Dark is the default per spec.
+
+         Deliberately built on a platform (android:) theme, not Theme.Material3.* / AppCompat
+         — this app module has no `com.google.android.material`/AppCompat dependency, only
+         Compose Material3, so those library themes/attrs aren't resolvable here. -->
+    <style name="Theme.ChessAnalyzer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/chrome_dark</item>
+        <item name="android:navigationBarColor">@color/chrome_dark</item>
+        <item name="android:windowBackground">@color/chrome_dark</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="23">false</item>
+        <item name="android:colorPrimary">@color/green_primary</item>
+        <item name="android:colorPrimaryDark">@color/chrome_dark</item>
+        <item name="android:colorAccent">@color/green_primary</item>
+    </style>
+</resources>
