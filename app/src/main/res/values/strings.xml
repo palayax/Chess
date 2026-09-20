@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Palaya Chess</string>
+    <string name="share_target_label">Analyze in Palaya Chess</string>
+    <string name="open_pgn_label">Open with Palaya Chess</string>
+
+    <!-- Navigation / top level -->
+    <string name="nav_import">Import</string>
+    <string name="nav_review">Review</string>
+    <string name="nav_report">Report</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Import screen -->
+    <string name="import_title">Analyze a game</string>
+    <string name="import_empty_headline">Bring a game in to get started</string>
+    <string name="import_empty_body">Import a PGN file from your device, paste PGN text below, or share a game directly from Chess.com, Lichess, or any other chess app using the Share menu.</string>
+    <string name="import_choose_file">Choose PGN file</string>
+    <string name="import_paste_label">Paste PGN</string>
+    <string name="import_paste_placeholder">[Event \"Casual Game\"]\n1. e4 e5 2. Nf3 Nc6 …</string>
+    <string name="import_paste_action">Analyze pasted PGN</string>
+    <string name="import_recent_header">Recent games</string>
+    <string name="import_recent_empty">Games you analyze will show up here.</string>
+    <string name="import_invalid_pgn">That doesn\'t look like a valid PGN. Check the text and try again.</string>
+
+    <!-- Analysis progress -->
+    <string name="progress_title">Analyzing game</string>
+    <string name="progress_downloading_engine">Preparing engine…</string>
+    <string name="progress_downloading_net">Downloading neural network (%1$s of %2$s)</string>
+    <string name="progress_analyzing_moves">Analyzing move %1$d of %2$d</string>
+    <string name="progress_cancel">Cancel</string>
+
+    <!-- Review screen -->
+    <string name="review_title">Review</string>
+    <string name="review_best_line">Best line</string>
+    <string name="review_show_me">Show me</string>
+    <string name="review_flip_board">Flip board</string>
+    <string name="review_autoplay">Autoplay</string>
+    <string name="review_first_move">First move</string>
+    <string name="review_previous_move">Previous move</string>
+    <string name="review_next_move">Next move</string>
+    <string name="review_last_move">Last move</string>
+    <string name="review_view_report">View game report</string>
+    <string name="review_start_position">Start position</string>
+
+    <!-- Tactic simulation / textbook reference -->
+    <string name="simulation_missed_title">Missed tactic: %1$s</string>
+    <string name="simulation_close">Close</string>
+    <string name="simulation_previous_step">Previous step</string>
+    <string name="simulation_next_step">Next step</string>
+    <string name="simulation_starting_position">Starting position</string>
+    <string name="simulation_watch_intro">Watch what happens: %1$s starts a line that %2$s.</string>
+    <string name="simulation_payoff">Payoff: %1$s</string>
+    <string name="simulation_back_to_game">Back to the game</string>
+    <string name="simulation_reference_offer">Want to see a %1$s done cleanly? There is a textbook example with nothing else on the board.</string>
+    <string name="simulation_reference_button">See the textbook example</string>
+    <string name="review_learn_pattern">Textbook: %1$s</string>
+    <string name="report_learn_pattern">Textbook example</string>
+    <!-- %1$d = how many, %2$s = the threshold in pawns, e.g. "0.5" -->
+    <string name="report_minor_tactics_hidden">%1$d minor (below ±%2$s pawns)</string>
+    <string name="report_minor_tactics_show">Show</string>
+    <string name="report_minor_tactics_hide">Hide</string>
+
+    <!-- Game report -->
+    <string name="report_title">Game report</string>
+    <string name="report_accuracy">Accuracy</string>
+    <string name="report_est_rating">Est. performance rating</string>
+    <string name="report_classification_breakdown">Move breakdown</string>
+    <string name="report_key_moments">Key moments</string>
+    <string name="report_eval_graph">Evaluation</string>
+    <string name="report_share">Share report</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_engine_header">Engine</string>
+    <string name="settings_depth">Search depth</string>
+    <string name="settings_time_per_move">Time per move</string>
+    <string name="settings_multipv">Analysis lines (MultiPV)</string>
+    <string name="settings_username_header">Your account</string>
+    <string name="settings_username">Your username</string>
+    <string name="settings_username_help">Used to auto-detect which side is you when a PGN has player names.</string>
+    <string name="settings_version_header">Engine version</string>
+    <string name="settings_engine_version">Engine: %1$s</string>
+    <string name="settings_net_version">Network: %1$s</string>
+    <string name="settings_check_updates">Check for updates</string>
+    <string name="settings_narration_content_header">Narration content</string>
+    <string name="settings_narration_threshold">Only narrate moves worth</string>
+    <!-- %1$s = the threshold in pawns, one decimal, e.g. "0.5". -->
+    <string name="settings_narration_threshold_value">±%1$s pawns</string>
+    <string name="settings_narration_threshold_off">Every move</string>
+    <string name="settings_narration_threshold_help">A move is narrated when it changes the evaluation by at least this much. Sequences are judged on their combined swing. Set to zero to narrate every move.</string>
+    <string name="settings_narration_header">Narration voice</string>
+    <string name="settings_narration_device">Device voice</string>
+    <string name="settings_narration_device_help">Free, works offline, no account needed.</string>
+    <string name="settings_narration_neural">Natural voice (on-device)</string>
+    <string name="settings_narration_neural_help">Free, works offline, no account needed — more natural than the device voice.</string>
+    <string name="settings_narration_neural_disabled_help">Download a voice model below to enable this option.</string>
+    <string name="settings_narration_neural_not_downloaded">Not downloaded yet</string>
+    <!-- %1$s = download size, %2$s = size once extracted. Both are stated because the
+         archives are compressed and the two differ by a lot (Kokoro: 98.5 MB down, 150.6 MB
+         on disk) — quoting only one of them misleads whichever one you pick. -->
+    <string name="settings_narration_neural_size">%1$s download · %2$s on disk</string>
+    <string name="settings_narration_neural_installed_size">%1$s on this device</string>
+    <string name="settings_narration_neural_wifi_only">Auto-downloads on Wi-Fi only</string>
+    <string name="settings_narration_neural_download">Download</string>
+    <string name="settings_narration_neural_cancel">Cancel</string>
+    <string name="settings_narration_neural_delete">Delete</string>
+    <string name="settings_narration_storage_label">Narration audio: %1$s</string>
+    <string name="settings_narration_storage_clear">Clear</string>
+    <string name="settings_narration_storage_empty">No pre-generated narration audio stored yet.</string>
+
+    <!-- Cloud voice (Google Cloud Text-to-Speech, user's own key) -->
+    <string name="settings_narration_cloud">Cloud voice (Google)</string>
+    <string name="settings_narration_cloud_help_ready">Uses your own Google Cloud account. The free tier covers about %1$d reviews a month; beyond that Google bills you.</string>
+    <string name="settings_narration_cloud_help_no_key">Optional upgrade. Needs your own Google Cloud API key, and Google requires billing to be enabled even for the free tier. Set it up below.</string>
+    <string name="settings_narration_cloud_voice_english">English voices</string>
+    <string name="settings_narration_cloud_voice_hebrew">Hebrew voices</string>
+    <string name="settings_narration_cloud_voice_hint">%1$s · free tier ≈ %2$d reviews/month</string>
+    <string name="settings_narration_cloud_key_saved_encrypted">API key saved — encrypted on this device</string>
+    <string name="settings_narration_cloud_key_saved_plain">API key saved — this device could not use encrypted storage</string>
+    <string name="settings_narration_cloud_key_missing">No API key yet</string>
+    <string name="settings_narration_cloud_set_up">Set up key</string>
+    <string name="settings_narration_cloud_change">Change key</string>
+    <string name="settings_narration_cloud_remove">Remove</string>
+
+    <!-- Cloud voice setup wizard -->
+    <string name="cloud_setup_title">Google Cloud voice</string>
+    <string name="cloud_setup_intro">Higher-quality narration from Google Cloud Text-to-Speech, using your own Google account. This is optional: the on-device natural voice stays available and stays free.</string>
+    <string name="cloud_setup_billing_header">Before you start: billing is required</string>
+    <string name="cloud_setup_billing_body">Google only serves Text-to-Speech to a project that has a billing account with a payment method attached — even for free-tier use. If you would rather not add a card to your Google account, stop here; the on-device voice needs no account and no card.</string>
+    <string name="cloud_setup_billing_cost">The free tier is %1$s characters a month for %2$s voices — about %3$d full game reviews. Anything beyond that, Google bills to you at $%4$d per million characters. New Google Cloud customers also get a $%5$d trial credit, which is a trial, not a free tier.</string>
+    <string name="cloud_setup_pricing_link">Google\'s pricing page</string>
+    <string name="cloud_setup_privacy">Your key is kept only on this device, encrypted with the Android Keystore, and is sent nowhere except Google\'s Text-to-Speech endpoint.</string>
+    <string name="cloud_setup_step">Step %1$d</string>
+    <string name="cloud_setup_step1_title">Create a Google Cloud project</string>
+    <string name="cloud_setup_step1_body">Sign in with your Google account and create a project — any name will do. Using the Cloud Console itself is free.</string>
+    <string name="cloud_setup_step2_title">Enable the Text-to-Speech API</string>
+    <string name="cloud_setup_step2_body">Open the API\'s page with your new project selected and press Enable.</string>
+    <string name="cloud_setup_step3_title">Enable billing on the project</string>
+    <string name="cloud_setup_step3_body">Link a billing account with a payment method to the project. Required even to use the free tier (see above). The free allowance is applied automatically; nothing is charged until you exceed it.</string>
+    <string name="cloud_setup_step4_title">Create an API key</string>
+    <string name="cloud_setup_step4_body">Credentials → Create credentials → API key. Copy the key that appears.</string>
+    <string name="cloud_setup_step5_title">Restrict the key (recommended)</string>
+    <string name="cloud_setup_step5_body">On the same page, edit the key: under API restrictions choose "Restrict key" and tick Cloud Text-to-Speech API. Leave application restrictions at "None" — a website (HTTP referrer) restriction blocks requests from apps.</string>
+    <string name="cloud_setup_step6_title">Paste the key and test it</string>
+    <string name="cloud_setup_step6_body">Testing synthesizes two words ("%1$s") through the selected voice, %2$s. It is a real request, so a wrong key, a project without billing or a disabled API shows up here with an explanation — not halfway through an export.</string>
+    <string name="cloud_setup_open_console">Open in Cloud Console</string>
+    <string name="cloud_setup_key_label">API key</string>
+    <string name="cloud_setup_key_show">Show</string>
+    <string name="cloud_setup_key_hide">Hide</string>
+    <string name="cloud_setup_test_and_save">Test and save</string>
+    <string name="cloud_setup_testing">Checking the key with Google…</string>
+    <string name="cloud_setup_saved">Key works: %1$s synthesized %2$d ms of audio. Cloud voice is now selected for narration — switch back in Settings any time.</string>
+    <string name="cloud_setup_done">Done</string>
+    <string name="cloud_setup_no_browser">No browser found on this device. Open this address on any device:\n%1$s</string>
+    <string name="settings_about_header">About</string>
+    <string name="settings_about_body">Palaya Chess uses the Stockfish chess engine, licensed under the GNU General Public License v3. This app is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess.</string>
+    <string name="settings_gpl_notice">View GPLv3 license notice</string>
+    <string name="settings_about_open">About Palaya Chess</string>
+
+    <!-- About screen -->
+    <string name="about_title">About</string>
+    <string name="about_cd_logo">Palaya logo</string>
+    <string name="about_app_name">Palaya Chess</string>
+    <string name="about_app_version">Version %1$s</string>
+    <string name="about_engine_version">Engine: %1$s</string>
+    <string name="about_owner_header">Made by</string>
+    <string name="about_owner_name">Dor Amit</string>
+    <string name="about_owner_contact_label">Contact</string>
+    <string name="about_owner_contact">Chess@palaya.net</string>
+    <string name="about_parent_brand">A Palaya Cyber Security LTD app · palaya.net</string>
+
+    <string name="about_licenses_header">Licenses &amp; attribution</string>
+    <string name="about_license_stockfish_title">Chess engine</string>
+    <string name="about_license_stockfish_body">Palaya Chess uses the Stockfish chess engine (%1$s). Because Stockfish is licensed under the GNU General Public License v3 (GPLv3), Palaya Chess is also distributed under GPLv3, and the corresponding source code is available on request.</string>
+    <string name="about_license_stockfish_link">stockfishchess.org</string>
+    <string name="about_license_stockfish_view">View full GPLv3 license text</string>
+    <!-- PLACEHOLDER: owner has not provided the public source repository URL yet.
+         Replace this single string with the real URL when available. -->
+    <string name="about_license_source_url">SOURCE_REPO_URL</string>
+    <string name="about_license_source_label">Source code</string>
+
+    <string name="about_license_openings_title">Opening book</string>
+    <string name="about_license_openings_body">Opening classification data is from lichess-org/chess-openings, dedicated to the public domain under CC0.</string>
+
+    <string name="about_license_pieces_title">Piece artwork</string>
+    <!-- Piece artwork attribution is loaded at runtime from app/src/main/assets/PIECES_LICENSE.txt
+         (added by a separate change: Cburnett piece set, CC BY-SA 3.0) — see AboutScreen.kt's
+         producePieceAttributionText(). This string is the short on-screen summary; the file's
+         full text (author, per-file sources, and the required "indicate changes" note) is shown
+         via the "View full attribution" dialog. If that asset is ever removed, the screen falls
+         back to about_license_pieces_body_fallback below instead of showing the dialog button. -->
+    <string name="about_license_pieces_body_found">Chess piece artwork uses the Cburnett piece set (Wikimedia Commons), licensed CC BY-SA 3.0, adapted for this app\'s renderer.</string>
+    <string name="about_license_pieces_view">View full attribution</string>
+    <string name="about_license_pieces_body_fallback">Board and piece artwork are original to this app.</string>
+
+    <string name="about_license_neural_title">On-device neural narration</string>
+    <string name="about_license_neural_body">The optional "Natural voice" narration runs entirely on your device via sherpa-onnx (Apache 2.0). Its voice models — Piper trained on the public-domain LJ Speech dataset, and Kokoro-82M (Apache 2.0) — are downloaded on request, verified, and never sent anywhere.</string>
+    <string name="about_license_neural_view">View full attribution</string>
+
+    <string name="about_disclaimer">Palaya Chess is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess. It only reads PGN game files exported from those services.</string>
+
+    <string name="about_dialog_close">Close</string>
+
+    <!-- Move classification display names -->
+    <string name="classification_brilliant">Brilliant</string>
+    <string name="classification_great">Great move</string>
+    <string name="classification_best">Best move</string>
+    <string name="classification_excellent">Excellent</string>
+    <string name="classification_good">Good</string>
+    <string name="classification_book">Book</string>
+    <string name="classification_inaccuracy">Inaccuracy</string>
+    <string name="classification_mistake">Mistake</string>
+    <string name="classification_miss">Miss</string>
+    <string name="classification_blunder">Blunder</string>
+    <string name="classification_forced">Forced</string>
+
+    <!-- Board content descriptions -->
+    <string name="cd_board_square">Square %1$s</string>
+    <string name="cd_flip_board">Flip board orientation</string>
+    <string name="cd_piece">%1$s %2$s on %3$s</string>
+
+    <!-- Narrated video -->
+    <string name="watch_game_review">Watch game review</string>
+    <string name="video_export_action">Export video</string>
+    <string name="video_export_synthesizing">Preparing narration… (%1$d/%2$d)</string>
+    <string name="video_export_rendering">Rendering video…</string>
+    <string name="video_export_finalizing">Finalizing…</string>
+    <string name="video_export_completed_title">Video ready</string>
+    <string name="video_export_failed_title">Export failed</string>
+    <string name="video_export_cancelled_title">Export cancelled</string>
+    <string name="video_export_cancel">Cancel</string>
+    <string name="video_export_share">Share</string>
+    <string name="video_export_open">Open</string>
+    <string name="video_export_close">Close</string>
+    <!-- Foreground-service export notifications (VideoExportService) -->
+    <string name="video_export_notification_title">Exporting game review</string>
+    <string name="video_export_notification_done_text">Tap to watch your game review</string>
+    <string name="video_export_notification_cancelled_text">The export was cancelled; no video was saved.</string>
+    <string name="video_export_channel_progress">Video export progress</string>
+    <string name="video_export_channel_progress_desc">Keeps a game-review export running while you use other apps, and lets you cancel it.</string>
+    <string name="video_export_channel_done">Video export finished</string>
+    <string name="video_export_channel_done_desc">Tells you when a game-review export is ready, failed, or was cancelled.</string>
+    <string name="video_chapters">Chapters</string>
+    <string name="video_speed">Speed</string>
+    <string name="video_narration_unavailable">No voice installed on this device — showing captions only</string>
+    <string name="video_previous_segment">Previous</string>
+    <string name="video_next_segment">Next</string>
+    <string name="video_play">Play</string>
+    <string name="video_pause">Pause</string>
+    <string name="video_enter_fullscreen">Enter full screen</string>
+    <string name="video_exit_fullscreen">Exit full screen</string>
+    <string name="video_prepare_narration_action">Prepare narration</string>
+    <string name="video_prepare_narration_ready">Narration ready</string>
+    <string name="video_prepare_narration_done_title">Narration ready</string>
+    <string name="video_prepare_narration_done_body">Every segment\'s narration is generated and saved on this device — playback and export reuse it instead of synthesizing it again.</string>
+    <!-- Language (Round 10, i18n groundwork). English only for now; see AppLanguage.kt for how a
+         language is added. Hebrew resources must live in values-iw, not values-he. -->
+    <string name="settings_language_header">Language</string>
+    <string name="settings_language_system">System default</string>
+    <string name="settings_language_english">English</string>
+    <string name="settings_language_help">The app and the narrated review use this language. Only English is available so far.</string>
+    <string name="settings_language_requires_android_13">Choosing a language needs Android 13 or newer. On this device the app follows the system language.</string>
+
+    <!-- Dialogs and messages that used to be hardcoded -->
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_analysis_failed_title">Couldn\'t analyze this game</string>
+    <string name="dialog_engine_title">Engine</string>
+    <string name="engine_update_available">Newer Stockfish available: %1$s</string>
+    <string name="engine_update_latest">You\'re on the latest vendored Stockfish (or the check failed offline).</string>
+    <string name="gpl_notice">Palaya Chess links the Stockfish chess engine, which is licensed under the GNU General Public License v3. Corresponding source for the engine is available at https://github.com/official-stockfish/Stockfish (tag sf_19, as vendored in this build). This app is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess.</string>
+    <string name="common_back">Back</string>
+    <string name="report_rating_low_confidence">Not enough moves to estimate a rating</string>
+
+    <!-- Video side panel (burned into exported frames, so these go through PanelLabels) -->
+    <string name="panel_move_number">Move %1$d</string>
+    <string name="panel_tactic">Tactic: %1$s</string>
+    <string name="panel_recent_moves">RECENT MOVES</string>
+    <string name="panel_evaluation">EVALUATION</string>
+    <!-- %1$s = White/Black -->
+    <string name="panel_to_move">%1$s to move</string>
+    <string name="panel_you_marker">(you)</string>
+    <string name="panel_excursion_default">What you could aim for</string>
+    <string name="side_white">White</string>
+    <string name="side_black">Black</string>
+
+    <!-- Tactic pattern names (TacticType). Keep in step with TacticTypeNames.kt. -->
+    <string name="tactic_fork">Fork</string>
+    <string name="tactic_pawn_fork">Pawn fork</string>
+    <string name="tactic_double_attack">Double attack</string>
+    <string name="tactic_pin_absolute">Absolute pin</string>
+    <string name="tactic_pin_relative">Relative pin</string>
+    <string name="tactic_skewer">Skewer</string>
+    <string name="tactic_discovered_attack">Discovered attack</string>
+    <string name="tactic_discovered_check">Discovered check</string>
+    <string name="tactic_double_check">Double check</string>
+    <string name="tactic_hanging_piece">Hanging piece</string>
+    <string name="tactic_trapped_piece">Trapped piece</string>
+    <string name="tactic_deflection">Deflection</string>
+    <string name="tactic_decoy">Decoy</string>
+    <string name="tactic_overloaded_piece">Overloaded piece</string>
+    <string name="tactic_interference">Interference</string>
+    <string name="tactic_clearance">Clearance</string>
+    <string name="tactic_zwischenzug">In-between move</string>
+    <string name="tactic_back_rank_mate">Back-rank mate</string>
+    <string name="tactic_smothered_mate">Smothered mate</string>
+    <string name="tactic_greek_gift">Greek gift sacrifice</string>
+    <string name="tactic_windmill">Windmill</string>
+    <string name="tactic_x_ray">X-ray</string>
+    <string name="tactic_promotion">Promotion</string>
+    <string name="tactic_underpromotion">Underpromotion</string>
+    <string name="tactic_passed_pawn_breakthrough">Passed pawn breakthrough</string>
+    <string name="tactic_removing_the_defender">Removing the defender</string>
+    <string name="tactic_mate_net">Mating net</string>
+    <string name="tactic_perpetual_check">Perpetual check</string>
+    <string name="tactic_stalemate_trick">Stalemate trick</string>
+    <string name="tactic_desperado">Desperado</string>
+    <string name="tactic_battery">Battery</string>
+    <string name="tactic_fortress">Fortress</string>
+</resources>
