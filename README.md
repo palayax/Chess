@@ -5,8 +5,11 @@ game with move-by-move analysis: chess.com-style move grades from Brilliant to B
 each side found, the tactics each side missed, a playable walkthrough of what the missed tactic
 would have looked like, and an estimated performance rating.
 
-Analysis runs **entirely on the device** using [Stockfish](https://stockfishchess.org/) 19. There is
-no account, no server, no telemetry.
+Analysis runs **entirely on the device** using [Stockfish](https://stockfishchess.org/) 19, and the
+narration voice runs on the device too. There is no account, no server, no telemetry, and the app
+declares **no network permission** at all. The engine's neural network and the narration voice are
+bundled inside the APK, so everything works offline from the first launch. The price is size: the APK
+is about **365 MB**.
 
 ---
 
@@ -66,26 +69,29 @@ Requirements:
 # 1. Fetch the Stockfish source (pinned to tag sf_19). Not vendored in git.
 scripts/fetch_stockfish.sh
 
-# 2. Build
+# 2. Fetch the two bundled models (~257 MB) into the gitignored vendor/models/.
+scripts/fetch_models.sh
+
+# 3. Build
 ./gradlew :app:assembleDebug
 ```
 
-The NNUE evaluation network is **not** bundled — it is ~79 MB compressed / 98.5 MB on disk, which
-would dwarf the rest of the app. The app downloads it from the official Stockfish network endpoint
-on first run and verifies it by SHA-256 (the filename encodes the first 12 hex digits of the file's
-own hash). To run the on-device engine tests without downloading inside the test:
+`scripts/fetch_models.sh` downloads the Stockfish NNUE evaluation network (98.5 MB, named by the
+first 12 hex digits of its own SHA-256) and the Kokoro voice archive, verifies both against
+`vendor/models/MODELS.lock`, and the build packs them into the APK as uncompressed assets. The build
+fails loudly if a model is missing or has the wrong size or SHA-256. The files are not committed.
 
-```bash
-scripts/push_test_net.sh
-./gradlew :engine:connectedDebugAndroidTest
-```
+On the first analysis the app copies the net into its private storage (Stockfish needs a real file
+path and cannot read it from inside the APK) and unpacks the voice, once, behind a "Setting up the
+engine (one time)..." screen. The app never downloads anything. The instrumented tests need no
+staging either; a `connectedDebugAndroidTest` run pushes the ~371 MB debug APK and takes 20-40 minutes.
 
 ### Why Stockfish is compiled from source
 
 The official Stockfish Android release binary is a 100 MB non-PIE executable with the network
-embedded. Shipping that is impractical (Play Store size limits, multiplied per ABI) and executing a
-downloaded binary is blocked on Android 10+. Compiling from source with `NNUE_EMBEDDING_OFF` into a
-JNI shared library gives ~1.6 MB per ABI instead, and lets the network update at runtime.
+embedded. Shipping that per ABI would triple the net, and executing a downloaded binary is blocked on
+Android 10+. Compiling from source with `NNUE_EMBEDDING_OFF` into a JNI shared library gives ~1.6 MB per
+ABI instead, with the network shipped once as a plain asset.
 
 ---
 
@@ -94,8 +100,8 @@ JNI shared library gives ~1.6 MB per ABI instead, and lets the network update at
 | Module | What it is |
 |---|---|
 | `:core` | Pure Kotlin/JVM. Board, legal move generation, FEN, SAN, PGN parsing, and the whole analysis model. No Android dependencies, so all of it is unit-testable on the host. Move generation is verified by perft against the five standard test positions — depth 5 on the start position and Position 3, depth 4 on Kiwipete, Position 4 and Position 5 (deeper runs on those are too slow for a unit test). |
-| `:engine` | Android library. Stockfish compiled via CMake/NDK into `libstockfish.so`, a JNI bridge that pipes UCI over stdin/stdout, a coroutine-based Kotlin wrapper, and network download/verification. |
-| `:app` | Jetpack Compose UI, navigation, PGN intake, and the analysis orchestration. |
+| `:engine` | Android library. Stockfish compiled via CMake/NDK into `libstockfish.so`, a JNI bridge that pipes UCI over stdin/stdout, a coroutine-based Kotlin wrapper, and the bundled-net provider (copy once, verify by hash). |
+| `:app` | Jetpack Compose UI, navigation, PGN intake, the analysis orchestration, the Practise screens and the narrated video (voice unpacked from the APK on first run). |
 
 ---
 
@@ -107,7 +113,13 @@ for what that means in practice.
 
 Third-party components:
 
-- **Stockfish 19** — GPLv3. <https://stockfishchess.org/>
+- **Stockfish 19** — GPLv3. <https://stockfishchess.org/> Its NNUE network was trained on data from
+  the Leela Chess Zero project, made available under the Open Database License (per the Stockfish README).
+- **sherpa-onnx** (voice inference) — Apache 2.0. <https://github.com/k2-fsa/sherpa-onnx>
+- **Kokoro-82M** (narration voice model, bundled) — Apache 2.0. <https://huggingface.co/hexgrad/Kokoro-82M>
+- **espeak-ng pronunciation data** (inside the Kokoro archive, bundled) — the espeak-ng project is
+  "GPL version 3 or later" per its README; the archive ships no separate licence file for this data.
+  <https://github.com/espeak-ng/espeak-ng>
 - **Opening book** — [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings),
   CC0 public domain dedication.
 - **Piece artwork** — the [Cburnett](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces)

@@ -1,32 +1,44 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,62 +50,111 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import net.palaya.chessanalyzer.ui.a11y.asHeading
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import net.palaya.chessanalyzer.R
+import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.theme.tacticTypeName
 import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.ui.components.EvalGraph
-import net.palaya.chessanalyzer.ui.model.ClassificationCount
+import net.palaya.chessanalyzer.ui.model.ClassificationGroup
+import net.palaya.chessanalyzer.ui.model.ClassificationRow
 import net.palaya.chessanalyzer.ui.model.GameReport
 import net.palaya.chessanalyzer.ui.model.KeyMoment
 import net.palaya.chessanalyzer.ui.model.PieceColor
+import net.palaya.chessanalyzer.ui.model.PracticeEntryState
+import net.palaya.chessanalyzer.ui.model.canTryIt
 import net.palaya.chessanalyzer.ui.model.PlaceholderData
 import net.palaya.chessanalyzer.ui.model.PlayerReport
+import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.SummaryMoments
 import net.palaya.chessanalyzer.ui.model.TacticGroup
 import net.palaya.chessanalyzer.ui.model.TacticOccurrence
+import net.palaya.chessanalyzer.ui.model.groupClassificationRows
+import net.palaya.chessanalyzer.ui.model.selectSummaryMoments
+import net.palaya.chessanalyzer.ui.model.sideChoice
+import net.palaya.chessanalyzer.video.AccuracyBand
+import net.palaya.chessanalyzer.video.accuracyBand
+import net.palaya.chessanalyzer.video.recapAccuracyText
+import net.palaya.chessanalyzer.video.versusLine
 import net.palaya.chessanalyzer.ui.theme.AccuracyGood
 import net.palaya.chessanalyzer.ui.theme.AccuracyLow
 import net.palaya.chessanalyzer.ui.theme.AccuracyMid
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import net.palaya.chessanalyzer.ui.theme.ClassificationBadge
+import net.palaya.chessanalyzer.ui.theme.MoveClassification
 
 /**
- * chess.com-style post-game report: accuracy, estimated performance rating, a
- * classification breakdown table for both sides, an eval graph, and key moments.
+ * The game summary: the hub of the app (docs/MOBILE_UX_DESIGN.md §6.3). It answers "what went
+ * wrong and what do I do about it" in the first screenful:
+ *
+ *  1. a header (players, opening, result), the accuracy of both sides and a plain-language rating;
+ *  2. "Which side were you?", so the rest can say "you";
+ *  3. the key moments, each opening the board at that move, with an inline "Show me" where a
+ *     walkthrough exists;
+ *  4. the video and the board;
+ *  5. a collapsed **Details** section with the graph, the move-quality table and the tactic buckets.
+ *
+ * The order is the design: what to fix first, the instruments (graph, 22 numbers) behind one tap.
  */
 @Composable
 fun GameReportScreen(
     report: GameReport,
     modifier: Modifier = Modifier,
-    onShareClick: (() -> Unit)? = null,
+    /** Open the board at this ply. */
     onKeyMomentClick: ((Int) -> Unit)? = null,
+    /** Open the walkthrough of the missed (or found) tactic at this ply. */
+    onShowMeClick: ((Int) -> Unit)? = null,
     /** Same shape/intent as [onKeyMomentClick]: jump the Review screen to this ply. */
     onTacticClick: ((Int) -> Unit)? = null,
     /** Open the textbook example of a pattern (ANALYSIS_SPEC §10). */
     onLearnPattern: ((TacticType) -> Unit)? = null,
+    /** Open the narrated video. */
     onWatchReviewClick: (() -> Unit)? = null,
+    /** Open the move-by-move board from the start. */
+    onOpenBoardClick: (() -> Unit)? = null,
+    /** The user answered "Which side were you?". Null hides the chooser (previews). */
+    onSideChosen: ((SideChoice) -> Unit)? = null,
+    /** What the "Practise these positions" row says; [PracticeEntryState.Hidden] draws nothing. */
+    practiceEntry: PracticeEntryState = PracticeEntryState.Hidden,
+    /** Open Practise at the first unsolved position (only called for [PracticeEntryState.Count]). */
+    onPracticeClick: (() -> Unit)? = null,
+    /** The plies that are practice positions; a key-moment card on one of them offers "Try it". */
+    practicePlies: Set<Int> = emptySet(),
+    /** Open Practise at this ply. */
+    onTryIt: ((Int) -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
 ) {
+    val moments = selectSummaryMoments(report)
+    // A game with nothing to fix has nothing above the fold worth reading, so Details starts open.
+    var detailsExpanded by rememberSaveable { mutableStateOf(moments.isEmpty) }
+    var showAllClasses by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.report_title)) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                actions = {
-                    if (onWatchReviewClick != null) {
-                        androidx.compose.material3.TextButton(onClick = onWatchReviewClick) {
-                            Text(stringResource(R.string.watch_game_review))
-                        }
-                    }
-                    if (onShareClick != null) {
-                        IconButton(onClick = onShareClick) {
-                            Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.report_share))
+                title = { AppBarTitle(stringResource(R.string.report_title)) },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                         }
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { innerPadding ->
@@ -104,55 +165,314 @@ fun GameReportScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item {
-                Text(
-                    text = "${report.header.white} vs ${report.header.black}",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+            item(key = "header") { HeaderCard(report) }
+
+            if (onSideChosen != null) {
+                item(key = "side-chooser") { SideChooserCard(choice = report.sideChoice, onChosen = onSideChosen) }
             }
 
-            item { AccuracyRow(white = report.white, black = report.black) }
+            keyMomentsSection(
+                report = report,
+                moments = moments,
+                onMomentClick = onKeyMomentClick,
+                onShowMeClick = onShowMeClick,
+                practicePlies = practicePlies,
+                onTryIt = onTryIt,
+            )
 
-            item {
-                Text(
-                    text = stringResource(R.string.report_eval_graph),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    EvalGraph(
-                        evalHistory = report.evalHistory,
-                        modifier = Modifier.padding(12.dp),
-                        plyClassifications = report.plyClassifications,
-                        sequences = report.sequences,
+            // "Practise these positions" (docs/PRACTICE_DESIGN.md §5): a card row, not a button, after
+            // the key moments and before the two buttons, so the Summary keeps one primary action.
+            // "Not me" hides the whole section.
+            if (practiceEntry != PracticeEntryState.Hidden) {
+                item(key = "practice-title") {
+                    Text(
+                        text = stringResource(R.string.practice_section_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.asHeading(),
                     )
+                }
+                item(key = "practice-entry") {
+                    PracticeEntryCard(entry = practiceEntry, onClick = onPracticeClick)
                 }
             }
 
-            item {
+            if (onWatchReviewClick != null || onOpenBoardClick != null) {
+                item(key = "buttons") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (onWatchReviewClick != null) {
+                            FilledTonalButton(onClick = onWatchReviewClick, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.summary_watch_video))
+                            }
+                        }
+                        if (onOpenBoardClick != null) {
+                            OutlinedButton(onClick = onOpenBoardClick, modifier = Modifier.fillMaxWidth()) {
+                                Text(stringResource(R.string.summary_open_board))
+                            }
+                        }
+                    }
+                }
+            }
+
+            item(key = "details-header") {
+                DetailsHeader(expanded = detailsExpanded, onToggle = { detailsExpanded = !detailsExpanded })
+            }
+            if (detailsExpanded) {
+                item(key = "graph-title") {
+                    Text(
+                        text = stringResource(R.string.report_eval_graph),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.asHeading(),
+                    )
+                }
+                item(key = "graph") {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        shape = MaterialTheme.shapes.medium,
+                    ) {
+                        EvalGraph(
+                            evalHistory = report.evalHistory,
+                            modifier = Modifier.padding(12.dp),
+                            plyClassifications = report.plyClassifications,
+                            sequences = report.sequences,
+                        )
+                    }
+                }
+
+                item(key = "table-title") {
+                    Text(
+                        text = stringResource(R.string.report_classification_breakdown),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.asHeading(),
+                    )
+                }
+                item(key = "table") {
+                    ClassificationTable(
+                        report = report,
+                        showAll = showAllClasses,
+                        onToggleShowAll = { showAllClasses = !showAllClasses },
+                    )
+                }
+
+                tacticsSections(report = report, onTacticClick = onTacticClick, onLearnPattern = onLearnPattern)
+            }
+        }
+    }
+}
+
+/** First-strong isolate (FSI..PDI): the text keeps its own direction inside any paragraph. */
+private val FSI = 0x2068.toChar()
+private val PDI = 0x2069.toChar()
+/** Left-to-right mark: keeps digits and notation in one piece inside an RTL paragraph. */
+private val LRM = 0x200E.toChar()
+
+private fun isolateBidi(text: String): String = "$FSI$text$PDI"
+
+/** "MorphyFan1857 (you) vs DukeAndCount", then "Philidor Defense · 17 moves · 1-0". */
+@Composable
+private fun HeaderCard(report: GameReport) {
+    val userColor = report.userColor
+    val vsFormat = stringResource(R.string.game_vs_format)
+    val youFormat = stringResource(R.string.summary_name_you)
+    // "(you)" goes after the isolated name, outside it (R7: the Hebrew-name header swapped its names).
+    fun label(color: PieceColor): (String) -> String =
+        if (userColor == color) { isolated -> String.format(youFormat, isolated) } else { isolated -> isolated }
+    val moves = (report.plyCount + 1) / 2
+    // FSI..PDI isolates "17 moves" so its direction cannot be reshuffled by an RTL paragraph; the
+    // LRM keeps "1-0" in one piece (the same two fixes Home needed).
+    val parts = listOfNotNull(
+        report.openingName?.takeIf { it.isNotBlank() },
+        if (moves > 0) isolateBidi(pluralStringResource(R.plurals.recent_moves_count, moves, moves)) else null,
+        report.header.result.takeIf { it.isNotBlank() && it != "*" }?.let { "$LRM$it" },
+    )
+    val subtitle = parts.reduceOrNull { acc, part -> stringResource(R.string.recent_game_subtitle, acc, part) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = versusLine(
+                    vsFormat,
+                    report.header.white,
+                    report.header.black,
+                    decorateWhite = label(PieceColor.WHITE),
+                    decorateBlack = label(PieceColor.BLACK),
+                ),
+                // Ltr, not Content: a title that starts with a Hebrew name must not turn the whole line RTL.
+                style = MaterialTheme.typography.titleLarge.copy(textDirection = TextDirection.Ltr),
+                fontWeight = FontWeight.Bold,
+            )
+            if (subtitle != null) {
                 Text(
-                    text = stringResource(R.string.report_classification_breakdown),
-                    style = MaterialTheme.typography.titleMedium,
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            item { ClassificationTable(white = report.white, black = report.black) }
-
-            item {
+            Spacer(modifier = Modifier.height(8.dp))
+            AccuracyRow(report)
+            report.summarySentence?.let { sentence ->
+                // One line on how the game unfolded (ANALYSIS_SPEC §12), built in :core from the
+                // report alone, so it follows the side chooser like the buckets do.
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = stringResource(R.string.report_key_moments),
-                    style = MaterialTheme.typography.titleMedium,
+                    text = sentence,
+                    style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            items(report.keyMoments) { moment ->
-                KeyMomentRow(moment = moment, onClick = { onKeyMomentClick?.invoke(moment.ply) })
-            }
+            Spacer(modifier = Modifier.height(4.dp))
+            RatingLines(report)
+        }
+    }
+}
 
-            tacticsSections(report = report, onTacticClick = onTacticClick, onLearnPattern = onLearnPattern)
+/** Plain-language rating: one sentence for the user, or one per side when the side is not known. */
+@Composable
+private fun RatingLines(report: GameReport) {
+    val style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content)
+    val color = MaterialTheme.colorScheme.onSurface
+    @Composable fun sentence(player: PlayerReport): String =
+        if (player.lowConfidence) {
+            stringResource(R.string.report_rating_low_confidence)
+        } else {
+            stringResource(R.string.report_est_rating_sentence, player.estimatedRating)
+        }
+    val user = report.userColor
+    when {
+        user != null -> Text(
+            text = sentence(if (user == PieceColor.WHITE) report.white else report.black),
+            style = style,
+            color = color,
+        )
+        report.white.lowConfidence && report.black.lowConfidence -> Text(
+            text = stringResource(R.string.report_rating_low_confidence),
+            style = style,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> Column {
+            listOf(PieceColor.WHITE to report.white, PieceColor.BLACK to report.black).forEach { (c, player) ->
+                Text(
+                    text = stringResource(
+                        R.string.summary_side_rating,
+                        stringResource(if (c == PieceColor.WHITE) R.string.side_white else R.string.side_black),
+                        sentence(player),
+                    ),
+                    style = style,
+                    color = color,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * "Which side were you?" The answer turns "White found" into "Tactics you found". Always shown, so
+ * a wrong answer can be changed; the current answer is the selected segment. [SideChoice.UNKNOWN]
+ * selects nothing and adds one line saying what the answer is for.
+ */
+@Composable
+private fun SideChooserCard(choice: SideChoice, onChosen: (SideChoice) -> Unit) {
+    val options = listOf(
+        SideChoice.WHITE to R.string.side_white,
+        SideChoice.BLACK to R.string.side_black,
+        SideChoice.NOT_ME to R.string.summary_side_neither,
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.summary_which_side),
+                style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.asHeading(),
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (option, labelRes) ->
+                    SegmentedButton(
+                        selected = choice == option,
+                        onClick = { onChosen(option) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(text = stringResource(labelRes), maxLines = 2, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            if (choice == SideChoice.UNKNOWN) {
+                Text(
+                    text = stringResource(R.string.summary_side_help),
+                    style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun LazyListScope.keyMomentsSection(
+    report: GameReport,
+    moments: SummaryMoments,
+    onMomentClick: ((Int) -> Unit)?,
+    onShowMeClick: ((Int) -> Unit)?,
+    practicePlies: Set<Int>,
+    onTryIt: ((Int) -> Unit)?,
+) {
+    val userKnown = report.userColor != null
+    item(key = "moments-title") {
+        Text(
+            text = stringResource(if (userKnown) R.string.report_key_moments_you else R.string.report_key_moments),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.asHeading(),
+        )
+    }
+    if (moments.isEmpty || (userKnown && moments.primary.isEmpty())) {
+        item(key = "moments-none") { TacticsEmptyRow(message = stringResource(R.string.summary_no_key_moments)) }
+    }
+    items(moments.primary, key = { "moment-${it.ply}" }) { moment ->
+        KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt)
+    }
+    if (moments.opponent.isNotEmpty()) {
+        item(key = "moments-opponent-title") {
+            Text(
+                text = stringResource(R.string.summary_key_moments_opponent),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.asHeading(),
+            )
+        }
+        items(moments.opponent, key = { "moment-${it.ply}" }) { moment ->
+            KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt)
+        }
+    }
+}
+
+@Composable
+private fun DetailsHeader(expanded: Boolean, onToggle: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        shape = MaterialTheme.shapes.medium,
+        onClick = onToggle,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.summary_details),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).asHeading(),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = stringResource(if (expanded) R.string.summary_details_collapse else R.string.summary_details_expand),
+            )
         }
     }
 }
@@ -167,10 +487,10 @@ fun GameReportScreen(
  * is unreachable.
  */
 private data class TacticSection(
-    val title: String,
+    @StringRes val titleRes: Int,
     val groups: List<TacticGroup>,
     val minor: List<TacticGroup>,
-    val emptyMessage: String,
+    @StringRes val emptyRes: Int,
 )
 
 private fun buildTacticSections(report: GameReport): List<TacticSection> {
@@ -180,55 +500,55 @@ private fun buildTacticSections(report: GameReport): List<TacticSection> {
         val opponent = if (userColor == PieceColor.WHITE) report.black else report.white
         listOf(
             TacticSection(
-                title = "Tactics you found",
+                titleRes = R.string.report_tactics_you_found,
                 groups = you.tacticsFound,
                 minor = you.minorTacticsFound,
-                emptyMessage = "No tactics found yet.",
+                emptyRes = R.string.report_tactics_empty,
             ),
             TacticSection(
-                title = "Tactics you missed",
+                titleRes = R.string.report_tactics_you_missed,
                 groups = you.tacticsMissed,
                 minor = you.minorTacticsMissed,
-                emptyMessage = "No missed tactics — nice game.",
+                emptyRes = R.string.report_tactics_empty_nice,
             ),
             TacticSection(
-                title = "Tactics your opponent found",
+                titleRes = R.string.report_tactics_opponent_found,
                 groups = opponent.tacticsFound,
                 minor = opponent.minorTacticsFound,
-                emptyMessage = "Your opponent didn't land any tactics.",
+                emptyRes = R.string.report_tactics_empty,
             ),
             TacticSection(
-                title = "Tactics your opponent missed",
+                titleRes = R.string.report_tactics_opponent_missed,
                 groups = opponent.tacticsMissed,
                 minor = opponent.minorTacticsMissed,
-                emptyMessage = "Your opponent didn't miss any tactics.",
+                emptyRes = R.string.report_tactics_empty,
             ),
         )
     } else {
         listOf(
             TacticSection(
-                title = "White found",
+                titleRes = R.string.report_tactics_white_found,
                 groups = report.white.tacticsFound,
                 minor = report.white.minorTacticsFound,
-                emptyMessage = "White didn't land any tactics.",
+                emptyRes = R.string.report_tactics_empty,
             ),
             TacticSection(
-                title = "White missed",
+                titleRes = R.string.report_tactics_white_missed,
                 groups = report.white.tacticsMissed,
                 minor = report.white.minorTacticsMissed,
-                emptyMessage = "No missed tactics for White — nice game.",
+                emptyRes = R.string.report_tactics_empty,
             ),
             TacticSection(
-                title = "Black found",
+                titleRes = R.string.report_tactics_black_found,
                 groups = report.black.tacticsFound,
                 minor = report.black.minorTacticsFound,
-                emptyMessage = "Black didn't land any tactics.",
+                emptyRes = R.string.report_tactics_empty,
             ),
             TacticSection(
-                title = "Black missed",
+                titleRes = R.string.report_tactics_black_missed,
                 groups = report.black.tacticsMissed,
                 minor = report.black.minorTacticsMissed,
-                emptyMessage = "No missed tactics for Black — nice game.",
+                emptyRes = R.string.report_tactics_empty,
             ),
         )
     }
@@ -242,12 +562,13 @@ private fun LazyListScope.tacticsSections(
     buildTacticSections(report).forEach { section ->
         item {
             Text(
-                text = section.title,
+                text = stringResource(section.titleRes),
                 style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.asHeading(),
             )
         }
         if (section.groups.isEmpty()) {
-            item { TacticsEmptyRow(message = section.emptyMessage) }
+            item { TacticsEmptyRow(message = stringResource(section.emptyRes)) }
         } else {
             items(section.groups) { group ->
                 TacticGroupCard(group = group, onOccurrenceClick = onTacticClick, onLearnPattern = onLearnPattern)
@@ -255,10 +576,9 @@ private fun LazyListScope.tacticsSections(
         }
         if (section.minor.isNotEmpty()) {
             // One expander per section, keyed on the section so its state survives scrolling.
-            item(key = "minor-${section.title}") {
+            item(key = "minor-${section.titleRes}") {
                 MinorTacticsDisclosure(
                     minor = section.minor,
-                    thresholdCp = report.tacticThresholdCp,
                     onOccurrenceClick = onTacticClick,
                     onLearnPattern = onLearnPattern,
                 )
@@ -268,14 +588,13 @@ private fun LazyListScope.tacticsSections(
 }
 
 /**
- * "N minor (below ±0.5 pawns) — Show": the tactics the §9.6 gate pruned. Collapsed by default so
+ * "N smaller ones - Show": the tactics the §9.6 gate pruned. Collapsed by default so
  * the report reads as what mattered; one tap shows the rest, drawn with the same cards so nothing
  * about them is second-class except their placement.
  */
 @Composable
 private fun MinorTacticsDisclosure(
     minor: List<TacticGroup>,
-    thresholdCp: Int,
     onOccurrenceClick: ((Int) -> Unit)?,
     onLearnPattern: ((TacticType) -> Unit)?,
 ) {
@@ -285,12 +604,13 @@ private fun MinorTacticsDisclosure(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button) { expanded = !expanded }
                 .padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = stringResource(R.string.report_minor_tactics_hidden, count, "%.1f".format(thresholdCp / 100.0)),
+                text = pluralStringResource(R.plurals.report_minor_tactics_hidden, count, count),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
@@ -323,25 +643,15 @@ private fun TacticGroupCard(
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = tacticTypeName(group.type),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                if (group.count > 1) {
-                    Text(
-                        text = "×${group.count}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            // The pattern is the unit of learning, so the offer sits on the group, not on each
+            // occurrence: one quiet text button, no pop quiz. From font scale 1.3 it drops under the
+            // name instead of squeezing it ("Hangin / g piece" at 2.0).
+            val stackLearn = LocalDensity.current.fontScale >= 1.3f
+            val learn: @Composable () -> Unit = {
                 if (group.hasReference && onLearnPattern != null) {
-                    // The pattern is the unit of learning, so the offer sits on the group, not on
-                    // each occurrence — one quiet text button, no pop quiz.
                     TextButton(
                         onClick = { onLearnPattern(group.type) },
+                        modifier = Modifier.heightIn(min = 48.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     ) {
                         Icon(
@@ -354,6 +664,23 @@ private fun TacticGroupCard(
                     }
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = tacticTypeName(group.type),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (group.count > 1) {
+                    Text(
+                        text = "$LRM×${group.count}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!stackLearn) learn()
+            }
+            if (stackLearn) learn()
             group.occurrences.forEachIndexed { index, occurrence ->
                 if (index > 0) {
                     Spacer(modifier = Modifier.height(6.dp))
@@ -372,7 +699,8 @@ private fun TacticOccurrenceRow(occurrence: TacticOccurrence, onClick: (() -> Un
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .let { base -> if (onClick != null) base.clickable(onClick = onClick) else base }
+            .heightIn(min = 48.dp)
+            .let { base -> if (onClick != null) base.clickable(role = Role.Button, onClick = onClick) else base }
             .padding(vertical = 4.dp),
     ) {
         Text(
@@ -382,7 +710,7 @@ private fun TacticOccurrenceRow(occurrence: TacticOccurrence, onClick: (() -> Un
         )
         Text(
             text = occurrence.description,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -397,78 +725,82 @@ private fun TacticsEmptyRow(message: String) {
     ) {
         Text(
             text = message,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(12.dp),
         )
     }
 }
 
+/**
+ * The two accuracy numbers, the user's side first. Side by side normally; stacked one per row from
+ * font scale 1.3 up, where two columns of big digits plus labels no longer fit a phone.
+ */
 @Composable
-private fun AccuracyRow(white: PlayerReport, black: PlayerReport) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AccuracyCard(player = white, modifier = Modifier.weight(1f))
-        AccuracyCard(player = black, modifier = Modifier.weight(1f))
+private fun AccuracyRow(report: GameReport) {
+    val user = report.userColor
+    val order = if (user == PieceColor.BLACK) listOf(PieceColor.BLACK, PieceColor.WHITE) else listOf(PieceColor.WHITE, PieceColor.BLACK)
+    val stacked = LocalDensity.current.fontScale >= 1.3f
+    @Composable
+    fun cell(color: PieceColor, modifier: Modifier) {
+        val player = if (color == PieceColor.WHITE) report.white else report.black
+        val label = when {
+            user == null -> stringResource(if (color == PieceColor.WHITE) R.string.side_white else R.string.side_black)
+            user == color -> stringResource(R.string.summary_you)
+            else -> stringResource(R.string.summary_opponent)
+        }
+        AccuracyCell(label = label, accuracyPercent = player.accuracyPercent, stacked = stacked, modifier = modifier)
+    }
+    if (stacked) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            order.forEach { cell(it, Modifier.fillMaxWidth()) }
+        }
+    } else {
+        Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            order.forEach { cell(it, Modifier.weight(1f)) }
+        }
     }
 }
 
 @Composable
-private fun AccuracyCard(player: PlayerReport, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+private fun AccuracyCell(label: String, accuracyPercent: Double, stacked: Boolean, modifier: Modifier = Modifier) {
+    // LRM: "97%" must not become "%97" inside an RTL paragraph.
+    val percent = recapAccuracyText(accuracyPercent)
+    val color = accuracyColor(accuracyPercent)
+    val accuracyWord = stringResource(R.string.report_accuracy)
+    // One TalkBack stop ("You, Accuracy, 97%"); the bar underneath only repeats the number.
+    Column(modifier = modifier.semantics(mergeDescendants = true) {}) {
+        if (stacked) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "$label · $accuracyWord",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(text = percent, style = MaterialTheme.typography.headlineSmall, color = color, fontWeight = FontWeight.Bold)
+            }
+        } else {
             Text(
-                text = player.name,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "%.1f%%".format(player.accuracyPercent),
-                style = MaterialTheme.typography.displaySmall,
-                color = accuracyColor(player.accuracyPercent),
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = stringResource(R.string.report_accuracy),
-                style = MaterialTheme.typography.labelSmall,
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(10.dp))
-            LinearProgressIndicator(
-                progress = { (player.accuracyPercent / 100.0).toFloat() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-                color = accuracyColor(player.accuracyPercent),
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            if (player.lowConfidence) {
-                // ANALYSIS_SPEC.md §4: games under 20 plies have too little signal for the
-                // rating estimate to mean anything — showing the number as fact would be
-                // actively misleading (e.g. a near-empty game can "estimate" to ~2900).
-                Text(
-                    text = stringResource(R.string.report_rating_low_confidence),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text(
-                    text = "${player.estimatedRating}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
+            Text(text = percent, style = MaterialTheme.typography.headlineMedium, color = color, fontWeight = FontWeight.Bold)
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = { (accuracyPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clearAndSetSemantics { },
+            color = color,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+        if (!stacked) {
             Text(
-                text = stringResource(R.string.report_est_rating),
+                text = accuracyWord,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -476,87 +808,249 @@ private fun AccuracyCard(player: PlayerReport, modifier: Modifier = Modifier) {
     }
 }
 
-private fun accuracyColor(accuracy: Double) = when {
-    accuracy >= 85 -> AccuracyGood
-    accuracy >= 65 -> AccuracyMid
-    else -> AccuracyLow
+private fun accuracyColor(accuracy: Double) = when (accuracyBand(accuracy)) {
+    AccuracyBand.GOOD -> AccuracyGood
+    AccuracyBand.MID -> AccuracyMid
+    AccuracyBand.LOW -> AccuracyLow
 }
 
+/**
+ * The move-quality table, grouped: Brilliant, Great, "Good moves (Best, Excellent, Good)", the
+ * mistake classes and "Book / Forced", with all-zero rows left out. "Show all 11" is the old flat
+ * table (every class, zeros included) with the one-line legends for the classes that need one.
+ */
 @Composable
-private fun ClassificationTable(white: PlayerReport, black: PlayerReport) {
+private fun ClassificationTable(report: GameReport, showAll: Boolean, onToggleShowAll: () -> Unit) {
+    val rows = groupClassificationRows(report.white.counts, report.black.counts, showAll)
+    val user = report.userColor
+    @Composable
+    fun header(player: PlayerReport, color: PieceColor) =
+        if (user == color) stringResource(R.string.summary_name_you, player.name) else player.name
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         shape = MaterialTheme.shapes.medium,
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            white.counts.forEachIndexed { index, whiteCount ->
-                val blackCount = black.counts.getOrNull(index) ?: ClassificationCount(whiteCount.classification, 0)
-                ClassificationTableRow(whiteCount = whiteCount, blackCount = blackCount)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = header(report.white, PieceColor.WHITE),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = header(report.black, PieceColor.BLACK),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            rows.forEach { ClassificationTableRow(it) }
+            if (showAll) {
+                Spacer(modifier = Modifier.height(8.dp))
+                listOf(
+                    R.string.classification_book_help,
+                    R.string.classification_forced_help,
+                    R.string.classification_miss_help,
+                ).forEach { helpRes ->
+                    Text(
+                        text = stringResource(helpRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            TextButton(onClick = onToggleShowAll, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(
+                    text = if (showAll) {
+                        stringResource(R.string.report_table_show_fewer)
+                    } else {
+                        stringResource(R.string.report_table_show_all, MoveClassification.entries.size)
+                    },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ClassificationTableRow(whiteCount: ClassificationCount, blackCount: ClassificationCount) {
+private fun ClassificationTableRow(row: ClassificationRow) {
+    val name = when (row.group) {
+        ClassificationGroup.GOOD_MOVES -> stringResource(R.string.report_group_good_moves)
+        ClassificationGroup.BOOK_FORCED -> stringResource(R.string.report_group_book_forced)
+        null -> stringResource(row.badge.displayNameRes)
+    }
+    val spoken = stringResource(R.string.cd_class_row, name, row.white, row.black)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 6.dp)
+            // One sentence per row ("Mistake, White 2, Black 1"): read cell by cell it was "2, 1".
+            .clearAndSetSemantics { contentDescription = spoken },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "${whiteCount.count}",
-            modifier = Modifier.width(28.dp),
+            text = "${row.white}",
+            modifier = Modifier.widthIn(min = 28.dp),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(modifier = Modifier.width(4.dp))
-        ClassificationBadge(classification = whiteCount.classification, size = 18.dp)
+        ClassificationBadge(classification = row.badge, size = 18.dp)
         Spacer(modifier = Modifier.width(10.dp))
         Text(
-            text = stringResource(whiteCount.classification.displayNameRes),
+            text = when (row.group) {
+                ClassificationGroup.GOOD_MOVES -> stringResource(R.string.report_group_good_moves)
+                ClassificationGroup.BOOK_FORCED -> stringResource(R.string.report_group_book_forced)
+                null -> stringResource(row.badge.displayNameRes)
+            },
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        ClassificationBadge(classification = blackCount.classification, size = 18.dp)
+        ClassificationBadge(classification = row.badge, size = 18.dp)
         Spacer(modifier = Modifier.width(4.dp))
         Text(
-            text = "${blackCount.count}",
-            modifier = Modifier.width(28.dp),
+            text = "${row.black}",
+            modifier = Modifier.widthIn(min = 28.dp),
             style = MaterialTheme.typography.labelLarge,
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            textAlign = TextAlign.End,
         )
     }
 }
 
+/**
+ * One key moment: badge, move and class, the one-line explanation, and (only where a walkthrough
+ * exists) "Show me". Tapping the card opens the board at that move.
+ */
 @Composable
-private fun KeyMomentRow(moment: KeyMoment, onClick: () -> Unit) {
+private fun KeyMomentCard(
+    moment: KeyMoment,
+    report: GameReport,
+    onClick: ((Int) -> Unit)?,
+    onShowMe: ((Int) -> Unit)?,
+    practicePlies: Set<Int>,
+    onTryIt: ((Int) -> Unit)?,
+) {
+    // "what I missed" is only true of the user's own mistakes; a found tactic or the opponent's
+    // moment is a plain "Show me".
+    val ownMistake = report.userColor == moment.moverColor && moment.classification != MoveClassification.BRILLIANT
+    val canShowMe = onShowMe != null && moment.ply in report.plysWithSimulation
+    // "Try it" opens Practise at this move, only when the move is a practice position.
+    val tryIt = onTryIt != null && canTryIt(moment.ply, practicePlies)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.medium,
-        onClick = onClick,
+        onClick = { onClick?.invoke(moment.ply) },
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ClassificationBadge(classification = moment.classification, size = 22.dp)
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${moment.moveNumber}. ${moment.san}",
-                    style = MaterialTheme.typography.titleSmall,
-                )
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ClassificationBadge(classification = moment.classification, size = 26.dp)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        // LRM: a move like "15… Nf6" is notation, never mirrored (Round 10).
+                        text = LRM + stringResource(
+                            if (moment.moverColor == PieceColor.WHITE) R.string.summary_moment_white else R.string.summary_moment_black,
+                            moment.moveNumber,
+                            moment.san,
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = stringResource(moment.classification.displayNameRes),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (moment.description.isNotBlank()) {
                 Text(
                     text = moment.description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (canShowMe || tryIt) {
+                // A flow row, so at a large font the two buttons wrap instead of clipping.
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canShowMe) {
+                        FilledTonalButton(
+                            onClick = { onShowMe?.invoke(moment.ply) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(if (ownMistake) R.string.review_show_me_missed else R.string.review_show_me))
+                        }
+                    }
+                    if (tryIt) {
+                        OutlinedButton(
+                            onClick = { onTryIt?.invoke(moment.ply) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(R.string.practice_try_it))
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+/**
+ * The "Practise these positions" row (docs/PRACTICE_DESIGN.md §5): a card, not a button. Only the
+ * [PracticeEntryState.Count] state is tappable and carries a chevron; "choose a side" and "nothing to
+ * fix" are plain text. [PracticeEntryState.Hidden] is never passed here (the section is not drawn).
+ */
+@Composable
+private fun PracticeEntryCard(entry: PracticeEntryState, onClick: (() -> Unit)?) {
+    val text = when (entry) {
+        PracticeEntryState.NoSide -> stringResource(R.string.practice_entry_no_side)
+        PracticeEntryState.Empty -> stringResource(R.string.practice_entry_empty)
+        is PracticeEntryState.Count -> stringResource(
+            R.string.practice_entry_solved,
+            pluralStringResource(R.plurals.practice_entry_count, entry.total, entry.total),
+            entry.solved,
+        )
+        PracticeEntryState.Hidden -> ""
+    }
+    val content: @Composable () -> Unit = {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content),
+                color = if (entry is PracticeEntryState.Count) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (entry is PracticeEntryState.Count) {
+                // Auto-mirrored, so it points the reading direction in RTL.
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    if (entry is PracticeEntryState.Count && onClick != null) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.medium,
+            onClick = onClick,
+        ) { content() }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            shape = MaterialTheme.shapes.medium,
+        ) { content() }
     }
 }
 
@@ -564,6 +1058,6 @@ private fun KeyMomentRow(moment: KeyMoment, onClick: () -> Unit) {
 @Composable
 private fun GameReportScreenPreview() {
     ChessAnalyzerTheme {
-        GameReportScreen(report = PlaceholderData.sampleReport)
+        GameReportScreen(report = PlaceholderData.sampleReport, onSideChosen = {})
     }
 }

@@ -22,9 +22,15 @@ object WinProbability {
     const val MATE_STEP = 50
     private const val SIGMOID_K = 0.00368208
 
-    /** Saturating centipawn value for a mate score. [n] > 0 means the side to move mates. */
+    /**
+     * Saturating centipawn value for a mate score. [n] > 0 means the side to move mates.
+     * [n] == 0 means the side to move IS checkmated (what `AnalysisService` records for a
+     * terminal position), so it saturates negative. It used to return +10000 here, which gave
+     * every mating move a wrong-sign centipawn value, while [winPercentOfLine] already had it
+     * right (0.0).
+     */
     fun cpFromMate(n: Int): Int {
-        val sign = if (n >= 0) 1 else -1
+        val sign = if (n > 0) 1 else -1
         return sign * (MATE_CP - min(abs(n), 40) * MATE_STEP)
     }
 

@@ -5,81 +5,116 @@ package net.palaya.chessanalyzer.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import net.palaya.chessanalyzer.R
-import net.palaya.chessanalyzer.core.narration.cloud.GoogleCloudVoice
-import net.palaya.chessanalyzer.ui.model.EngineSettings
-import net.palaya.chessanalyzer.ui.model.AppLocales
+import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
+import net.palaya.chessanalyzer.ui.a11y.asHeading
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import net.palaya.chessanalyzer.ui.model.AdvancedExpander
+import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.AppLanguage
+import net.palaya.chessanalyzer.ui.model.AppLocales
+import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings
-import net.palaya.chessanalyzer.ui.model.NeuralModelUiState
-import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
-import net.palaya.chessanalyzer.video.VoiceModelProvisioner
+import net.palaya.chessanalyzer.ui.model.ReviewDetail
+import net.palaya.chessanalyzer.ui.model.customDepthValue
+import net.palaya.chessanalyzer.ui.model.customThresholdValue
+import net.palaya.chessanalyzer.ui.model.formatStorageMegabytes
+import net.palaya.chessanalyzer.ui.model.providerForVoiceSwitch
+import net.palaya.chessanalyzer.ui.model.voiceSwitchIsOn
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 
 /**
- * Engine configuration + app-level preferences. State is passed in/out via callbacks so a
- * later integration pass can back this with DataStore (the module already depends on
- * `androidx.datastore:datastore-preferences`) without touching the composable's shape.
+ * Settings (UX step U9, `docs/MOBILE_UX_DESIGN.md` §3.2 and §6.7): four rows. **Your name**,
+ * **Language** (opens a list), **Advanced** (collapsed; expands in place to four controls) and
+ * **About Palaya Chess**. Nothing else.
+ *
+ * State is passed in and out through callbacks; [onSettingsChange] receives the whole
+ * [EngineSettings] snapshot, so the two presets are just `copy(depth = ...)` and
+ * `copy(narrationThresholdCp = ...)` and the repository's clamps (depth 6..30, threshold 0..300)
+ * are unchanged. The search-line count (MultiPV) is not a user decision and stays at its default.
  */
 @Composable
 fun SettingsScreen(
     settings: EngineSettings,
     modifier: Modifier = Modifier,
     onSettingsChange: (EngineSettings) -> Unit = {},
-    onCheckForUpdates: () -> Unit = {},
-    onViewGplNotice: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
     narrationVoiceSettings: NarrationVoiceSettings = NarrationVoiceSettings(),
     onNarrationProviderChange: (NarrationProviderChoice) -> Unit = {},
     /** Total bytes currently held in the persistent narration cache (`filesDir/narration/`). */
     narrationStorageBytes: Long = 0L,
     onClearNarrationStorage: () -> Unit = {},
-    neuralModelState: NeuralModelUiState = NeuralModelUiState(),
-    onNeuralTierChange: (NeuralVoiceTier) -> Unit = {},
-    onDownloadNeuralModel: (NeuralVoiceTier) -> Unit = {},
-    onCancelNeuralModelDownload: () -> Unit = {},
-    onDeleteNeuralModel: (NeuralVoiceTier) -> Unit = {},
-    onCloudVoiceChange: (GoogleCloudVoice) -> Unit = {},
-    /** Opens the Google Cloud key wizard ([CloudVoiceSetupScreen]). */
-    onOpenCloudSetup: () -> Unit = {},
-    onRemoveCloudKey: () -> Unit = {},
 ) {
+    var advanced by rememberSaveable(stateSaver = AdvancedExpanderSaver) { mutableStateOf(AdvancedExpander()) }
+
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = { AppBarTitle(stringResource(R.string.settings_title)) },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -89,600 +124,392 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                SectionHeader(stringResource(R.string.settings_engine_header))
+            item(key = "name") {
                 SettingsCard {
-                    LabeledSlider(
-                        label = stringResource(R.string.settings_depth),
-                        value = settings.depth,
-                        valueRange = 6..30,
-                        valueLabel = "${settings.depth}",
-                        onValueChange = { onSettingsChange(settings.copy(depth = it)) },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    LabeledSlider(
-                        label = stringResource(R.string.settings_time_per_move),
-                        value = settings.timePerMoveMs,
-                        valueRange = 100..3000,
-                        valueLabel = "${settings.timePerMoveMs} ms",
-                        step = 100,
-                        onValueChange = { onSettingsChange(settings.copy(timePerMoveMs = it)) },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    LabeledSlider(
-                        label = stringResource(R.string.settings_multipv),
-                        value = settings.multiPv,
-                        valueRange = 1..5,
-                        valueLabel = "${settings.multiPv}",
-                        onValueChange = { onSettingsChange(settings.copy(multiPv = it)) },
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_username_header))
-                SettingsCard {
-                    OutlinedTextField(
-                        value = settings.username,
-                        onValueChange = { onSettingsChange(settings.copy(username = it)) },
-                        label = { Text(stringResource(R.string.settings_username)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = stringResource(R.string.settings_username_help),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_narration_content_header))
-                SettingsCard {
-                    NarrationThresholdSlider(
-                        thresholdCp = settings.narrationThresholdCp,
-                        onThresholdChange = { onSettingsChange(settings.copy(narrationThresholdCp = it)) },
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_narration_header))
-                SettingsCard {
-                    NarrationVoiceSection(
-                        state = narrationVoiceSettings,
-                        onProviderChange = onNarrationProviderChange,
-                        neuralModelState = neuralModelState,
-                        onNeuralTierChange = onNeuralTierChange,
-                        onDownloadNeuralModel = onDownloadNeuralModel,
-                        onCancelNeuralModelDownload = onCancelNeuralModelDownload,
-                        onDeleteNeuralModel = onDeleteNeuralModel,
-                        onCloudVoiceChange = onCloudVoiceChange,
-                        onOpenCloudSetup = onOpenCloudSetup,
-                        onRemoveCloudKey = onRemoveCloudKey,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    NarrationStorageRow(
-                        totalBytes = narrationStorageBytes,
-                        onClear = onClearNarrationStorage,
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_version_header))
-                SettingsCard {
-                    Text(
-                        text = stringResource(R.string.settings_engine_version, settings.engineVersion),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = stringResource(R.string.settings_net_version, settings.netVersion),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedButton(onClick = onCheckForUpdates) {
-                        Text(stringResource(R.string.settings_check_updates))
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        val usernameLabel = stringResource(R.string.settings_username)
+                        // A floating label is one line tall; at a large font it wraps and pokes out of the
+                        // card. From scale 1.3 the label becomes a plain line above the field (the field
+                        // keeps it as its TalkBack name).
+                        val labelAbove = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
+                        if (labelAbove) {
+                            Text(
+                                text = usernameLabel,
+                                style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                        }
+                        OutlinedTextField(
+                            value = settings.username,
+                            onValueChange = { onSettingsChange(settings.copy(username = it)) },
+                            label = if (labelAbove) null else ({ Text(usernameLabel) }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics { if (labelAbove) contentDescription = usernameLabel },
+                            singleLine = true,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.settings_username_help),
+                            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_language_header))
+            item(key = "language") {
                 SettingsCard {
-                    LanguageSection(
+                    LanguageRow(
                         selected = settings.language,
                         onLanguageChange = { onSettingsChange(settings.copy(language = it)) },
                     )
                 }
             }
 
-            item {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionHeader(stringResource(R.string.settings_about_header))
+            item(key = "advanced") {
                 SettingsCard {
-                    Text(
-                        text = stringResource(R.string.settings_about_body),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = onViewGplNotice) {
-                        Text(stringResource(R.string.settings_gpl_notice))
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedButton(onClick = onOpenAbout, modifier = Modifier.fillMaxWidth()) {
-                        Text(stringResource(R.string.settings_about_open))
+                    Column {
+                        AdvancedHeaderRow(expanded = advanced.expanded, onToggle = { advanced = advanced.toggled() })
+                        if (advanced.expanded) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(20.dp),
+                            ) {
+                                AnalysisStrengthControl(
+                                    depth = settings.depth,
+                                    onChange = { onSettingsChange(settings.copy(depth = it.depth)) },
+                                )
+                                ReviewDetailControl(
+                                    thresholdCp = settings.narrationThresholdCp,
+                                    onChange = { onSettingsChange(settings.copy(narrationThresholdCp = it.thresholdCp)) },
+                                )
+                                DeviceVoiceSwitchRow(
+                                    provider = narrationVoiceSettings.provider,
+                                    onProviderChange = onNarrationProviderChange,
+                                )
+                                NarrationStorageRow(
+                                    totalBytes = narrationStorageBytes,
+                                    onClear = onClearNarrationStorage,
+                                )
+                            }
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            item(key = "about") {
+                SettingsCard {
+                    SettingsRow(
+                        title = stringResource(R.string.settings_about_open),
+                        supporting = null,
+                        onClick = onOpenAbout,
+                    )
+                }
             }
         }
     }
 }
 
-/**
- * The app language. Offers [AppLanguage.entries] — English only today — with the plumbing that a
- * second language plugs into (see [AppLanguage]). Below Android 13 the platform has no per-app
- * language API and this app carries no AppCompat backport, so the choice is shown disabled with
- * the reason rather than silently doing nothing.
- */
-@Composable
-private fun LanguageSection(selected: AppLanguage, onLanguageChange: (AppLanguage) -> Unit) {
-    val supported = AppLocales.isPerAppLanguageSupported
-    Column {
-        for (language in AppLanguage.entries) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = supported) { onLanguageChange(language) },
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            ) {
-                RadioButton(
-                    selected = selected == language,
-                    onClick = { onLanguageChange(language) },
-                    enabled = supported,
-                )
-                Text(stringResource(language.labelRes), style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = stringResource(if (supported) R.string.settings_language_help else R.string.settings_language_requires_android_13),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
+/** Survives rotation and process death: collapsed by default, remembered as one boolean. */
+private val AdvancedExpanderSaver = Saver<AdvancedExpander, Boolean>(
+    save = { it.expanded },
+    restore = { AdvancedExpander(it) },
+)
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
-}
-
-@Composable
-private fun SettingsCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+private fun SettingsCard(content: @Composable () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         shape = MaterialTheme.shapes.medium,
     ) {
-        Column(modifier = Modifier.padding(16.dp), content = content)
+        content()
+    }
+}
+
+/** A tappable row with a title, an optional second line and a chevron that mirrors in RTL. */
+@Composable
+private fun SettingsRow(
+    title: String,
+    supporting: String?,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.6f)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.titleMedium)
+            if (supporting != null) {
+                Text(
+                    text = supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
-private fun LabeledSlider(
-    label: String,
-    value: Int,
-    valueRange: IntRange,
-    valueLabel: String,
-    onValueChange: (Int) -> Unit,
-    step: Int = 1,
-) {
-    Column(modifier = Modifier.padding(vertical = 8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(text = label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                text = valueLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange((it.toInt() / step) * step) },
-            valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
+private fun AdvancedHeaderRow(expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onToggle)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.settings_advanced),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f).asHeading(),
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = stringResource(
+                if (expanded) R.string.settings_advanced_collapse else R.string.settings_advanced_expand,
+            ),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 /**
- * How selective the narrated review is (ANALYSIS_SPEC §9.2).
- *
- * Expressed in **pawns to one decimal**, because that is the unit a chess player thinks in; the
- * stored value is centipawns, so the slider steps in tenths of a pawn and never lands on a value
- * that cannot be displayed exactly. 0.0 is a real, reachable setting and reads "Every move"
- * rather than "±0.0 pawns", since that is what it does.
+ * The app language as one row that opens a list. Offers [AppLanguage.entries] (English only
+ * today). Below Android 13 the platform has no per-app language API and this app carries no
+ * AppCompat backport, so the row is shown disabled with the reason rather than silently doing
+ * nothing.
  */
 @Composable
-private fun NarrationThresholdSlider(thresholdCp: Int, onThresholdChange: (Int) -> Unit) {
-    val valueLabel = if (thresholdCp <= 0) {
-        stringResource(R.string.settings_narration_threshold_off)
-    } else {
-        stringResource(
-            R.string.settings_narration_threshold_value,
-            String.format(java.util.Locale.ROOT, "%.1f", thresholdCp / 100.0),
+private fun LanguageRow(selected: AppLanguage, onLanguageChange: (AppLanguage) -> Unit) {
+    val supported = AppLocales.isPerAppLanguageSupported
+    var dialogOpen by rememberSaveable { mutableStateOf(false) }
+
+    SettingsRow(
+        title = stringResource(R.string.settings_language_header),
+        supporting = if (supported) {
+            stringResource(selected.labelRes)
+        } else {
+            stringResource(R.string.settings_language_requires_android_13)
+        },
+        onClick = { dialogOpen = true },
+        enabled = supported,
+    )
+
+    if (dialogOpen && supported) {
+        AlertDialog(
+            onDismissRequest = { dialogOpen = false },
+            title = { Text(stringResource(R.string.settings_language_header)) },
+            text = {
+                Column {
+                    for (language in AppLanguage.entries) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .selectable(selected = selected == language, role = Role.RadioButton) {
+                                    dialogOpen = false
+                                    if (language != selected) onLanguageChange(language)
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = selected == language, onClick = null)
+                            Text(
+                                text = stringResource(language.labelRes),
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.settings_language_help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { dialogOpen = false }) {
+                    Text(stringResource(R.string.settings_language_close))
+                }
+            },
         )
     }
-    Column {
-        LabeledSlider(
-            label = stringResource(R.string.settings_narration_threshold),
-            value = thresholdCp,
-            valueRange = 0..300,
-            valueLabel = valueLabel,
-            step = 10,
-            onValueChange = onThresholdChange,
-        )
+}
+
+/** "Analysis strength": Quick / Standard / Deep. A stored depth outside those shows "Custom (N)". */
+@Composable
+private fun AnalysisStrengthControl(depth: Int, onChange: (AnalysisStrength) -> Unit) {
+    val preset = AnalysisStrength.fromDepth(depth)
+    PresetControl(
+        title = stringResource(R.string.settings_depth),
+        help = stringResource(R.string.settings_depth_help),
+        options = listOf(
+            AnalysisStrength.QUICK to stringResource(R.string.settings_depth_quick),
+            AnalysisStrength.STANDARD to stringResource(R.string.settings_depth_standard),
+            AnalysisStrength.DEEP to stringResource(R.string.settings_depth_deep),
+        ),
+        selected = preset,
+        customLabel = if (preset == null) stringResource(R.string.settings_custom_value, customDepthValue(depth)) else null,
+        onSelect = onChange,
+    )
+}
+
+/**
+ * "What the review talks about": Only big moments / Balanced / Every move. The help says in plain
+ * words that the same setting also decides which tactics the summary lists (the significance gate
+ * drives both).
+ */
+@Composable
+private fun ReviewDetailControl(thresholdCp: Int, onChange: (ReviewDetail) -> Unit) {
+    val preset = ReviewDetail.fromThresholdCp(thresholdCp)
+    PresetControl(
+        title = stringResource(R.string.settings_narration_threshold),
+        help = stringResource(R.string.settings_narration_threshold_help),
+        options = listOf(
+            ReviewDetail.ONLY_BIG_MOMENTS to stringResource(R.string.settings_threshold_big),
+            ReviewDetail.BALANCED to stringResource(R.string.settings_threshold_balanced),
+            ReviewDetail.EVERY_MOVE to stringResource(R.string.settings_threshold_all),
+        ),
+        selected = preset,
+        customLabel = if (preset == null) {
+            stringResource(R.string.settings_custom_value, customThresholdValue(thresholdCp))
+        } else null,
+        onSelect = onChange,
+    )
+}
+
+/**
+ * A title, a single-choice control and a help line. At normal text size the control is a segmented
+ * row; at large font scales three labels no longer fit side by side (a word would break in the
+ * middle), so it becomes a vertical list of radio rows instead (the design's "large font" rule).
+ *
+ * When [customLabel] is non-null the stored value is not one of [options]: no preset is selected
+ * and a "Custom (N)" line states what is stored, so the screen never claims a preset that is not
+ * what is stored (and never rewrites it unless the user picks one).
+ */
+@Composable
+private fun <T> PresetControl(
+    title: String,
+    help: String,
+    options: List<Pair<T, String>>,
+    selected: T?,
+    customLabel: String?,
+    onSelect: (T) -> Unit,
+) {
+    val largeText = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = stringResource(R.string.settings_narration_threshold_help),
-            style = MaterialTheme.typography.bodySmall,
+            text = title,
+            style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content),
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.asHeading(),
+        )
+        if (largeText) {
+            Column {
+                options.forEach { (option, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .selectable(selected = selected == option, role = Role.RadioButton) { onSelect(option) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected == option, onClick = null)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content),
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
+            }
+        } else {
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                options.forEachIndexed { index, (option, label) ->
+                    SegmentedButton(
+                        selected = selected == option,
+                        onClick = { onSelect(option) },
+                        modifier = Modifier.fillMaxHeight(),
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(text = label, maxLines = 2, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+        if (customLabel != null) {
+            Text(
+                text = customLabel,
+                style = MaterialTheme.typography.labelLarge.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            text = help,
+            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
+/** From this font scale up, three preset labels do not fit side by side on a phone. */
+private const val LARGE_FONT_SCALE = 1.3f
+
 /**
- * "Narration voice" settings: the on-device neural voice (default, free, offline, downloaded once)
- * with Android's built-in device TTS as the always-available floor, and the Google Cloud voice as
- * an opt-in upgrade on the user's own key.
- *
- * The neural option is disabled (with an explanatory line) until its model is actually on disk,
- * and the Cloud option until a key has been saved, so a user can't select a voice that isn't
- * there. [NeuralModelTierPicker] and [CloudVoiceSection] below are where the model download and
- * the key setup live.
+ * "Use the phone's built-in voice instead". Off means the bundled natural voice (NEURAL); on
+ * writes DEVICE. Either way it goes through `setProvider`, so `providerExplicitlyChosen` latches.
  */
 @Composable
-private fun NarrationVoiceSection(
-    state: NarrationVoiceSettings,
+private fun DeviceVoiceSwitchRow(
+    provider: NarrationProviderChoice,
     onProviderChange: (NarrationProviderChoice) -> Unit,
-    neuralModelState: NeuralModelUiState,
-    onNeuralTierChange: (NeuralVoiceTier) -> Unit,
-    onDownloadNeuralModel: (NeuralVoiceTier) -> Unit,
-    onCancelNeuralModelDownload: () -> Unit,
-    onDeleteNeuralModel: (NeuralVoiceTier) -> Unit,
-    onCloudVoiceChange: (GoogleCloudVoice) -> Unit,
-    onOpenCloudSetup: () -> Unit,
-    onRemoveCloudKey: () -> Unit,
 ) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onProviderChange(NarrationProviderChoice.DEVICE) },
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = state.provider == NarrationProviderChoice.DEVICE, onClick = { onProviderChange(NarrationProviderChoice.DEVICE) })
-            Column {
-                Text(stringResource(R.string.settings_narration_device), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    stringResource(R.string.settings_narration_device_help),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        val neuralUsable = neuralModelState.isInstalled(state.neuralTier)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = neuralUsable) { onProviderChange(NarrationProviderChoice.NEURAL) },
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            RadioButton(
-                selected = state.provider == NarrationProviderChoice.NEURAL,
-                onClick = { onProviderChange(NarrationProviderChoice.NEURAL) },
-                enabled = neuralUsable,
-            )
-            Column {
-                Text(stringResource(R.string.settings_narration_neural), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    if (neuralUsable) {
-                        stringResource(R.string.settings_narration_neural_help)
-                    } else {
-                        stringResource(R.string.settings_narration_neural_disabled_help)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        NeuralModelTierPicker(
-            state = state,
-            neuralModelState = neuralModelState,
-            onNeuralTierChange = onNeuralTierChange,
-            onDownloadNeuralModel = onDownloadNeuralModel,
-            onCancelNeuralModelDownload = onCancelNeuralModelDownload,
-            onDeleteNeuralModel = onDeleteNeuralModel,
+    val checked = voiceSwitchIsOn(provider)
+    // The whole row is the switch (label, state and a 48 dp+ target in one TalkBack stop). Before, the
+    // Switch stood alone with no label, so TalkBack read "switch, off" with no idea what it switched.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = { onProviderChange(providerForVoiceSwitch(it)) },
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.settings_voice_use_device),
+            style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content),
+            modifier = Modifier.weight(1f),
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        val cloudUsable = state.hasCloudKey
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(enabled = cloudUsable) { onProviderChange(NarrationProviderChoice.CLOUD) },
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            RadioButton(
-                selected = state.provider == NarrationProviderChoice.CLOUD,
-                onClick = { onProviderChange(NarrationProviderChoice.CLOUD) },
-                enabled = cloudUsable,
-            )
-            Column {
-                Text(stringResource(R.string.settings_narration_cloud), style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    if (cloudUsable) {
-                        stringResource(R.string.settings_narration_cloud_help_ready, state.cloudVoice.tier.freeReviewsPerMonth)
-                    } else {
-                        stringResource(R.string.settings_narration_cloud_help_no_key)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        CloudVoiceSection(
-            state = state,
-            onCloudVoiceChange = onCloudVoiceChange,
-            onOpenCloudSetup = onOpenCloudSetup,
-            onRemoveCloudKey = onRemoveCloudKey,
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            modifier = Modifier.padding(start = 12.dp),
         )
     }
 }
-
-/**
- * Google Cloud voice picker + key status. The voice list is the curated [GoogleCloudVoice] set,
- * grouped by language so the Hebrew upgrade path is visible without being confused with the
- * English default. Key handling is deliberately minimal here: status, "Set up"/"Change" (which
- * opens the wizard, the only place a key is entered, because it validates with a real request
- * before saving) and "Remove". The key itself is never displayed.
- */
-@Composable
-private fun CloudVoiceSection(
-    state: NarrationVoiceSettings,
-    onCloudVoiceChange: (GoogleCloudVoice) -> Unit,
-    onOpenCloudSetup: () -> Unit,
-    onRemoveCloudKey: () -> Unit,
-) {
-    Column(modifier = Modifier.padding(start = 40.dp)) {
-        val groups = listOf(
-            R.string.settings_narration_cloud_voice_english to GoogleCloudVoice.entries.filter { !it.isHebrew },
-            R.string.settings_narration_cloud_voice_hebrew to GoogleCloudVoice.entries.filter { it.isHebrew },
-        )
-        for ((headerRes, voices) in groups) {
-            Text(
-                stringResource(headerRes),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-            )
-            for (voice in voices) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onCloudVoiceChange(voice) },
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = state.cloudVoice == voice, onClick = { onCloudVoiceChange(voice) })
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(voice.label, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            stringResource(R.string.settings_narration_cloud_voice_hint, voice.tier.label, voice.tier.freeReviewsPerMonth),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        ) {
-            Text(
-                text = when {
-                    !state.hasCloudKey -> stringResource(R.string.settings_narration_cloud_key_missing)
-                    state.apiKeyIsEncrypted -> stringResource(R.string.settings_narration_cloud_key_saved_encrypted)
-                    else -> stringResource(R.string.settings_narration_cloud_key_saved_plain)
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (state.hasCloudKey && !state.apiKeyIsEncrypted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            if (state.hasCloudKey) {
-                TextButton(onClick = onRemoveCloudKey) { Text(stringResource(R.string.settings_narration_cloud_remove)) }
-                OutlinedButton(onClick = onOpenCloudSetup) { Text(stringResource(R.string.settings_narration_cloud_change)) }
-            } else {
-                OutlinedButton(onClick = onOpenCloudSetup) { Text(stringResource(R.string.settings_narration_cloud_set_up)) }
-            }
-        }
-    }
-}
-
-/**
- * Per-tier ([NeuralVoiceTier.PIPER] / [NeuralVoiceTier.KOKORO]) model picker + download/delete UI
- * for the on-device neural voice. Each tier shows its size, whether it's downloaded, and either a
- * "Download" button (with live progress once started) or a "Delete" button — the same
- * download-once-keep-forever-under-filesDir shape as [NarrationStorageRow] below, but per model
- * file rather than per cached narration clip. See
- * [net.palaya.chessanalyzer.video.VoiceModelProvisioner] for where these bytes actually live.
- */
-@Composable
-private fun NeuralModelTierPicker(
-    state: NarrationVoiceSettings,
-    neuralModelState: NeuralModelUiState,
-    onNeuralTierChange: (NeuralVoiceTier) -> Unit,
-    onDownloadNeuralModel: (NeuralVoiceTier) -> Unit,
-    onCancelNeuralModelDownload: () -> Unit,
-    onDeleteNeuralModel: (NeuralVoiceTier) -> Unit,
-) {
-    // 16dp, not 40dp: the indent has to read as "these belong to Natural voice" while still
-    // leaving the label column wide enough that the size line ("98.5 MB download · 150.6 MB on
-    // disk") fits without wrapping next to the Download button. Every dp spent here comes
-    // straight out of that line, and at 24dp it lost "disk" to a second line.
-    Column(modifier = Modifier.padding(start = 16.dp)) {
-        for (tier in NeuralVoiceTier.entries) {
-            val installed = neuralModelState.isInstalled(tier)
-            val downloading = neuralModelState.downloadingTier == tier
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = installed) { onNeuralTierChange(tier) },
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                // weight(1f) so the label column yields space to the action button instead of
-                // squeezing it: with a real size on every row ("98.5 MB download · 150.6 MB on
-                // disk") the unweighted layout took the button's width and wrapped "Download"
-                // one character per line.
-                // Top, not CenterVertically: this block is three or four lines tall (title,
-                // quality hint, size, and Kokoro's Wi-Fi note), and centring floated the radio
-                // down beside the size text instead of beside the title it selects.
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = androidx.compose.ui.Alignment.Top,
-                ) {
-                    RadioButton(
-                        selected = state.neuralTier == tier,
-                        onClick = { onNeuralTierChange(tier) },
-                        enabled = installed,
-                    )
-                    // Title and quality hint on separate lines: "Kokoro — Best quality, larger download"
-                    // as one bodyMedium string wrapped mid-phrase next to the button, and the size
-                    // line then jammed against it. Three short lines read; one long wrapped one didn't.
-                    // Nudged down to sit on the title's baseline now the radio is Top-aligned,
-                    // and given breathing room so the size line is not jammed against the hint.
-                    // The hints stay deliberately terse ("Smaller, faster" / "Best quality"):
-                    // the exact figures on the next line already carry the size trade-off, and at
-                    // this column width every extra word buys a wrapped line back.
-                    Column(
-                        modifier = Modifier.weight(1f).padding(top = 12.dp, bottom = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(tier.label, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            text = tier.qualityHint,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        val spec = VoiceModelProvisioner.specFor(tier)
-                        val sizeBytes = neuralModelState.installedSizeBytes[tier] ?: 0L
-                        // Real numbers, per tier, in both states: what it costs to fetch and what
-                        // it costs to keep. "Not downloaded yet" alone told the user nothing about
-                        // whether tapping Download was a 20 MB or a 98 MB decision.
-                        Text(
-                            text = if (installed) {
-                                stringResource(R.string.settings_narration_neural_installed_size, megabytes(sizeBytes))
-                            } else {
-                                stringResource(
-                                    R.string.settings_narration_neural_size,
-                                    megabytes(spec.downloadSizeBytes),
-                                    megabytes(spec.installedSizeBytes),
-                                )
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        // Only Kokoro is withheld on a metered connection (see decideAutoVoice) —
-                        // saying so here is the only place the user learns that the automatic
-                        // download has a condition attached.
-                        if (!installed && tier == NeuralVoiceTier.KOKORO) {
-                            Text(
-                                text = stringResource(R.string.settings_narration_neural_wifi_only),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                // Tighter than the 24dp default horizontal content padding: the button is the
-                // only thing competing with the label column for width, and 12dp keeps
-                // "Download" comfortably inside its outline while handing ~24dp back to the
-                // size line, which is what stops it wrapping. The 48dp minimum touch height
-                // is untouched — this trims padding, not the target.
-                val actionPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                when {
-                    downloading -> TextButton(
-                        onClick = onCancelNeuralModelDownload,
-                        contentPadding = actionPadding,
-                    ) {
-                        Text(stringResource(R.string.settings_narration_neural_cancel))
-                    }
-                    installed -> TextButton(
-                        onClick = { onDeleteNeuralModel(tier) },
-                        contentPadding = actionPadding,
-                    ) {
-                        Text(stringResource(R.string.settings_narration_neural_delete))
-                    }
-                    else -> OutlinedButton(
-                        onClick = { onDownloadNeuralModel(tier) },
-                        contentPadding = actionPadding,
-                    ) {
-                        Text(stringResource(R.string.settings_narration_neural_download))
-                    }
-                }
-            }
-            if (downloading) {
-                LinearProgressIndicator(
-                    progress = { neuralModelState.downloadProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 48.dp, end = 8.dp, bottom = 4.dp),
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-        }
-        if (neuralModelState.lastError != null) {
-            Text(
-                text = neuralModelState.lastError,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-}
-
-/** MB with one decimal, the single formatting used for every model/cache size in Settings. */
-private fun megabytes(bytes: Long): String = "%.1f MB".format(bytes / (1024.0 * 1024.0))
 
 /**
  * Shows how much pre-generated narration audio is sitting in the persistent, `filesDir`-backed
@@ -696,13 +523,12 @@ private fun NarrationStorageRow(totalBytes: Long, onClear: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
-            val mb = totalBytes / (1024.0 * 1024.0)
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = stringResource(R.string.settings_narration_storage_label, "%.1f MB".format(mb)),
-                style = MaterialTheme.typography.bodyMedium,
+                text = stringResource(R.string.settings_narration_storage_label, formatStorageMegabytes(totalBytes)),
+                style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content),
             )
             if (totalBytes <= 0L) {
                 Text(
@@ -713,14 +539,18 @@ private fun NarrationStorageRow(totalBytes: Long, onClear: () -> Unit) {
             }
         }
         if (totalBytes > 0L) {
-            TextButton(onClick = onClear) {
+            val clearLabel = stringResource(R.string.cd_settings_storage_clear)
+            TextButton(
+                onClick = onClear,
+                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = clearLabel },
+            ) {
                 Text(stringResource(R.string.settings_narration_storage_clear))
             }
         }
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF302E2B, heightDp = 1200)
+@Preview(showBackground = true, backgroundColor = 0xFF302E2B, heightDp = 900)
 @Composable
 private fun SettingsScreenPreview() {
     ChessAnalyzerTheme {

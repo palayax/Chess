@@ -128,14 +128,22 @@ data class RecentGameSummary(
     val plyCount: Int,
 )
 
-enum class AnalysisPhase { PREPARING_ENGINE, DOWNLOADING_NET, ANALYZING_MOVES, DONE }
+enum class AnalysisPhase {
+    PREPARING_ENGINE,
+    /**
+     * One-time first-launch setup: the net and the voice ship inside the APK and are copied or
+     * extracted to app storage before the first analysis. Shown as "Setting up the engine (one
+     * time)…" with a determinate bar ([AnalysisProgress.fractionComplete]) and no byte counters.
+     */
+    FIRST_RUN_SETUP,
+    ANALYZING_MOVES,
+    DONE,
+}
 
 data class AnalysisProgress(
     val phase: AnalysisPhase,
     val currentMoveIndex: Int = 0,
     val totalMoves: Int = 0,
-    val bytesDownloaded: Long = 0L,
-    val totalBytes: Long = 0L,
     val fractionComplete: Float = 0f,
 )
 
@@ -197,7 +205,12 @@ data class KeyMoment(
     val san: String,
     val classification: MoveClassification,
     val description: String,
-)
+    /** Win-percent lost by this move (0 for a brilliancy); only used to rank moments. */
+    val loss: Double = 0.0,
+) {
+    /** Who played it: odd plies are White's. */
+    val moverColor: PieceColor get() = if (ply % 2 == 1) PieceColor.WHITE else PieceColor.BLACK
+}
 
 data class GameReport(
     val header: GameHeader,
@@ -224,15 +237,57 @@ data class GameReport(
      * "minor tactics" disclosure can say what "minor" means. 0 = ungated.
      */
     val tacticThresholdCp: Int = 0,
-)
+    /**
+     * True when the user answered "Not me" to "Which side were you?" (Summary, UX step U5): they
+     * did not play this game. Kept as an explicit state, separate from [userColor] == null
+     * ("never asked / unknown"), because the two mean different things to later code: the Practise
+     * feature shows "choose a side" for the unknown case and hides itself for "not me". Read both
+     * through [sideChoice].
+     */
+    val notMe: Boolean = false,
+    /** The opening's name from the book (`CoreGameReport.openingName`), or null when none matched. */
+    val openingName: String? = null,
+    /**
+     * Plies whose annotation carries a [net.palaya.chessanalyzer.core.analysis.TacticSimulation],
+     * so the Summary can offer an inline "Show me" only where the walkthrough exists.
+     */
+    val plysWithSimulation: Set<Int> = emptySet(),
+    /**
+     * One sentence on how the game unfolded ("You were fine until move 11, then a blunder decided
+     * it."), written by `core.narration.GameSummarySentence` from the report alone and re-written
+     * whenever the side chooser re-maps the report, so it says "you" / "your opponent" like the
+     * buckets do. Null for placeholder data and for a report with no moves.
+     */
+    val summarySentence: String? = null,
+) {
+    /** Number of half-moves played; Home and the Summary both show it as whole moves. */
+    val plyCount: Int get() = maxOf(plyClassifications.size, evalHistory.size - 1, 0)
+}
+
+/**
+ * What the Summary's "Practise these positions" row shows (docs/PRACTICE_DESIGN.md §5). Decided by
+ * [practiceEntryState] from the side the user chose and the puzzles `:core` found.
+ */
+sealed interface PracticeEntryState {
+    /** The side is not known yet: a line asking for it, not tappable. */
+    data object NoSide : PracticeEntryState
+
+    /** "Not me": the section is not drawn at all. */
+    data object Hidden : PracticeEntryState
+
+    /** A side was chosen but nothing qualified: "Nothing to fix in this game". */
+    data object Empty : PracticeEntryState
+
+    /** [total] positions to practise, [solved] of them already solved in this session. */
+    data class Count(val total: Int, val solved: Int) : PracticeEntryState
+}
 
 data class EngineSettings(
+    /** Search depth. Settings offers the presets 12 / 14 / 18; any stored value 6..30 is still honoured. */
     val depth: Int = 14,
-    val timePerMoveMs: Int = 500,
+    /** Not a user setting any more (kept at 3: the tactic gate needs the second-best line). */
     val multiPv: Int = 3,
     val username: String = "",
-    val engineVersion: String = "Stockfish 19 (bundled)",
-    val netVersion: String = "not downloaded",
     /**
      * How much a move must change the evaluation before the narrated review talks about it, in
      * centipawns. Default 50 (= ±0.5 pawns), the value ANALYSIS_SPEC §9.2 fixes; the Settings
@@ -367,5 +422,7 @@ object PlaceholderData {
             KeyMoment(13, 7, "Bb3", MoveClassification.MISTAKE, "White misses dxe5 winning a clean pawn."),
         ),
         userColor = PieceColor.WHITE,
+        openingName = "Ruy Lopez",
+        plysWithSimulation = setOf(13),
     )
 }

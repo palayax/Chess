@@ -5,8 +5,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.analysis.EngineLineInput
 import net.palaya.chessanalyzer.core.analysis.PositionEval
-import net.palaya.chessanalyzer.data.AnalysisService
-import net.palaya.chessanalyzer.data.EngineController
 import net.palaya.chessanalyzer.data.GameRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -53,8 +51,7 @@ class ResumeAnalysisTest {
 
     @Test
     fun resumePrefixUsesAllAlignedEvals() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val service = AnalysisService(context, EngineController(context.filesDir), GameRepository(context.filesDir))
+        val service = TestApp.analysisService()
 
         val positions = listOf("a", "b", "c", "d", "e")
         val cached = listOf(eval("a"), eval("b"), eval("c"))
@@ -71,8 +68,7 @@ class ResumeAnalysisTest {
      */
     @Test
     fun resumePrefixStopsAtFirstFenMismatch() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val service = AnalysisService(context, EngineController(context.filesDir), GameRepository(context.filesDir))
+        val service = TestApp.analysisService()
 
         val positions = listOf("a", "b", "c", "d")
         // Index 2 disagrees with the game being analysed.
@@ -86,8 +82,7 @@ class ResumeAnalysisTest {
 
     @Test
     fun resumePrefixIgnoresCacheLongerThanTheGame() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val service = AnalysisService(context, EngineController(context.filesDir), GameRepository(context.filesDir))
+        val service = TestApp.analysisService()
 
         val positions = listOf("a", "b")
         val cached = listOf(eval("a"), eval("b"), eval("c"), eval("d"))
@@ -99,8 +94,7 @@ class ResumeAnalysisTest {
 
     @Test
     fun resumePrefixIsEmptyForAnEmptyCache() {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val service = AnalysisService(context, EngineController(context.filesDir), GameRepository(context.filesDir))
+        val service = TestApp.analysisService()
         assertTrue(service.usableResumePrefix(listOf("a", "b"), emptyList()).isEmpty())
     }
 }

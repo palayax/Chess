@@ -176,4 +176,24 @@ class PanelChipLabelTest {
         }
         assertEquals("the panel drew the verdict $bands times", 1, bands)
     }
+
+    // -----------------------------------------------------------------------
+    // The recap card (R6b) says a class the way the panel chip does
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun theRecapCardNamesEveryClassWithTheWordThePanelChipUses() {
+        val labels = BoardFrameRenderer.PanelLabels.from(
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        )
+        for (cls in MoveClassification.values()) {
+            // The chip is "glyph + name" and the recap chip is "name ×n": the same name, from the same
+            // string resource, so the two cannot drift into calling a Mistake two things.
+            assertEquals("${cls.glyph} ${labels.recap.className(cls)}", labels.verdict(cls))
+        }
+        // The English defaults agree with the resources, so a hand-built spec reads the same.
+        for (cls in MoveClassification.values()) {
+            assertEquals(cls.displayName, RecapLabels.ENGLISH.className(cls))
+        }
+    }
 }

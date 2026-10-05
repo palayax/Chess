@@ -6,7 +6,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -14,14 +13,9 @@ import java.io.File
 /**
  * End-to-end test against the real native engine (libstockfish.so) on a device/emulator.
  *
- * The NNUE net is not bundled (we build with NNUE_EMBEDDING_OFF), and downloading ~79 MB inside
- * a test would be slow and flaky, so the net is pushed to the device beforehand:
- *
- *     adb push nn-1a298aa575a0.nnue /data/local/tmp/nn-1a298aa575a0.nnue
- *     adb shell chmod 644 /data/local/tmp/nn-1a298aa575a0.nnue
- *
- * See scripts/push_test_net.sh. Search tests skip themselves (rather than fail) when the net is
- * absent, so the handshake and the safety tests still run on a bare device.
+ * The NNUE net is bundled in the APK's assets (we build with NNUE_EMBEDDING_OFF, so it is not
+ * compiled in) and [TestNet] copies it to the test package's filesDir through [BundledNetProvider],
+ * exactly as the app does. Nothing is pushed to the device and no test skips itself.
  *
  * Note: [StockfishEngine.start] redirects the whole process's STDIN_FILENO/STDOUT_FILENO to pipes
  * talking to the native engine thread (see engine/src/main/cpp/jni_bridge.cpp). That is
@@ -29,8 +23,6 @@ import java.io.File
  */
 @RunWith(AndroidJUnit4::class)
 class StockfishEngineInstrumentedTest {
-
-    private val netFile = File("/data/local/tmp/nn-1a298aa575a0.nnue")
 
     @Test
     fun uciHandshakeSucceedsWithoutANet() = runBlocking {
@@ -104,12 +96,11 @@ class StockfishEngineInstrumentedTest {
 
     @Test
     fun searchFromStartPositionReturnsABestMove() = runBlocking {
-        assumeTrue("net not pushed to device; see scripts/push_test_net.sh", netFile.isFile)
         val engine = StockfishEngine()
         try {
             engine.start()
             withTimeout(30_000) { engine.uci() }
-            engine.setEvalFile(netFile.absolutePath)
+            engine.setEvalFile(TestNet.net().absolutePath)
             engine.newGame()
             engine.setPosition(fen = null, moves = emptyList())
 
@@ -130,12 +121,11 @@ class StockfishEngineInstrumentedTest {
     /** MultiPV must actually produce multiple distinct lines — the analysis pipeline depends on it. */
     @Test
     fun multiPvReturnsMultipleDistinctLines() = runBlocking {
-        assumeTrue("net not pushed to device; see scripts/push_test_net.sh", netFile.isFile)
         val engine = StockfishEngine()
         try {
             engine.start()
             withTimeout(30_000) { engine.uci() }
-            engine.setEvalFile(netFile.absolutePath)
+            engine.setEvalFile(TestNet.net().absolutePath)
             engine.newGame()
             engine.setPosition(fen = null, moves = emptyList())
 
@@ -157,12 +147,11 @@ class StockfishEngineInstrumentedTest {
      */
     @Test
     fun analysingACheckmatedPositionReturnsInsteadOfHanging() = runBlocking {
-        assumeTrue("net not pushed to device; see scripts/push_test_net.sh", netFile.isFile)
         val engine = StockfishEngine()
         try {
             engine.start()
             withTimeout(30_000) { engine.uci() }
-            engine.setEvalFile(netFile.absolutePath)
+            engine.setEvalFile(TestNet.net().absolutePath)
             engine.newGame()
             // Black has just been mated (the Opera Game's final position, Rd8#).
             engine.setPosition(fen = "1n1Rkb1r/p4ppp/4q3/4p1B1/4P3/8/PPP2PPP/2K5 b k - 0 17")
@@ -182,12 +171,11 @@ class StockfishEngineInstrumentedTest {
     /** A forced mate must be found and reported as a mate score, not a centipawn score. */
     @Test
     fun findsForcedMate() = runBlocking {
-        assumeTrue("net not pushed to device; see scripts/push_test_net.sh", netFile.isFile)
         val engine = StockfishEngine()
         try {
             engine.start()
             withTimeout(30_000) { engine.uci() }
-            engine.setEvalFile(netFile.absolutePath)
+            engine.setEvalFile(TestNet.net().absolutePath)
             engine.newGame()
             // Back-rank mate in 1: Ra8#.
             engine.setPosition(fen = "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1", moves = emptyList())

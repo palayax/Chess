@@ -2,14 +2,12 @@ package net.palaya.chessanalyzer
 
 import android.app.Application
 import net.palaya.chessanalyzer.data.EngineController
-import net.palaya.chessanalyzer.data.EngineInfo
 import net.palaya.chessanalyzer.data.GameRepository
-import net.palaya.chessanalyzer.data.GeneratedEngineVersion
+import net.palaya.chessanalyzer.data.LegacyKeyStoragePurge
 import net.palaya.chessanalyzer.data.NarrationSettingsRepository
 import net.palaya.chessanalyzer.data.SettingsRepository
-import net.palaya.chessanalyzer.video.CloudTtsTransport
-import net.palaya.chessanalyzer.video.OkHttpCloudTtsTransport
-import net.palaya.chessanalyzer.video.VoiceModelProvisioner
+import net.palaya.chessanalyzer.data.FirstRunSetup
+import net.palaya.chessanalyzer.video.BundledVoiceInstaller
 
 /**
  * App-wide `Application`. Owns the process-lifetime singletons that must not be duplicated per
@@ -24,20 +22,21 @@ import net.palaya.chessanalyzer.video.VoiceModelProvisioner
  */
 class ChessAnalyzerApplication : Application() {
 
-    val engineController: EngineController by lazy { EngineController(filesDir) }
+    val engineController: EngineController by lazy { EngineController(filesDir, assets) }
     val gameRepository: GameRepository by lazy { GameRepository(filesDir) }
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(this) }
     val narrationSettingsRepository: NarrationSettingsRepository by lazy { NarrationSettingsRepository(this) }
 
-    /** Downloads/verifies the on-device neural voice models — see [VoiceModelProvisioner]'s doc. */
-    val voiceModelProvisioner: VoiceModelProvisioner by lazy { VoiceModelProvisioner(filesDir) }
+    /** Installs the bundled Kokoro voice out of the APK — see [BundledVoiceInstaller]'s doc. */
+    val voiceInstaller: BundledVoiceInstaller by lazy { BundledVoiceInstaller(filesDir, assets) }
 
-    /** The one HTTP seam of the Cloud voice — see [net.palaya.chessanalyzer.video.GoogleCloudTtsProvider]. */
-    val cloudTtsTransport: CloudTtsTransport by lazy { OkHttpCloudTtsTransport() }
+    /** The one-time setup run before the first analysis — see [FirstRunSetup]'s doc. */
+    val firstRunSetup: FirstRunSetup by lazy { FirstRunSetup(engineController, voiceInstaller) { filesDir.usableSpace } }
 
     override fun onCreate() {
         super.onCreate()
-        EngineInfo.VERSION_LABEL = GeneratedEngineVersion.LABEL
+        // Delete any API key a pre-Round-13 build stored for the removed Google Cloud voice.
+        Thread { LegacyKeyStoragePurge.run(this) }.start()
     }
 
     override fun onTerminate() {

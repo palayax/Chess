@@ -2,9 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Required to download the Stockfish NNUE net and check for engine updates. -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      No INTERNET and no ACCESS_NETWORK_STATE: the app is fully offline. The Stockfish net and the
+      narration voice ship inside the APK and are set up on the first analysis (see
+      FirstRunSetup), and nothing in the app opens a socket. ManifestPermissionsTest and the
+      instrumented NoNetworkPermissionTest keep it that way.
+    -->
 
     <!--
       Video export runs in VideoExportService, a started foreground service, so it survives the
@@ -34,7 +37,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:localeConfig="@xml/locales_config"
-        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.ChessAnalyzer"
         tools:targetApi="34">
 

@@ -472,3 +472,237 @@ needs a debuggable build — it does not work against the release APK, which mus
 real (as it did in Round 5).
 
 Credit: flagged by the peer session working on the panel-label fix; confirmed here independently.
+
+---
+
+## SCOPE CHANGE — Round 12, PC video producer ("option 1")
+
+**Owner decision (2026-09-25):** the videos are for the owner's own use, so build **option 1**: a PC
+program that takes a game and outputs a finished, narrated analysis MP4. The Android app stays as-is.
+Two explicit quality asks on top of the port:
+
+1. **A better TTS model** than Kokoro, meaning better narration.
+2. **A better LLM** writing the commentary, rather than templated sentences.
+
+**Target:** the result should feel like a GothamChess game-analysis video (or similar). That means
+we copy the *format and energy*: storytelling, personality, reactions, arrows, eval bar, and pacing.
+**We do not clone Levy Rozman's voice, name or branding.** Doing so would be impersonation, and it
+is out of scope whatever the use.
+
+**Hard constraints carried over:** free, risk-free, no credit card, no cloud APIs; everything runs
+locally.
+
+### Target hardware (measured, not assumed)
+
+| Part | Value | Consequence |
+|---|---|---|
+| CPU | i9-10885H, 8C/16T (laptop) | CPU inference is viable for ≤~30B-class MoE models |
+| RAM | 31.7 GB | colibri-class giant MoE (~0.05–0.1 tok/s at this size) is **impractical**; a mid-size MoE in llama.cpp is the realistic ceiling |
+| GPU | GTX 1650 Ti Max-Q, **4 GB VRAM**, Turing (fp16, no bf16) | Small TTS models can use CUDA; LLMs mostly stay on CPU |
+| Disk | 415 GB free | Not a constraint |
+| Tooling | Python 3.13, uv, git, JDK 17; **no ffmpeg, no ollama yet** | Both must be installed (free, no account) |
+
+### Subtasks
+
+| # | Subtask | Done-condition | Status |
+|---|---------|----------------|--------|
+| 50 | Research: best free local expressive TTS for this hardware (EN + HE) | shortlist with licence, VRAM/CPU fit, speed; claims sourced | **done** → docs/pc_research/TTS.md |
+| 51 | Research: best free local LLM for this hardware + grounding strategy | shortlist with measured-or-sourced tok/s on 32 GB / 4 GB VRAM | **done** → docs/pc_research/LLM.md |
+| 52 | Research: anatomy of a GothamChess-style analysis video | concrete, buildable format spec | **done** → docs/pc_research/VIDEO_FORMAT.md |
+| 53 | Design (Fable 5.1, high): PC producer architecture | design doc in `docs/PC_PRODUCER_DESIGN.md` | **done** |
+| 54 | Spike: TTS samples on THIS PC, candidate models vs Kokoro baseline | WAVs the owner can hear; duration + RMS checked; RTF measured | **done**, samples sent; awaiting owner's ear |
+| 55 | Spike: LLM commentary on a real fixture game, grounded in engine facts | script checked move-by-move against the engine facts: no invented moves or evals | pending |
+| 56 | Build the producer end-to-end | `palaya-review game.pgn -o review.mp4` produces a watchable video | pending |
+
+**The samples come before the build.** "Better narration" is judged by ear, so the owner hears the
+candidate voices and a sample script before we commit to a pipeline.
+
+### Build phases, from the design (docs/PC_PRODUCER_DESIGN.md §14)
+
+The design decisions:
+- **Orchestration:** a Kotlin/JVM `:desktop` module, reusing `:core` unchanged apart from 2 additive changes.
+- **Python:** only the TTS worker (JSONL over stdio).
+- **LLM:** llama-server over HTTP.
+- **Rendering:** Java2D frames piped as rawvideo into ffmpeg.
+- **Caching:** every stage writes to `pc/work/<gameId>/`.
+
+| Phase | Scope | Done when | Status |
+|---|---|---|---|
+| P0 | Skeleton: `:desktop`, CLI, UCI client, analysis stage, `--dry-run` | `analysis.json`/`report.json` written for immortal.pgn; UciClient + parity tests green; `:core:test` still 279/0 | **done** (core now 282 after 2 bug fixes) |
+| P1 | Crude end-to-end: template narration, Java2D board, ffmpeg mux | `--no-llm` MP4 verified by ffprobe + loudness + audio-present test; watched | **done** |
+| P2 | Director v1: tiers, cold open, find-the-move, variations + rewind, recap | DirectorTest green; 8–14 min estimate on both fixtures | **done** |
+| P3 | LLM writer: prompts, placeholders, validator, retries, fallback | ≥ 90% first-try valid; move-by-move check passes; tok/s measured | pending |
+| P4 | Voice: chosen backend, emotions, captions | TtsLiveTest bounds; captions in sync | pending |
+| P5 | Polish: badges, shake, zoom, SFX, music ducking, loudnorm | −14 ±1 LUFS; SFX at cue times | pending |
+| P6 | Hebrew | owner confirms intelligibility | pending |
+| P7 | Hardening and resumability | kill/resume at every stage | pending |
+
+**Ordering:**
+- The LLM spike (task 55) runs on P0's `report.json`, after the TTS spike frees the GPU.
+- Gradle stays strictly one invocation at a time.
+
+---
+
+## SCOPE CHANGE — Round 13, MOBILE focus (owner, 2026-10-03)
+
+**Owner direction.** The PC producer (Round 12) is **paused**. P2 and the LLM spike were stopped and left nothing; P0/P1 are done and stay. Focus is the Android app.
+
+The owner tested the app on a real Android phone. Feedback: **the UI/UX is a bit too complex, so make it simpler and more user-friendly.** They asked to continue with all the improvement ideas. Two constraints:
+- **Drop the Google Cloud voice option.** A big APK is fine.
+- **Everything works locally, with no external APIs.**
+
+### Decisions I made (flagged for the owner to overrule)
+
+| Decision | Reason |
+|---|---|
+| **Cut "import by username"** (Lichess/chess.com) | It calls external APIs, which the owner ruled out |
+| **Bundle the Stockfish net and the voice model in the APK** so the first launch needs no download | "Everything local" plus "big APK is fine". It also removes the slowest first-run step, which is itself UX complexity. Reversible |
+| UX redesign goes to a **Fable 5.1 / high** design agent first | Owner's standing instruction for complicated design tasks |
+
+### Subtasks
+
+| # | Subtask | Done-condition | Status |
+|---|---------|----------------|--------|
+| 60 | Remove Google Cloud TTS entirely: provider, setup wizard, key storage (including the plaintext fallback), strings, tests, docs, `NarrationProviderChoice.CLOUD` | no Cloud code; `:core`/`:app` tests green; no network call remains except the (soon-removed) model downloads | DONE (2026-10-03) |
+| 61 | Backup rules: exclude `tts_models`, the narration cache and the key prefs from cloud backup and device transfer | rules updated; verified with `bmgr`/dumpsys or a rules lint | DONE (2026-10-03) |
+| 62 | Re-run `:app` tests after the core mate-sign and PGN fixes | 77+ tests, 0 failures, skipped read from XML | DONE (2026-10-03) |
+| 63 | UX redesign: simpler flow and settings, written as a design | `docs/MOBILE_UX_DESIGN.md` | **done** (Fable) |
+| 64 | Core: better pacing for the app video (tiers, cap on dramatic moments, no missed-line walks for inaccuracies) | the 17-move fixture comes out near 3–6 min, not 11; tests | **done**: 17-move game 629 s → 314 s; brilliancy fix in progress |
+| 65 | Core: clean up tactic detection (confident and significant only, max 2 per ply, mate first) | 17.Rd8# no longer tagged Fork/Hanging/Skewer; tests | **done**: 17.Rd8# → Mate net only; 15.Bxd7+ → Clearance only; corpus 28/28 |
+| 66 | UX implementation per the design | screens simplified; emulator screenshots | pending |
+| 67 | "Train on your own blunders": puzzles from the user's mistakes | playable from the report; tests | pending |
+| 68 | Bundle models in the APK (net + voice), with first-run extraction and progress | cold install works in airplane mode | pending |
+| 69 | Smaller items: share video, export-time estimate, recap card, accessibility/font-scale pass | each verified on the emulator | pending |
+| 70 | Final: signed release APK, full e2e pass on the emulator, fresh screenshots, docs | APK verified; RUN_LOG updated | pending |
+
+**Sequencing:** only one `./gradlew` at a time, so edit agents run one after another. Read-only design agents can run alongside.
+
+### UX design accepted (docs/MOBILE_UX_DESIGN.md)
+
+Root cause per the audit: not the number of screens, but landing on the board after analysis instead of the report, 26+ engine/TTS settings (two dead), five data points per move chip, and jargon (PGN, MultiPV, centipawns, plies).
+
+The owner's open questions were answered with the design's recommended defaults:
+1. Land on the **Summary**, not the board.
+2. Add a **"Which side were you?"** chooser on the Summary.
+3. Playback speed becomes a **player cycle button**, not a setting.
+
+Implementation order (design §7). Each step is one agent, one Gradle build at a time:
+
+| Step | Scope | Status |
+|---|---|---|
+| U1 | Copy and resources pass; move hardcoded English into strings | **done** |
+| U2 | Navigation shell: land on Summary, back arrows, error state | **done** |
+| U3 | Home | **done** |
+| U4 | Analysing | **done** |
+| U5 | Summary hub, with the side chooser | **done** |
+| U6 | Board | **done** |
+| U7 | Video | **done** (R2) |
+| U8 | Walkthrough | **done** (R2) |
+| U9 | Settings (3 visible rows plus Advanced) and repository cleanup | **done** |
+| U10 | Accessibility, font-scale and RTL pass, screenshots `r13_*` | **done** (R6a) |
+
+**Gating:** task 60 (Cloud removal) must land before U9. Core tasks 64 and 65 run before the UX steps, because the Summary and video depend on the cleaner tactic data and pacing.
+
+### Practise-your-mistakes design accepted (docs/PRACTICE_DESIGN.md), task 67
+
+The feature is entirely local, with no engine call in v1. Puzzles are the user's own MISTAKE/MISS/BLUNDER positions (capped at 5), judged from the cached MultiPV lines.
+
+The selection rule only admits positions where the cache can decide, so a wrong answer is never a guess. The design's two open questions were answered with its defaults: hide Practise on "Not me", and never turn inaccuracies into puzzles.
+
+| Step | Scope | Status |
+|---|---|---|
+| P1 | Core: `CandidateLine` plus `MoveAnnotation.candidateLines`, filled by `GameAnalyzer` | pending |
+| P2 | Core: `PracticeSelector` and `PracticeJudge` with boundary tests, spec §11 | pending |
+| P3 | App: route, `PracticeScreen`, ViewModel (after U5/U6) | pending |
+| P4 | App: Summary entry card, RTL/font pass, screenshots | pending |
+| P5 | Optional: persist solved plies | pending |
+
+**Sequence:** U3/U4 (running) → P1+P2 (core) → U5 → U6 → P3+P4 → U7 → U8 → U9 → bundling → U10 and final.
+
+### Bundled-models design accepted (docs/BUNDLED_MODELS_DESIGN.md), task 68
+
+The net (`nnue/…` in `:engine`) and the Kokoro voice (a plain `.tar` in `:app`) ship in the APK as **stored** assets. The net is copied once to `filesDir` and SHA-256-verified, because Stockfish needs a real file path. The voice is extracted once.
+
+One "Setting up (one time)…" phase runs inside the Analysing screen before the first analysis. **INTERNET and ACCESS_NETWORK_STATE are removed from the manifest**, with host and instrumented tests that prove it. Piper is dropped. APK ≈ 365 MB.
+
+The owner's two open questions were answered with the design's defaults: drop Piper, and set up before the first analysis.
+
+| Step | Scope | Status |
+|---|---|---|
+| B0 | Repo prep: gitignore, `MODELS.lock`, `scripts/fetch_models.sh`, fetch and pin | **done**, verified |
+| B1 | `:engine`: assets, `BundledNetProvider`, engine tests | **done** |
+| B2 | `:app`: installer, `FirstRunSetup`, remove downloads/permissions/tier UI (back-to-back with B1; sequence with U9) | **done** |
+| B3 | `:app` instrumented tests rewritten for bundling | **done** |
+| B4 | Docs, licence texts (including the espeak-ng GPL gap), delete the push scripts | pending |
+| B5 | Release build and the offline evidence run | **done** (R7: signed release APK, airplane-mode cold install, narrated MP4 measured; RUN_LOG R7) |
+
+**Flagged licence gap (pre-existing):** `espeak-ng-data/` (18 MB) is GPL-3.0-or-later (from memory, to be verified). The app already ships it, via the Kokoro download, but the About text and `NEURAL_VOICE_LICENSE.txt` never mentioned it. B4 adds the attribution.
+
+---
+
+### Owner rule added 2026-10-04: chess.com is the UX reference
+
+For every UI/UX decision not clearly reflected in or derived from the owner's own goals, chess.com is the reference. Owner goals always win. Reference only: patterns, never assets, copy, icons, logos or screenshots.
+
+- **Recorded in:** `CLAUDE.md` ("Design reference"), and in memory (`feedback-chesscom-ux-reference.md`).
+- **Alignment audit (Fable 5.1, high):** a read-only agent audits our designs and screens against chess.com's public patterns and returns `docs/CHESSCOM_REFERENCE_ALIGNMENT.md`.
+- **Effect on the queue:** it can change U7 (Video), U8 (Walkthrough), U9 (Settings), P3/P4 (Practise) and U10 before they are built. It may also yield a short list of rework items for the screens already built (U2–U6), and those are ranked by user impact.
+- **Gate:** U7 onwards waits for this audit. The U6 agent's final verification is unaffected.
+
+### Chess.com alignment audit accepted (docs/CHESSCOM_REFERENCE_ALIGNMENT.md)
+
+Verdict: **Home, key moments, board, move chips and the class names are already aligned with chess.com's conventions.** Divergences are deliberate and come from the owner's goals: no account, the side chooser, a simple walkthrough, and details tucked away.
+
+**Adopted changes** (owner's rule applied; all small and in the "simpler" direction):
+- **B1:** the badge drawn on the destination square.
+- **B2:** a "Next key moment" button on the Board.
+- **B3:** no repeated class word in the coach text.
+- **B4:** a one-sentence game summary (needs a core sentence).
+- **B5:** "Great" and "Best" as the class names.
+- **U7:** a single mute icon, and "game review" strings renamed to "video review".
+- **U8:** "Before the mistake" plus a step counter, and no "Back to the game".
+- **P3/P4:** a two-step hint, a "Try it" button on each key moment (route `practice/{gameId}?ply=`), and a check/cross badge.
+- **Walkthrough intro defect:** fix the "…a line that The pawn… .." sentence in core.
+
+**Not adopted, deliberately:** graph on top, autoplay, a coach avatar, phase grades, and any rating, points, streaks or daily cap.
+
+**Owner decision pending (not blocking):** `GreenPrimary 0xFF81B64C` and the board colours `0xFFEBECD0` / `0xFF739552` are very close to chess.com's brand values, from memory. The owner tested the app with this look and did not object. **Recommend changing them to our own values before any public listing, and leaving them for the personal POC.** Not changed now.
+
+### Revised queue (after the U6 final verification)
+
+| Step | Scope | Status |
+|---|---|---|
+| R1 | Core: game-summary sentence (B4), de-duplicated coach text (B3), walkthrough intro defect | **done** (stretch not done) |
+| R2 | App: B1, B2, B5, summary sentence, plus U7 Video and U8 Walkthrough with the chess.com adoptions | **done** |
+| R3 | App: P3+P4 Practise screen and the "Try it" entries | **done** |
+| R4 | App + engine: bundling B1–B2 together with U9 Settings (sequenced, never interleaved) | **R4a done**; U9 Settings next |
+| R5 | Bundling tests, docs, licence texts (B3–B4) | pending |
+| R6 | U10 and task 69 smalls: large font, RTL, accessibility; share video, export-time estimate | **R6a done** (U10, measured time left, Share, About line); **R6b done** (silent recap end card in the exported MP4, 4-6 s, outside the pacing budget; the video title card says "N moves" instead of "N plies"); **R6c done** (title and final-numbers cards: fit logic for long and Hebrew names, each fact once, whole-percent accuracy, bidi isolation) |
+| R7 | Final: signed release APK, offline run, full e2e, fresh screenshots (B5, task 70) | **done** (signed `dist/PalayaChess-1.0-release.apk`, 364,733,235 B; offline proof on chess34 in airplane mode; Summary-header bidi fix; RUN_LOG R7) |
+
+**R1b (added):** fix the existing commentary defects R1 found but left alone, since they are wrong chess claims shown to the user:
+- "This forces mate. Better was Ba6." describes the opponent's mate as if it were the mover's.
+- A brilliant move says it "allowed" the very motif it sets up.
+- Chesscom ply 12 says "pins the piece on b7" for Nf6.
+- Both walkthrough intros repeat the first move in the second sentence.
+
+Also, as the stretch item: store the raw tactics on `MoveAnnotation` so the card text can switch to you/your opponent when the side is chosen later.
+
+Runs after R3 and before R4 (bundling).
+
+**R1b additions (found in R2):**
+- **Video length for tiny games:** a 4-move scholar's-mate game produced a **3 min 43 s** video. The budget `min(720 s, 120 s + 14 s × moves)` has too large a base for very short games. Re-scale the budget so a 4-move game lands around 1 minute, with no padding. Pin it with a test.
+- **Walkthrough result line:** it reads "Result: has invested material in the attack" on the last step (a core `payoffDescription` problem). Fix it at the source, and guard the payoff sentence.
+
+**R1b: done** (see RUN_LOG).
+
+**Bundling split, because of context size:**
+- **R4a:** B1 + B2 + B3 in one agent, because `:app` will not compile until B2 and its tests must compile too. It writes checkpoint notes to RUN_LOG as it goes, so a cut-off is recoverable.
+- **R4b:** U9 Settings rebuild, per the design and the chess.com audit.
+- **R4c:** B4 docs and licence texts (including the espeak-ng credit).
+
+**R4c (B4 docs, licences, About text): done.**
+
+**Remaining queue:**
+- **R6:** done (R6a accessibility, time left, Share; R6b recap end card and "moves" wording; R6c title and final-numbers card polish). Still open from the R6 list: nothing.
+- **R7:** **done** (final signed release APK, the airplane-mode offline proof (B5), full gate, fresh screenshots, final docs and handoff). Nothing is queued.

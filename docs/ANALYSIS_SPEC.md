@@ -69,6 +69,10 @@ Evaluate the rules **in this order**; first match wins.
    - the move is a **sacrifice**: it gives up material by Static Exchange Evaluation
      (`see(move) <= -200`, i.e. a minor piece down or more, OR it leaves a piece worth
      >= 300cp en prise to a legal capture next move), and
+     **The capture must really be legal** (R1b): a piece whose only attacker is pinned to its king
+     is not en prise. 14.Rd1 in the Opera Game was labelled Brilliant for "offering" a rook to a rook
+     on d7 that Bb5 pins to the king - Rxd1 is illegal there - and is now an ordinary BEST move.
+     (The SEE the classifier consults is pseudo-legal, so the classifier checks legality itself.)
    - after the move the side is **not losing**: `winPercent(after, S) >= 50`, and
    - the move is best or near-best: `loss <= 2.0`, and
    - the sacrifice is **not trivially recaptured for equal value** — the refutation must
@@ -162,9 +166,15 @@ involvedSquares, materialSwing, description, confidence)`.
 
 - **FORK** — the moved piece now attacks >= 2 enemy units where at least two are
   (the king) or (value >= the moved piece's value) or (undefended).
-  `PAWN_FORK` when the forker is a pawn.
+  `PAWN_FORK` when the forker is a pawn. **The forker must survive to cash it in** (Round 13):
+  when the opponent can take it and not lose material by SEE — an even trade counts, because the
+  threats die with it and nothing was won by them — what happened is a capture or an exchange, not
+  a fork. (Bxd7+ Nxd7 "forked" king and queen with a bishop that was simply taken; the first
+  reference pawn fork, 1.e4 against a knight and a bishop, failed the same test because the
+  forked bishop took the pawn.)
 - **DOUBLE_ATTACK** — >= 2 enemy units attacked as a result of the move (including via
-  discovery) that were not both attacked before.
+  discovery) that were not both attacked before. When the moved piece is the *only* new attacker
+  it must survive, by the same test as a fork.
 - **PIN_ABSOLUTE** — an enemy piece on a line between our slider and the enemy king.
   **PIN_RELATIVE** — same, but the rear piece is merely more valuable.
 - **SKEWER** — our slider attacks an enemy piece that is **at least as valuable as the enemy
@@ -177,33 +187,79 @@ involvedSquares, materialSwing, description, confidence)`.
   attack from a friendly slider onto an enemy piece or king. **DOUBLE_CHECK** when the
   moved piece also gives check.
 - **HANGING_PIECE** — an enemy piece is hanging and worth >= 300, or any piece whose
-  capture wins material by SEE.
+  capture wins material by SEE. Its description says what the detector checked and no more:
+  "The pawn on e5 is attacked and nothing defends it." / "The knight on f5 is attacked, and taking
+  it would win material." The opponent moves next and may save the piece, so the earlier wording
+  ("is left hanging and can be taken for nothing", "cannot be held") promised a future the
+  detector never examined (R1b).
 - **BACK_RANK_MATE** — mate (or a mate threat within 2) on the 1st/8th rank where the
   enemy king's escape squares are blocked by its own pawns.
 - **SMOTHERED_MATE** — knight mate with the king fully surrounded by its own pieces.
 - **DEFLECTION / REMOVING_THE_DEFENDER** — the move attacks or captures a piece whose
   removal leaves another enemy unit or key square undefended, and the engine PV exploits
-  exactly that.
+  exactly that. A deflection needs the defender to **end up somewhere that no longer guards**
+  the square (R1b): a defender that simply captures *on* that square (4...Nc6 exd6 Qxd6: the pawn
+  takes on d6) was exchanged there, not deflected from it, and one that still sees the square from
+  its new square was not deflected at all.
 - **DECOY** — the move (usually a sacrifice) lures an enemy piece or king to a square where
   it is then forked, skewered or mated in the PV.
 - **OVERLOADED_PIECE** — an enemy piece is the sole defender of >= 2 things and the PV
   exploits it.
 - **INTERFERENCE / CLEARANCE** — the move blocks an enemy line / vacates a friendly line
-  and the PV uses it.
+  and the PV uses it. A clearance gets **another piece** through (R1b): the piece that just
+  moved coming back along the line it left clears nothing for anyone (5.Bxb5 ... Be2), and a pawn
+  stepping onto the square the moved piece vacated is not using a line (9.Nf5 ... h4).
 - **TRAPPED_PIECE** — an enemy piece worth >= 300 with no safe square (every legal
-  destination loses material by SEE).
+  destination loses material by SEE). **Not reported when the move gives check** (Round 13): while
+  the king is in check the legal-move list is whatever answers the check, so every other piece
+  looks "trapped" simply because it is not allowed to move. A checking move traps nothing.
 - **ZWISCHENZUG** — an in-between move (check or larger threat) inserted before the
   expected recapture, per the engine PV.
 - **MATE_NET** — the engine reports mate in <= 5 and the move is part of it.
 - **GREEK_GIFT** — Bxh7+/Bxh2+ sacrifice with Ng5+/Ng4+ and Qh5/Qh4 follow-up in the PV.
-- **WINDMILL** — a repeating discovered-check-plus-capture cycle in the PV.
+- **WINDMILL** — a repeating discovered-check-plus-capture cycle in the PV (Torre–Lasker, 1925).
+  Inside one unbroken run of the mover's checks it requires: at least **4 consecutive checking
+  moves** (`WINDMILL_MIN_CHECKS`), every reply in the run a king move; at least **2 discovered
+  checks** (the checking piece is not the one that moved) and at least **2 captures**; and **the
+  same piece returning to a square it already landed on** — the blade coming round again, not two
+  different pieces visiting one square. (The first rule, "a slider lands on one square twice, two
+  captures, three checks somewhere in the PV", accepted any long forcing line: 15.Bxd7+ was a
+  "windmill" because a bishop and, later, a rook both landed on d7.)
 - **PROMOTION_TACTIC, UNDERPROMOTION, PASSED_PAWN_BREAKTHROUGH, DESPERADO,
   PERPETUAL_CHECK, STALEMATE_TRICK, FORTRESS, BATTERY, X_RAY** — detect per their standard
   definitions; these are lower priority and may report lower confidence.
 
+The skewer description says the piece behind "is attacked" when the front piece moves, not that it
+"falls" (R1b): whether it falls depends on whether it is defended.
+
+**Whose motif it is (R1b).** `TacticInstance.byColor` and `moveUci` say which side's *which move* the
+motif belongs to, and every consumer must respect both: a motif found for the played move belongs to
+the mover, a missed motif to the engine's best move, a threat to the opponent's best reply. The
+commentary (§7) discards a motif that is not owned by the side, or not about the move, that the sentence
+is about. Detectors that replay the engine's line read "our" moves and "their" moves off the line by
+position, so a line in which the mover is being mated must not be credited to the mover: §7.2.
+
 **Confidence:** a tactic detected purely by static pattern = 0.6. If the engine PV confirms
 the follow-up (the PV plays the exploiting move within 4 plies) = 0.95. Only report tactics
 with confidence >= 0.6; sort by confidence, then by materialSwing.
+
+**Reporting (Round 13).** The detectors are deliberately generous: one move routinely trips several
+of them for the same underlying fact. A real game had 17.Rd8# tagged Fork, Double attack, Hanging
+piece and Skewer on top of the mate. `MotifDetector.detectRaw` returns everything the rules above
+recognise (the detector tests and the reference corpus assert against it); `MotifDetector.detect`,
+which the app calls, reduces it:
+
+1. **A checkmating move carries its mating pattern and nothing else** — `BACK_RANK_MATE`,
+   `SMOTHERED_MATE`, `MATE_NET` (a plain checkmate is a `MATE_NET`).
+2. **A motif that merely restates another on the same move is dropped:** a `HANGING_PIECE` on a
+   square another motif already names *and accounts for at least as much material* (the fork or pin
+   is the mechanism, the hanging piece its consequence — a zero-swing x-ray explains nothing); a
+   `DOUBLE_ATTACK` whose targets a `FORK`/`PAWN_FORK` on the same move already covers; a plain
+   `PROMOTION_TACTIC` next to the `UNDERPROMOTION` that is the interesting half of the move.
+3. **Rank and cap.** Mating motifs first, then confidence, then `materialSwing`; **at most 2
+   survive per move** (`MAX_TACTICS_PER_MOVE`).
+
+The §9.6 significance gate then runs on this reduced list, unchanged.
 
 ### 5.4 Found vs missed — the four required buckets
 
@@ -240,6 +296,47 @@ For any `missedByPlayer` / `missedByOpponent` entry the UI can enter a guided si
   "mates in 3").
 - The simulation must be replayable from the same start position and must never mutate the
   main game line.
+- The lead-in shown on the starting position is `SimulationIntro` (typed `Sentence.WalkthroughIntro`):
+  "Watch what happens: h5 starts the line." followed by the tactic's own description as a **separate,
+  normalised sentence** (one capital, one full stop). A description is a finished sentence and may
+  open with a move ("Qxa1+ clears b2...") or a square ("h5 forks..."), so it is never lowercased and
+  grafted into a clause ("a line that The pawn... .."). With no description the line names the
+  tactic type instead. **A description that opens with the line's first move carries the whole
+  lead-in** (R1b): "Watch what happens. Qb4+ clears e7 so that Bxb4+ can come through." The
+  "starts the line" half is dropped rather than said twice ("Qb4+ starts the line. Qb4+ clears...").
+  Only the opening of the description counts: a pawn move is spelled like a square, and "the pawn on
+  e4" in the middle of a sentence is not the move e4.
+
+### 6.1 What a walkthrough may claim (R1b)
+
+A walkthrough is read as fact, so each sentence is something the board proves:
+
+- **A step names what the move does, no more.** The piece lands, captures, castles; it "attacks" what
+  it attacks (the king, or a unit worth at least the mover). A HANGING_PIECE motif says "attacking
+  the pawn on e5, which nothing defends" - only when the target really is attacked by the mover and
+  undefended - never "collecting" it: the opponent moves next.
+- **"Winning ..." is the exchange evaluator's verdict on the capture, and a recapture is judged by the
+  pair.** `Qxd6` straight after `exd6` takes back a pawn: what counts is what the side took minus what
+  it had just lost, so an even pair says nothing and a pair that wins material says so. (Exd6 Qxd6 Qxd6
+  Bxd6 used to read "winning a pawn", "winning a queen" on the two recaptures.)
+- **A gain is named only when it is within 40 cp of a whole piece** (`GAIN_TOLERANCE_CP`): queen 900,
+  rook 500, piece 325, pawn 100. Anything between is "material": a rook taken for a bishop (+170) is
+  not "a pawn", and a queen taken by a pawn that is then recaptured (+800) is not "a rook".
+- **The payoff is what the line proves, settled.** A line that ends in checkmate says "mates in N".
+  Otherwise it is the material the winning side has netted between the start and the end of the
+  line - *after the opponent has taken back* the most the exchange evaluator says it can
+  (`ExchangeEvaluator.settledGain`), so a line that stops right after a capture is not credited with a
+  piece that is taken straight back - named by the rule above. The drawing motifs (perpetual,
+  stalemate trick, desperado, passed pawn) keep their one-line outcomes, and a reference example keeps
+  the corpus-verified sentence of `TacticReferenceLibrary`.
+- **A line that neither mates nor nets material has no payoff** (`payoffDescription == ""`): nothing is
+  appended to the last step and the screen shows no "Result" row. The Round 13 fallbacks - "has
+  invested material in the attack", "gains a decisive advantage" - were not supported by anything in
+  the data and are gone, as is "keeps the king under fire" (an engine-confirmed MATE_NET keeps "leaves
+  the king in a mating net": the PV that confirmed it ends in mate).
+- The narrated video follows the same rule: its payoff beat ends "That is as far as the line goes."
+  (`PayoffKind.LINE_ENDS`) instead of those two sentences, and "for nothing" is gone from
+  "You come out of it a rook up".
 
 ---
 
@@ -249,19 +346,115 @@ Each ply produces `MoveAnnotation`:
 
     classification, loss, evalBefore, evalAfter, bestMoveSan, bestLineSan: List<String>,
     tacticsFound: List<TacticInstance>, tacticsMissed: List<TacticInstance>,
-    threatsAllowed: List<TacticInstance>, text: String, simulation: TacticSimulation?
+    threatsAllowed: List<TacticInstance>, tacticsPlayed: List<TacticInstance>,
+    text: String, simulation: TacticSimulation?
 
-`text` is generated deterministically from a template table keyed on classification plus
-the highest-confidence tactic. Templates must read naturally and name concrete squares and
-pieces. Examples:
+`tacticsPlayed` (R1b) is the detector's raw output for the move actually played, whatever its class;
+`tacticsFound` is that list filtered to BEST / GREAT / BRILLIANT (§5.4). Keeping the raw list is what
+lets the text be written again later (§7.1).
 
-- BLUNDER + missed HANGING_PIECE: "Blunder. This drops the knight on f6. Better was Qe2,
-  keeping material level."
-- BRILLIANT + DECOY: "Brilliant! The rook sacrifice on d7 drags the knight away from
-  defending b8, and mate follows."
-- MISS + MATE_NET: "Missed win. Qb8+ forced mate in 3."
+`text` is generated deterministically by `CommentaryGenerator` from the classification, the motifs and
+concrete squares and pieces read off the position, and from the engine's own numbers. It is shown as
+fact, so **a claim is only made when the data proves it, and a sentence that cannot be made reliably
+true is dropped, not hedged** (§7.2). Examples of what comes out:
 
-No LLM at runtime — all commentary is template-generated and works offline.
+- BLUNDER, the opponent's reply wins: "This lets White play Qxa1+, which wins a rook. Better was Re1."
+- BLUNDER that allows mate: "This lets White play Nxg7+, which starts a forced mate. Better was Ba6."
+- INACCURACY, a better move that attacks a loose piece: "Nh5 gives back ground. Better was c6, which
+  attacks the undefended bishop on b5."
+- BRILLIANT: "Nxb5 is a sacrifice: it offers the knight on b5."
+- MISS + mate: "Better was Qb8+, forcing mate in 3."
+- BEST with a motif: "Qb3 matches the engine's top choice. This pins the pawn on b7 to the knight on b8."
+
+The shapes, per class:
+
+| Class | Text |
+|---|---|
+| FORCED, BOOK | "X was the only legal move." / "X follows known opening theory." |
+| BRILLIANT | the sacrifice lead (below), then what the move does |
+| GREAT, BEST, EXCELLENT, GOOD | one lead sentence about the engine's verdict, then what the move does |
+| INACCURACY, MISTAKE, BLUNDER | what went wrong (the opponent's reply, or "X gives back ground."), then "Better was Y[, which ...]." |
+| MISS | one sentence: "Better was Y, forcing mate in N." / "..., keeping a decisive advantage." |
+
+Rules every template obeys:
+
+1. **The text never opens with the classification's own name.** The app shows the classification as a
+   badge and a label beside the text (comment card, key-moment cards), so "Blunder. This drops the
+   knight..." said the same word twice. The text goes straight to the piece and the threat. (chess.com's
+   coach text works the same way: the icon carries the label.)
+2. **"Better was X" is the final sentence, and appears once**, for INACCURACY, MISTAKE and BLUNDER.
+   What the opponent's reply wins ("This lets White play Nxg7+, ...") comes *before* it. A MISS
+   carries the better move inside its one sentence. The app hides its own structured "Better was X"
+   line whenever the text already contains it.
+3. **Generated names agree with their article.** "a"/"an" is decided by `EnglishGrammar` on the first
+   *sound* of the name ("an underpromotion", "an undefended bishop"), never by `"a " + name`.
+4. **Who it is about.** The viewer is "you", the other side "your opponent" ("This lets you play h4,
+   which ..."); with no side chosen, or "Not me", both are named by colour ("This lets White play h4,
+   which ..."). The text contains no other side-specific wording, so it can be rewritten for any side.
+
+The annotation text is **not** part of the narrated video: the video says its own sentences from typed
+facts (`NarrationStrings`), so these rules do not touch it.
+
+No LLM at runtime - all commentary is template-generated and works offline.
+
+### 7.1 The text follows the side the user chooses (R1b)
+
+The analysis writes the text before the user has said which side they played, so it names colours.
+Whenever the side becomes known - detected from the username, answered on the Summary ("Which side
+were you?"), or "Not me" - the app writes it again with `CommentaryGenerator.regenerate(report,
+userColor)` and rebuilds the move cards and the key-moment cards from the result, so they say "you /
+your opponent" exactly like the Summary's buckets and headings. This needs the engine and the detector
+not at all: the text is a pure function of the annotation (its two FENs and UCI move, the engine's
+numbers, `tacticsPlayed` / `tacticsMissed` / `threatsAllowed`, `bestMoveSan`, mate distances) and of the
+viewer's colour. `GameAnalyzer` writes the text through the very same function, so the text produced
+at analysis time and the text produced on a side change are identical for the same side (tested for
+both recorded games and all three sides). With no side, or "Not me", the neutral colour wording stays
+(and comes back after a side was chosen). Only wording changes: classifications, evaluations, motifs,
+simulations, the buckets and the one-sentence summary's inputs are untouched.
+
+### 7.2 Every claim is verified (R1b)
+
+`docs/COMMENTARY_AUDIT.md` audits every text of the two recorded games claim by claim; this is the
+rule set it produced. A sentence is produced only when its claim is verified on the board (or in the
+engine's own numbers) at generation time:
+
+- **Whose motif.** What the played move did comes from the mover's own motifs *on that very move*
+  (`byColor` and `moveUci` both match). What a better move would have done comes from the best move's
+  motifs and is said about that move: "Better was c6, which attacks the undefended bishop on b5." -
+  never "This drops/pins/forks ...", which credited the played move with it ("Better was Ba6" after a
+  move that "forces mate"). What the opponent now has comes from the opponent's motifs, said about the
+  opponent's reply: "This lets White play Qb3, which pins the pawn on b7 to the knight on b8."
+- **Said no stronger than the board shows.** A move that merely attacks a loose piece "attacks" it
+  ("attacks the undefended pawn on e4", "attacks the queen on g5 with a pawn", "attacks the pawn on g4
+  more often than it is defended", "leaves the pawn on g7 undefended, with the knight on f5 attacking
+  it"): the opponent moves next. Only a **capture of a piece that exchange evaluation proves wins
+  material, and that is not just taking back**, "wins" anything ("Better was Qxa1+, which wins a rook").
+  A pawn capture is never claimed (it may regain a pawn lost a move earlier). A recapture wins nothing
+  by itself.
+- **Re-checked on the position.** Pins, skewers, forks, double attacks, discoveries, double checks,
+  promotions and the mating patterns are re-verified geometrically on the position after the move; a
+  motif that does not survive is not mentioned. "Leaves the bishop on g1 with no safe square" requires
+  every legal move of the piece to lose material by exchange. A motif is mentioned only if it is
+  engine-confirmed (confidence >= 0.95) or wins material (swing >= 100): a static relative pin that
+  wins nothing is not worth a card.
+- **The engine's line is said as the engine's line.** Deflection, decoy, clearance, removing the
+  defender, interference, the Greek gift and the windmill are proved by replaying the engine's PV,
+  so they read "In the engine's line, Rxd7 drags the knight on f6 off the same diagonal, and Bxe7
+  follows." / "Better was Qb4+; in the engine's line it clears e7 so that Bxb4+ can come through." -
+  the opponent may reply differently.
+- **"Allowed" is a charge, made only against a move that cost something.** INACCURACY, MISTAKE and
+  BLUNDER only, and only when the opponent's reply mates or wins material (swing >= 100), and the
+  reply is a legal move that the engine's line makes. A move the engine chose, or rated great or
+  brilliant, never "allows" anything. A forced mate against the mover is "This allows a forced mate."
+  when no motif names the reply. A move after which the opponent has a forced mate is not credited
+  with the motifs of that line (they are the opponent's combination).
+- **A sacrifice is called one only when it is one.** BRILLIANT says "X is a sacrifice: it offers the
+  knight on b5" when the opponent can really take a piece of the mover's for a net gain of at least 200
+  cp (the classifier's own `see <= -200`); "X leaves the rook on d1 open to capture, and the engine
+  still rates it among the best moves" when it is an even trade; and "X is among the engine's best
+  moves here" when nothing can be taken (the classifier requires a *legal* capture, §2).
+- **Unprovable additions are not made**: "keeping material level", "stunning", "the point becomes clear
+  a few moves later", "sets up a clearance on e2" (a motif's name with a square) are gone.
 
 ---
 
@@ -326,7 +519,9 @@ Rules:
   a lie. It is the escape hatch; every other depth composes with the threshold.
 - **Structural beats are never filtered**: intro, opening summary, chapter transitions, the
   outro summary (which states the final result) and the closing lessons are emitted outside
-  per-ply selection.
+  per-ply selection. Only the length budget (§9.7) may thin them, and only for a game so short that
+  its story cannot fit in its budget any other way; the result, the intro's players and the
+  accuracy line always stay.
 - **A checkmating final move always survives** the threshold — it is the game's result.
 - **The selection is never empty.** If the threshold rejects every ply, fall back to
   narrating the single largest-swing ply (ties resolved towards the earlier ply).
@@ -432,6 +627,179 @@ the blunder would be narrated and the punishment pruned, since the punishing mov
 tactically decisive happened"); a review with no body is broken, a report with no tactics is not.
 The "Show me" simulation on a ply is kept only while at least one missed motif on that ply survives.
 
+### 9.7 Pacing tiers and the length budget
+
+Added in Round 13. The first narration selected every mistake and every missed tactic and walked
+each missed line for up to eight plies, so a 17-move game came out at 83 beats and eleven minutes
+and the 23-move Immortal Game at 195 beats and twenty-three. A review video for a phone is a
+short story, not an audit, so every ply is now assigned a **pacing tier** (the shape follows
+`docs/pc_research/VIDEO_FORMAT.md` §2) and the whole script is held to a length budget.
+
+**The tiers.** `VideoScriptGenerator` decides a tier for every ply; the rules are evaluated in
+this order and the first that matches wins:
+
+| Rule | Tier |
+|---|---|
+| the game's checkmate | **DWELL** at least (it is never lower; see the mating beat) |
+| `BOOK` or `FORCED` classification | **SKIP** |
+| `BLUNDER`, `MISS` or `BRILLIANT` | **FULL** candidate |
+| `MISTAKE` whose missed tactic wins material or mates (below) | **FULL** candidate |
+| any other `MISTAKE` | **DWELL** |
+| `INACCURACY` | **BRIEF**, always — never a walk of the missed line, however much it would have won |
+| `GREAT` | **DWELL** |
+| a recapture (takes back on the square the opponent just took on) | **SKIP** |
+| a found tactic with `confidence >= 0.95` (`FOUND_TACTIC_CONFIDENCE`; the §9.6 gate already requires it) | **DWELL** |
+| significant (§9.2: swing `>= significanceThresholdCp`, or a member of a §9.3 sequence — the plies where the plan changes) but none of the above | **BRIEF** |
+| anything else: routine best/excellent/good moves with a small swing | **SKIP** |
+
+A missed tactic **wins material or mates** when its own `materialSwing >= 150`
+(`PUZZLE_MIN_SWING_CP`), or it is a mating motif (`BACK_RANK_MATE`, `SMOTHERED_MATE`, `MATE_NET`,
+`GREEK_GIFT`), or the mover had a forced mate before the move, or the engine line that realises it
+checkmates or nets `>= 150cp` on the board (the highest-confidence motif is often a clearance
+worth nothing by itself while the line it opens wins a rook).
+
+**What each tier says.**
+
+- **SKIP** — no beat of its own. A run of **three or more** consecutive skipped plies becomes one
+  "skip ahead" connective; one or two get a lead-in ("two moves on") on the next beat.
+- **BRIEF** — one or two sentences, and the second one has to *say* something: an inaccuracy gets
+  the better move; any other move gets the tactic it carries, or what it did to the evaluation
+  ("White has gone from clearly better to winning", or "The evaluation moves in White's favour").
+  Never a pleasantry such as "Top of the engine's list" or "No complaints": those survive only in
+  `EVERY_MOVE`, the complete walkthrough, which is never budget-demoted. No excursion.
+- **DWELL** — the fuller explanation (the error beat, the found-tactic beat, the threat beat). A
+  missed tactic still gets its reveal and a variation, but **at most 4 plies**
+  (`DWELL_EXCURSION_PLIES`) and **no puzzle pause**.
+- **FULL** — the puzzle pause (when the missed tactic wins material or mates, or the move is a
+  `MISS`), the reveal, and the excursion walk of up to 8 plies (`MAX_EXCURSION_PLIES`, §6). A
+  `BLUNDER` or `MISS` whose missed motif does *not* win material or mate is still FULL (it is among
+  the worst moments) but is shown the short DWELL way.
+
+**At most 3 FULL moments per game** (`MAX_FULL_MOMENTS`), ranked by a **drama score**, ties going to
+the earlier move. The drama score is the move's `loss`, except that a `BRILLIANT` move (which loses
+nothing by definition) scores as a loss of **25** (`BRILLIANT_DRAMA`, a mid-sized blunder), so in a
+game with three or more errors a brilliancy can still take a slot. **The turning point is FULL** and
+ranks first (for a game too short for its budget it is the last body beat to give way: below). It is the largest-loss move
+with `loss > 0.5` that is neither `BOOK` nor `FORCED` (a book move is not a decision, a forced move
+is not a choice). Every FULL candidate beyond the cap is demoted to DWELL. A brilliancy beyond the
+cap is therefore still told, as a DWELL found-tactic beat.
+
+**Protected beats.** A `BRILLIANT` or `GREAT` move, and a move that plays a forced mate (a found
+`MATE_NET`, `BACK_RANK_MATE`, `SMOTHERED_MATE` or `GREEK_GIFT` with `confidence >= 0.95` — the queen
+sacrifice that mates is the point of the game however the engine labels it), is **never taken below
+DWELL by the length budget**, and neither is the checkmate. (The §9.2 threshold is a different filter:
+a protected ply on which nothing happened at all is still pruned there.)
+
+**Composition with the other filters.** Depth picks the candidate plies (`MISTAKES_ONLY` narrows them
+to the errors, the key moments, the turning point and the mate), the §9.2 threshold then prunes — a
+ply that moved nothing and belongs to no sequence is SKIP at every tier, the mate always survives,
+a threshold of 0 prunes nothing — and the tier rules above shape what is left. The §9.6 tactic gate
+is untouched and still decides which tactics a ply is said to carry. `EVERY_MOVE` narrates every ply
+at the length its tier gives (a SKIP/BRIEF ply is told as a single normal beat) and is exempt from
+the threshold and the budget, as before. If everything is pruned, the single largest-swing ply is
+narrated (§9.2), as a BRIEF beat.
+
+**The length budget.** The script's `totalEstimatedMs` (speech from `estimateSpeechMs` at
+`NarrationOptions.speechWpm`, plus holds) may not exceed
+
+    budgetMs = min(720 000, 120 000 + 14 000 × fullMoves, 23 000 × fullMoves − 32 000)
+    floor 20 000                                                   fullMoves = (plies + 1) / 2
+
+(`BUDGET_MAX_MS`, `BUDGET_BASE_MS`, `BUDGET_PER_MOVE_MS`, `BUDGET_RAMP_PER_MOVE_MS`,
+`BUDGET_RAMP_OFFSET_MS`, `BUDGET_MIN_MS`; the one function is `VideoScriptGenerator.budgetMs`).
+
+| Moves | 4 | 8 | 12 | 17 | 23 | 40 | 43 and up |
+|---|---|---|---|---|---|---|---|
+| Budget | 60 s | 152 s | 244 s | 358 s | 442 s | 680 s | 720 s |
+
+The first two terms are the Round 13 budget. Its 120 s base was never meant for a tiny game: a
+four-move scholar's mate was allowed 176 s and came out at **3 min 43 s** on the emulator (21 beats, a
+puzzle, an eight-ply walk of the missed 3...g6, three lessons). The third term is the ramp for such a
+game; it meets the old line at 17 moves (`23 x 17 - 32 = 359 s`, against 358 s), so **every game of 17
+moves or more has exactly the budget it had** and only shorter ones got smaller. The budget is a
+ceiling, never a target: **the script is not padded** to fill it, and a quiet game comes out far under
+it (the first eight moves of Byrne-Fischer: 90 s of a 152 s budget). When a script overruns it, the
+beats with the least `interest` give way in this order, one batch at a time, rebuilding and
+re-measuring until it fits:
+
+1. DWELL beats that are not protected become BRIEF, lowest interest first (ties: the later ply goes first);
+2. only when none is left, BRIEF beats become SKIP, lowest interest first;
+3. only when nothing lighter remains (a six-move game with three blunders; a game whose brilliancies
+   alone fill the budget): the other FULL beats become DWELL, the cheapest first - lowest drama score,
+   a brilliancy last of all - and never below DWELL;
+4. only then **the turning point itself**: FULL to DWELL, then DWELL to BRIEF (one beat, no puzzle, no
+   walk, no separate "turning point" segment). A protected move and the checkmate stay at DWELL;
+5. only then **the structure around the story**, one level per round (`ScriptBuilder.trim`):
+   1. all lessons but the first, and no textbook offer after it;
+   2. the rating and error-count sentences of the summary, and the caveat about the ratings;
+   3. the opening summary;
+   4. the intro's hook sentence;
+   5. the last lesson.
+   The result and the players in the intro, the accuracy line and the mating beat are never trimmed.
+
+The checkmate and every protected beat are never demoted below DWELL, and at least one body beat always
+survives. Because protected beats are exempt, a game rich in brilliant and great moves may
+legitimately **overrun the budget** by the cost of those beats; the budget is not raised for that, and
+nothing is added to fill the space either. The lesson lead counts its lessons truthfully ("Three
+things to take out of this game" is only said before three).
+`interest` is the existing ply score (loss, tactic swing, brilliancy and greatness bonuses, check or
+mate, minus a book penalty).
+
+**Measured (Stockfish 19, MultiPV 3, replayed through this pipeline).** `fixtures/chesscom_style_game.pgn`
+(17 moves, depth 20): 70 beats / 629 s before, 30 beats / 313 s after, with 4...Bxf3 (an inaccuracy)
+down from about 70 s to one sentence. `fixtures/immortal.pgn` (23 moves, depth 12): 160 beats / 1319 s
+before, 50 beats / 441 s after (the unconstrained plan was 702 s; the budget removed the rest). After the Round 13 follow-up
+(protected beats, drama ranking, no filler): chesscom 30 beats / 327 s, immortal 47 beats / 441 s; in
+the Immortal Game the queen sacrifice 22.Qf6+ (11 s), the knight sacrifice 21.Nxg7+ (11.5 s) and the
+mate are told at DWELL length or more, and 18.Bd6, which leaves both rooks en prise, keeps its
+reveal and a four-ply variation.
+
+**Measured after R1b (the same pipeline, Stockfish 19, MultiPV 3, depth 12 for the two recordings made
+for it, `scripts/record_analysis.py`).** The scholar's mate 4 moves: 236 s / 21 beats before, **54 s / 5
+beats** after. The first 8 moves of Byrne-Fischer: 102 s before, 90 s after. The Opera Game (17 moves):
+327 s before, 314 s after. The Immortal Game (23): 441 s before, 431 s after. The first 40 moves of
+Byrne-Fischer: 600 s before, 543 s after. The 8-, 17- and 40-move games are not budget-bound; their
+few seconds' difference is the text no longer carrying the retired payoff sentences and the detectors
+no longer reporting a clearance, a deflection or a sacrifice that was not one (§5.3, §2). The Immortal
+Game is the one game here that the budget still trims (661 s planned, 442 s allowed, 431 s told).
+
+
+**Recap card (R6b) is outside this budget.** An exported video ends with one silent end card,
+`VideoScript.recap`, built by `GameRecap` in `:core` and drawn by `BoardFrameRenderer.renderRecapFrame`.
+It is **not a segment**: it has no narration, so it adds nothing to `totalEstimatedMs`, to the budget
+comparison above, to the segment count behind the export's "N of M" and the time-left estimate
+(§ time left, `ExportTimeLeft`), or to the in-app player's timeline (playback ends on the last lesson
+card; only the MP4 carries the recap). It adds its own **4 to 6 seconds** (`recapDurationMs`: 3 s plus
+100 ms per word of the two sentences on it, clamped to 4 s..6 s; the audio track is padded with
+silence so both tracks end together) after the budgeted length, so the exported file is that much
+longer than the narrated script. What it says, and what proves each part:
+
+| Part | Source |
+|---|---|
+| both names | the same header names as the title card |
+| accuracy per side | `PlayerReport.accuracy`, shown as the Summary screen shows it (`%.0f%%`, same 85 / 65 colour bands) |
+| one sentence | `GameSummarySentence` (§12), rendered for the same viewer as the Summary |
+| "Biggest moment: move N, SAN (Class by Side)" | `GameSummarySentence.turningPoint`, the move §12 names, and only when it lost at least `BIG_SWING` (20) win-percent; otherwise no line |
+| count chips | `PlayerReport.classificationCounts` for Brilliant, Great, Inaccuracy, Mistake, Miss, Blunder, non-zero only; equal to the number of that side's moves with that class |
+
+**Title cards (R6c).** The intro, the final-numbers card and the lesson cards of the video are laid out by
+`video/CardLayout.kt` (pure) and drawn by `BoardFrameRenderer.renderCardFrame`; they carry no new claim and
+change no timing. Rules: (1) each fact is printed once: the intro is the title "Name (rating) vs Name (rating)"
+(from the header; the names are bidi-isolated, the rating sits outside the isolate), one grey subtitle line
+"1-0 · 17 moves · Opening (ECO)" and one green accuracy line "White 84% · Black 79%" (`VideoScriptGenerator`
+writes `[subtitle, accuracy]` as the intro card's lines); the final-numbers card prints each name and each
+accuracy once (the structured sub-lines that repeated them are gone); the intro and the final numbers draw no
+caption bar, since the card says it; (2) every accuracy on a card or caption is whole percent, the Summary's
+`%.0f` (the generator's `roundToInt` agrees with it on every value, swept in `CardTextTest`; the spoken
+sentences keep one decimal); (3) text stays in a column 10 percent in from each side, between the chapter bar
+and a zone of 9.5 percent (the caption bar) plus 3 percent air at the bottom, whether or not a caption is drawn:
+the title shrinks, then stacks the two names on two lines, then ends in an ellipsis (`layoutTitle`, `fitLine`);
+a body paragraph shrinks, then ends in an ellipsis (`fitParagraph`, `fitParagraphToHeight`); the block is
+centred and, if still too tall, every size steps down together.
+
+No new chess claim is made: every field is a report number or the §12 sentence. `GameRecapTest`
+checks each against the report on the four recorded games.
+
 ---
 
 ## 10. Tactic reference library
@@ -443,7 +811,7 @@ idea with nothing else on the board.
 
 **Provenance is mandatory.** The source of truth is the `REFS` table in
 `scripts/verify_tactic_references.py`, which checks every entry with python-chess for legality,
-for the pattern's **own structural claim** (mate is mate, a fork attacks two valuable pieces, a pin
+for the pattern's **own structural claim** (mate is mate, a fork attacks two valuable pieces and its forker cannot simply be taken for free, a pin
 leaves a pinned piece, a discovered check comes from a piece that did not move, a deflected
 defender no longer guards the square, a windmill alternates discovered and direct checks with
 forced replies, a stalemate trick leaves *every* reply stalemated, …) and, for combinations, for
@@ -462,3 +830,155 @@ move that carries the motif, and at the final step of a missed-tactic walkthroug
 this pattern done cleanly?"). The narrated video **stays in the game**: it names the pattern and
 the lessons mention that a textbook example is waiting in the report, but it never plays the
 reference position — a detour would break both the story and the running time.
+
+---
+
+## 11. Practice puzzles
+
+`core.analysis.PracticeSelector` and `PracticeJudge` (`Practice.kt`) turn the user's own mistakes into
+"find the better move" puzzles. Design: `docs/PRACTICE_DESIGN.md`. Everything is local and uses only
+data the analysis already produced; **no engine call is made to select or judge**. Puzzles are
+classification-based, so the §9.6 tactic gate does not apply and the selector runs on the
+**unpruned** report.
+
+### 11.1 Cached lines
+
+`MoveAnnotation.candidateLines` holds the MultiPV lines of the position *before* the move, best
+first (ascending `multiPv`), one `CandidateLine(multiPv, uci, san, scoreCp, mateIn)` per line.
+Scores are **mover-relative**, exactly like `EngineLineInput` (positive = good for the side to
+move; `mateIn` > 0 = the mover mates). They are not flipped to White's perspective. A line's win
+percent is `WinProbability.winPercentOfLine` (§1.1: a mate is 100 / 0). Positions are analysed at
+one depth (§1.2), so the lines are comparable with each other and with the played move's eval.
+
+### 11.2 Constants
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MIN_LOSS` | 10.0 | win-percent loss floor, the MISTAKE floor of §2 (MISS exempt) |
+| `MIN_WIN_BEFORE` | 25.0 | the mover's win percent before the move must be at least this |
+| `ACCEPT_LOSS` | 2.0 | a cached line within this many win-percent of the best is accepted (the same best-or-near-best bound as GREAT / BRILLIANT in §2) |
+| `MAX_PUZZLES` | 5 | puzzles per game |
+| `DEDUPE_WINDOW_PLIES` | 4 | same best move within this many plies is one puzzle |
+| `MISS_RANK_FLOOR` | 20.0 | a MISS ranks as `max(loss, 20.0)` |
+| `GOAL_ROOK_CP` / `GOAL_PIECE_CP` / `GOAL_MATERIAL_CP` | 500 / 320 / 150 | goal labels, the narration's puzzle-prompt thresholds |
+
+### 11.3 A ply is a candidate when ALL hold
+
+1. `color == userColor`. With `userColor == null` the result is `PracticeSet.NoSide`.
+2. `classification` is MISTAKE, MISS or BLUNDER. INACCURACY is excluded on purpose.
+3. `loss >= MIN_LOSS`, or the class is MISS (a thrown-away forced mate can lose little win percent).
+4. `winPercentBefore >= MIN_WIN_BEFORE`.
+5. There is an answer: `bestMoveUci` is non-null, differs from the played `uci`, and is legal in
+   `fenBefore`. A puzzle whose best move is a **non-queen promotion is skipped** (promotion
+   auto-queens in v1, so the answer could not be entered).
+6. **Judgeable from the cache.** With `k = candidateLines.size` and
+   `band = winPercent(best line) - ACCEPT_LOSS`, either
+   - `k >= 2` and (`winPercent(last line) < band` **or** `legalMoves(fenBefore).size <= k`), or
+   - the best move delivers checkmate (mate in 1, verified by the rules with
+     `Position.makeMove(...).isCheckmate()`).
+
+   So either every uncached move is provably no better than a line that is already worse than the
+   band, or every legal move is cached. "Not in the cached lines" is never a guess. A position with
+   several near-equal moves and more legal moves than cached lines is skipped as a poor puzzle.
+
+No candidates gives `PracticeSet.Empty`.
+
+**Dedupe** (before ranking, in ply order): two candidates with the same `bestMoveUci` whose plies
+differ by at most `DEDUPE_WINDOW_PLIES` are one puzzle; the one with the larger `loss` is kept (the
+earlier on a tie). **Cap and order:** rank by `rankLoss = if (MISS) max(loss, 20.0) else loss`
+(ties: earlier ply), take `MAX_PUZZLES`, then present in **ply order**.
+
+### 11.4 Goal label
+
+1. `MateIn(n)` when `mateInBefore` is a mate *for the mover* (`n = |mateInBefore|`), or, when it is
+   absent, when the best move checkmates (`MateIn(1)`).
+2. Else from the best missed tactic of the mover (largest `materialSwing`, then confidence):
+   `WinRookOrBetter` at >= 500, `WinPiece` at >= 320, `WinMaterial` at >= 150.
+3. Else `BetterMove`.
+
+The same tactic gives the puzzle's `hintMotif`. `evalSwingCp` is the mover-relative centipawn cost of
+the played move (never negative), and **null when `mateInBefore` or `mateInAfter` is set**, because
+a saturated mate value is not shown to the learner.
+
+### 11.5 Judging an attempt (`PracticeJudge.judge`)
+
+`acceptedUci` = the best move plus every cached line with
+`winPercent(best) - winPercent(line) <= ACCEPT_LOSS`, **minus the move actually played** (the puzzle's
+premise is that the played move was a mistake, so tapping it must never read as correct). In order:
+
+1. attempt in `acceptedUci` gives `Correct`;
+2. a mate-in-1 puzzle and the attempt checkmates by the rules gives `Correct` (the second mate need
+   not be cached);
+3. attempt equals the played move gives `PlayedInGame(loss, evalSwingCp)`;
+4. otherwise `Wrong`.
+
+**Mate puzzles.** In a mate puzzle the best line is 100 %, so a move that merely wins a queen
+(+1000 cp = 97.5 %) loses 2.5 > 2.0 and is `Wrong`; a slower mate is also 100 % and is `Correct`.
+This falls out of the band automatically and is pinned by tests.
+
+Engine-backed judging (a search per attempt) is deliberately not used: §1.2 forbids comparing evals
+from different depths, and the engine is a single in-process instance owned by the analysis loop.
+
+---
+
+## 12. One-sentence game summary
+
+The first line of a review is one sentence on how the game unfolded (pattern: chess.com's review
+opens with a one-line summary; the wording is our own). `GameSummarySentence.build(report, userColor,
+notMe)` produces it from the **report alone** as a typed `Sentence.GameSummary`, rendered by
+`NarrationStrings`; the app shows it under the accuracy row of the Summary header.
+
+### 12.1 Inputs and constants
+
+Everything is read from `GameReport`: `result` (the tag), `annotations` (ply, move number, colour,
+SAN, `loss`, `winPercentBefore`, classification) and `evalGraph`. Nothing else, so the sentence can
+never state a number or a move the report does not hold, and it re-derives instantly when the side
+chooser changes.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `BIG_SWING` | 20.0 | win-percent lost by one move that counts as a big error (the §2 BLUNDER line) |
+| `FINE_FLOOR` | 40.0 | the mover's win-percent before the turning move at or above which they were "fine" |
+| `COMEBACK_LEAD` | 65.0 | the mover's win-percent before the turning move at or above which the *other* side was behind |
+| `SHORT_GAME_PLIES` | 20 | fewer plies than this is a short game (the §4 low-confidence length) |
+| `CLOSE_LOW` / `CLOSE_HIGH` | 30.0 / 70.0 | White's win-percent staying inside this band at every position is a close game |
+
+**Turning point** = the annotation with the largest `loss` among moves that lost more than 0.5 and
+are neither BOOK nor FORCED; **a tie goes to the later move**. (`VideoScriptGenerator` picks the
+*earlier* move on an exact tie; a tie of two floating-point losses is vanishingly rare, but the two
+are not the same rule.)
+
+**Result.** `1-0` and `0-1` name the winner, `1/2-1/2` is a draw, anything else is "no result". A
+**mate is claimed only when** the result names a winner, the last move's SAN ends in `#` **and** that
+move was played by the winner; a tag that disagrees with the board wins, so the sentence can never
+contradict the result. The PGN result tag cannot tell a resignation from a flag fall, so no sentence
+claims either.
+
+### 12.2 Cases, first match wins
+
+| # | Condition | Kind | English (you as viewer) |
+|---|---|---|---|
+| 0 | no moves | *(no sentence)* | |
+| 1 | no result | `UNFINISHED` | The game stops after 23 moves without a result. |
+| 2 | plies < `SHORT_GAME_PLIES` | `SHORT_GAME` | A short game: you mated your opponent in 8 moves. / ... won in 8 moves. / A short game: it ended in a draw after 9 moves. |
+| 3 | decisive, turning loss >= `BIG_SWING`, **winner made it** | `WON_DESPITE_ERROR` | You won, even after a blunder on move 15. |
+| 4 | decisive, big swing by the loser, loser's `winPercentBefore` >= `COMEBACK_LEAD` | `COMEBACK` | You were behind when your opponent's blunder on move 21 turned the game around. |
+| 5 | decisive, big swing by the loser, `winPercentBefore` >= `FINE_FLOOR` | `DECIDED_BY_ERROR` | You were fine until move 11, then a blunder decided it. |
+| 6 | decisive, big swing by the loser, `winPercentBefore` < `FINE_FLOOR` | `SEALED_BY_ERROR` | You were already under pressure, and a blunder on move 21 sealed it. |
+| 7 | decisive, no big swing, **no mate**, White's win-percent inside the close band throughout | `CLOSE_CLEAN` | A close game: neither side made a big mistake. |
+| 8 | decisive, no big swing | `CLEAN_WIN` | You won by checkmate on move 30, and neither side made a big mistake. / You won, and neither side made a big mistake. |
+| 9 | draw, turning loss >= `BIG_SWING` | `DRAW_WITH_SWING` | It ended in a draw, but your mistake on move 14 was the big swing. |
+| 10 | draw, no big swing | `CLOSE_CLEAN` | A close game: neither side made a big mistake. |
+
+The error word comes from the turning move's classification: BLUNDER "blunder", MISTAKE "mistake",
+MISS "missed win", anything else "big swing". Move numbers are the annotation's full-move number;
+game lengths are `(plies + 1) / 2`.
+
+### 12.3 Side framing
+
+With the user's side known (`userColor` set and not "Not me") the user's side is `Person.SECOND`
+("you") and the other side `Person.THIRD` with `viewerKnown = true` ("your opponent"; possessive
+"your opponent's"). With no side, or "Not me", both are `Person.THIRD` and named by colour. This uses
+the same `Subject` mechanism as every other sentence: the viewer's `Gender` rides on their `Subject`
+for a language that inflects on it, the opponent's is always `UNSPECIFIED`, and English never
+genders anyone. "Black was fine until move 11, then a blunder decided it." is the colour form of case 5.

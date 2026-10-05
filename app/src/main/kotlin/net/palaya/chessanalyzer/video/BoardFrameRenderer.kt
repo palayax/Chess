@@ -136,6 +136,8 @@ object BoardFrameRenderer {
         val verdict: (MoveClassification) -> String,
         val segmentKind: (SegmentKind) -> String,
         val excursionDefault: String,
+        /** The words of the recap end card (R6b); defaulted so hand-built labels keep compiling. */
+        val recap: RecapLabels = RecapLabels.ENGLISH,
     ) {
         companion object {
             val ENGLISH = PanelLabels(
@@ -168,9 +170,24 @@ object BoardFrameRenderer {
                 // SegmentKind chips ("Puzzle Prompt", "Intro") have no resources yet — see RUN_LOG.
                 segmentKind = ::humanizeKind,
                 excursionDefault = context.getString(R.string.panel_excursion_default),
+                recap = recapLabelsFrom(context),
             )
         }
     }
+
+    /** The recap card's words from the app's resources in the current locale. */
+    private fun recapLabelsFrom(context: Context): RecapLabels = RecapLabels(
+        heading = context.getString(R.string.recap_heading),
+        accuracy = context.getString(R.string.report_accuracy),
+        youMarker = context.getString(R.string.panel_you_marker),
+        side = { context.getString(if (it == CoreColor.WHITE) R.string.side_white else R.string.side_black) },
+        className = { cls ->
+            context.getString(net.palaya.chessanalyzer.ui.theme.MoveClassification.valueOf(cls.name).displayNameRes)
+        },
+        biggestMoment = { n, san, by -> context.getString(R.string.recap_biggest_moment, n, san, by) },
+        qualityBy = { cls, side -> context.getString(R.string.recap_quality_by, cls, side) },
+        countChip = { cls, n -> context.getString(R.string.recap_count_chip, cls, n) },
+    )
 
     // ---- Palette (mirrors ui/theme/Color.kt's hex values so the exported video matches the
     // in-app board; kept as plain ARGB ints here since this class must not depend on Compose). ----
@@ -195,7 +212,7 @@ object BoardFrameRenderer {
     private const val EVAL_WHITE_FILL = 0xFFF2F1EC.toInt()
     private const val EVAL_BLACK_FILL = 0xFF1A1917.toInt()
 
-    private val classificationColors: Map<MoveClassification, Int> = mapOf(
+    internal val classificationColors: Map<MoveClassification, Int> = mapOf(
         MoveClassification.BRILLIANT to 0xFF26C2A3.toInt(),
         MoveClassification.GREAT to 0xFF749BBF.toInt(),
         MoveClassification.BEST to 0xFF81B64C.toInt(),
@@ -230,7 +247,7 @@ object BoardFrameRenderer {
     }
 
     /** Caption bar height reserved at the bottom of the frame, in pixels, for a given frame height. */
-    fun captionBarHeight(heightPx: Int): Float = heightPx * 0.095f
+    fun captionBarHeight(heightPx: Int): Float = heightPx * CAPTION_BAR_FRACTION
 
     /**
      * Renders a live-position frame: a dominant board (roughly half the frame's height in side
@@ -394,13 +411,51 @@ object BoardFrameRenderer {
     }
 
     /**
-     * Renders a board-less title/summary card (intro, outro, chapter break). [subLines] is
-     * structured data the renderer itself formats — [VideoGameHeader] for an intro (names,
-     * ratings, result, opening) or the accuracy/rating summary for an outro — drawn below the
-     * generator's freeform [lines] in a distinct style, rather than trusting that text to already
-     * contain it. Empty when the script has nothing structured to add (older cached script, or a
-     * plain chapter-break card), in which case the card renders exactly as it did before.
+     * Renders a board-less title/summary card (intro, final numbers, lesson, chapter break) from its
+     * words: [content] is the title, grey body paragraphs and green fact lines of `CardLayout.kt`.
+     *
+     * Nothing can run outside its box (R6c). Text sits in a column 10 percent in from both sides; the
+     * title is one line that shrinks to fit and, for "A vs B" with long names, two stacked lines
+     * ([layoutTitle]); a body paragraph shrinks, then ends in an ellipsis ([fitParagraph], or
+     * [fitParagraphToHeight] for a lesson that fills the card); a fact line shrinks, then ends in an
+     * ellipsis ([fitLine]). The block is centred between the chapter bar and the caption bar's zone, and
+     * when it is still too tall every size steps down together. The caption bar's zone at the bottom is
+     * kept clear whether or not a caption is drawn. All text is laid out left to right with its names
+     * isolated, so a Hebrew name inside a line cannot reorder the line.
      */
+    fun renderCardFrame(
+        canvas: Canvas,
+        widthPx: Int,
+        heightPx: Int,
+        content: CardContent,
+        caption: String = "",
+        chapterLabel: String? = null,
+    ) {
+        canvas.drawColor(SURFACE_DARK)
+        canvas.drawRect(0f, 0f, widthPx * 0.015f, heightPx.toFloat(), Paint().apply { color = GREEN_PRIMARY })
+
+        val w = widthPx.toFloat()
+        val h = heightPx.toFloat()
+        val left = CardGeometry.textLeft(w)
+        val textWidth = CardGeometry.textWidth(w)
+        val top = CardGeometry.contentTop(h)
+        val available = CardGeometry.contentBottom(h) - top
+
+        var scale = 1f
+        var block = buildCardBlock(content, h, textWidth, available, scale)
+        while (block.height > available && scale > 0.55f) {
+            scale -= 0.1f
+            block = buildCardBlock(content, h, textWidth, available, scale)
+        }
+        block.draw(canvas, left, top + ((available - block.height) / 2f).coerceAtLeast(0f))
+
+        if (chapterLabel != null) drawChapterBar(canvas, widthPx, heightPx * 0.07f, chapterLabel)
+        if (caption.isNotBlank()) {
+            drawCaptionBar(canvas, widthPx, heightPx, captionBarHeight(heightPx), caption)
+        }
+    }
+
+    /** A card from a heading and plain lines (the exporter's and the player's fallback before any script frame). */
     fun renderCardFrame(
         canvas: Canvas,
         widthPx: Int,
@@ -410,87 +465,311 @@ object BoardFrameRenderer {
         caption: String = "",
         chapterLabel: String? = null,
         subLines: List<String> = emptyList(),
-    ) {
-        canvas.drawColor(SURFACE_DARK)
+    ) = renderCardFrame(
+        canvas, widthPx, heightPx,
+        CardContent(CardTitle.Plain(heading), lines.map { CardParagraph(it, maxLines = 3) }, subLines),
+        caption, chapterLabel,
+    )
 
-        val accentPaint = Paint().apply { color = GREEN_PRIMARY }
-        canvas.drawRect(0f, 0f, widthPx * 0.015f, heightPx.toFloat(), accentPaint)
+    /** A card measured at one scale: its height, and how to draw it from a left edge and a top. */
+    private class CardBlock(val height: Float, val draw: (canvas: Canvas, left: Float, top: Float) -> Unit)
 
-        val headingPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = ON_DARK_PRIMARY
-            textSize = heightPx * 0.09f
-            isFakeBoldText = true
-        }
-        val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = ON_DARK_SECONDARY
-            textSize = heightPx * 0.05f
-        }
-        val subPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = GREEN_PRIMARY
-            textSize = heightPx * 0.042f
-            isFakeBoldText = true
-        }
-
-        val textLeft = widthPx * 0.10f
-        val textWidth = (widthPx * 0.80f).toInt()
-        val headingLayout = StaticLayout.Builder
-            .obtain(heading, 0, heading.length, headingPaint, textWidth)
+    /** Text laid out left to right at [width], whatever its first letter: names inside it are isolated instead. */
+    private fun cardLayout(text: String, paint: TextPaint, width: Int, maxLines: Int, spacing: Float): StaticLayout =
+        StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setLineSpacing(0f, 1.05f)
+            .setTextDirection(android.text.TextDirectionHeuristics.LTR)
+            .setLineSpacing(0f, spacing)
+            .setMaxLines(maxLines)
+            .setEllipsize(TextUtils.TruncateAt.END)
             .build()
 
-        val bodyLayouts = lines.map { line ->
-            StaticLayout.Builder
-                .obtain(line, 0, line.length, bodyPaint, textWidth)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.15f)
-                .build()
-        }
-        val subLayouts = subLines.map { line ->
-            StaticLayout.Builder
-                .obtain(line, 0, line.length, subPaint, textWidth)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.15f)
-                .build()
-        }
+    private fun buildCardBlock(content: CardContent, h: Float, textWidth: Float, available: Float, scale: Float): CardBlock {
+        val widthPx = textWidth.toInt()
+        val titleGap = h * 0.06f * scale
+        val bodyGap = h * 0.03f * scale
+        val factGap = h * 0.025f * scale
+        val ruleGap = h * 0.04f * scale
+        val ruleAbove = h * 0.02f * scale
 
-        val bodyBlockHeight = bodyLayouts.sumOf { it.height } + bodyLayouts.size * (heightPx * 0.03f).toInt()
-        val subBlockHeight = if (subLayouts.isEmpty()) 0 else {
-            (heightPx * 0.04f).toInt() + subLayouts.sumOf { it.height } + subLayouts.size * (heightPx * 0.025f).toInt()
+        // ---- title
+        val titleLayout = layoutTitle(
+            content.title, textWidth,
+            maxSize = h * 0.09f * scale, minSingleSize = h * 0.058f * scale,
+            stackedMaxSize = h * 0.075f * scale, minSize = h * 0.04f * scale, measure = ::boldWidth,
+        )
+        val titleLines = titleLayout.lines.map { line ->
+            cardLayout(line.text, recapPaint(ON_DARK_PRIMARY, line.size, bold = true), widthPx, 1, 1.05f)
         }
-        val totalHeight = headingLayout.height + (heightPx * 0.06f) + bodyBlockHeight + subBlockHeight
-        var y = (heightPx - totalHeight) / 2f
+        val titleHeight = titleLines.sumOf { it.height.toDouble() }.toFloat()
 
-        canvas.save()
-        canvas.translate(textLeft, y)
-        headingLayout.draw(canvas)
-        canvas.restore()
-        y += headingLayout.height + heightPx * 0.06f
-
-        bodyLayouts.forEach { layout ->
-            canvas.save()
-            canvas.translate(textLeft, y)
-            layout.draw(canvas)
-            canvas.restore()
-            y += layout.height + heightPx * 0.03f
+        // ---- facts (green, bold, one line each)
+        val factLines = content.facts.map { text ->
+            val fit = fitLine(text, textWidth, h * 0.042f * scale, h * 0.03f * scale, ::boldWidth)
+            cardLayout(fit.text, recapPaint(GREEN_PRIMARY, fit.size, bold = true), widthPx, 1, 1.15f)
+        }
+        val factBlock = if (factLines.isEmpty()) 0f else {
+            ruleAbove + ruleGap + factLines.sumOf { it.height.toDouble() }.toFloat() + factLines.size * factGap
         }
 
-        if (subLayouts.isNotEmpty()) {
-            y += heightPx * 0.02f
-            canvas.drawRect(textLeft, y, textLeft + textWidth, y + 2f, Paint().apply { color = 0x33FFFFFF })
-            y += heightPx * 0.04f
-            subLayouts.forEach { layout ->
+        // ---- body: paragraphs of a bounded number of lines, then those that fill what is left
+        fun paragraphAt(text: String, size: Float, maxLines: Int) =
+            cardLayout(text, recapPaint(ON_DARK_SECONDARY, size), widthPx, maxLines, 1.15f)
+        fun wrappedLines(text: String, size: Float): Int = paragraphAt(text, size, Int.MAX_VALUE).lineCount
+
+        val bodyMax = h * 0.05f * scale
+        val bodyMin = minOf(h * 0.034f * scale, bodyMax)
+        val gaps = if (content.body.isEmpty()) 0f else titleGap + content.body.size * bodyGap
+        val bounded = content.body.withIndex().filter { it.value.maxLines != CardParagraph.FILL }
+        val fills = content.body.withIndex().filter { it.value.maxLines == CardParagraph.FILL }
+        val layouts = arrayOfNulls<StaticLayout>(content.body.size)
+        for ((i, p) in bounded) {
+            val fit = fitParagraph(bodyMax, bodyMin, p.maxLines) { s -> wrappedLines(p.text, s) }
+            layouts[i] = paragraphAt(p.text, fit.size, p.maxLines)
+        }
+        val boundedHeight = bounded.sumOf { layouts[it.index]!!.height.toDouble() }.toFloat()
+        val room = ((available - titleHeight - factBlock - gaps - boundedHeight) / fills.size.coerceAtLeast(1))
+            .coerceAtLeast(h * 0.05f)
+        for ((i, p) in fills) {
+            val fit = fitParagraphToHeight(
+                bodyMax, bodyMin, room,
+                heightAt = { s -> paragraphAt(p.text, s, Int.MAX_VALUE).height.toFloat() },
+                lineHeightAt = { s -> paragraphAt("Ag", s, 1).height.toFloat() },
+                lineCountAt = { s -> wrappedLines(p.text, s) },
+            )
+            layouts[i] = paragraphAt(p.text, fit.size, if (fit.truncated) fit.lineCount else Int.MAX_VALUE)
+        }
+        val bodyLayouts = layouts.map { it!! }
+        val bodyHeight = bodyLayouts.sumOf { it.height.toDouble() }.toFloat() + gaps
+
+        val total = titleHeight + bodyHeight + factBlock
+        return CardBlock(total) { canvas, left, top ->
+            var y = top
+            fun drawAt(layout: StaticLayout) {
                 canvas.save()
-                canvas.translate(textLeft, y)
+                canvas.translate(left, y)
                 layout.draw(canvas)
                 canvas.restore()
-                y += layout.height + heightPx * 0.025f
+                y += layout.height
+            }
+            titleLines.forEach { drawAt(it) }
+            if (bodyLayouts.isNotEmpty()) y += titleGap
+            bodyLayouts.forEach { drawAt(it); y += bodyGap }
+            if (factLines.isNotEmpty()) {
+                y += ruleAbove
+                canvas.drawRect(left, y, left + textWidth, y + 2f, Paint().apply { color = 0x33FFFFFF })
+                y += ruleGap
+                factLines.forEach { drawAt(it); y += factGap }
             }
         }
+    }
 
-        if (chapterLabel != null) drawChapterBar(canvas, widthPx, heightPx * 0.07f, chapterLabel)
-        if (caption.isNotBlank()) {
-            drawCaptionBar(canvas, widthPx, heightPx, captionBarHeight(heightPx), caption)
+    // ------------------------------------------------------------------------------------------
+    // Recap end card (R6b)
+    // ------------------------------------------------------------------------------------------
+
+    /** Ink on a class-coloured chip: the near-black the app's own badge glyphs use (AA on every class colour). */
+    private const val CHIP_INK = 0xFF1A1917.toInt()
+    private const val ACCURACY_MID = 0xFFF7C631.toInt()
+    private const val ACCURACY_LOW = 0xFFFA412D.toInt()
+
+    private fun accuracyColor(band: AccuracyBand): Int = when (band) {
+        AccuracyBand.GOOD -> GREEN_PRIMARY
+        AccuracyBand.MID -> ACCURACY_MID
+        AccuracyBand.LOW -> ACCURACY_LOW
+    }
+
+    private fun recapPaint(color: Int, size: Float, bold: Boolean = false) = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        textSize = size
+        isFakeBoldText = bold
+    }
+
+    /** The width of [text] at [size] px in the card's bold face, for [fitLine]. */
+    private fun boldWidth(text: String, size: Float): Float = recapPaint(0, size, true).measureText(text)
+
+    private class RecapSideLayout(
+        val side: RecapSideContent,
+        val name: FittedLine,
+        val markerWidth: Float,
+        val chipRows: List<List<Int>>,
+        val chipTexts: List<FittedLine>,
+        val chipWidths: List<Float>,
+    )
+
+    /**
+     * Draws the silent recap end card: heading, then one column per side (colour dot and name, the
+     * accuracy large and in its Summary colour, the move-quality chips), then the one-sentence
+     * game summary and the biggest moment. Same dark surface, green accent and palette as every
+     * other card and panel of the video.
+     *
+     * Nothing can clip: a name shrinks from 40 px (at 720 p) to 23 px and is then shortened with an
+     * ellipsis ([fitLine]); the sentence and the moment line shrink and then end in an ellipsis
+     * ([fitParagraph]); chips wrap to further rows ([flowChips]). The whole block is centred
+     * vertically from its measured height. Text is centred, so a right-to-left name sits where a
+     * left-to-right one does.
+     */
+    fun renderRecapFrame(canvas: Canvas, widthPx: Int, heightPx: Int, card: RecapCardContent) {
+        canvas.drawColor(SURFACE_DARK)
+        canvas.drawRect(0f, 0f, widthPx * 0.015f, heightPx.toFloat(), Paint().apply { color = GREEN_PRIMARY })
+
+        val w = widthPx.toFloat()
+        val h = heightPx.toFloat()
+        val colW = w * 0.40f
+        val centres = floatArrayOf(w * 0.27f, w * 0.73f)
+        val bigGap = h * 0.055f
+        val smallGap = h * 0.02f
+
+        // ---- heading
+        val headingFit = fitLine(card.heading, w * 0.8f, h * 0.05f, h * 0.034f, ::boldWidth)
+        val headingPaint = recapPaint(GREEN_PRIMARY, headingFit.size, bold = true)
+        val headingHeight = headingFit.size * 1.2f
+
+        // ---- columns
+        val dotR = h * 0.02f
+        val dotGap = h * 0.015f
+        val markerPaint = recapPaint(ON_DARK_SECONDARY, h * 0.03f)
+        val chipSize = h * 0.032f
+        val chipPadH = chipSize * 0.5f
+        val chipPadV = chipSize * 0.3f
+        val chipGap = h * 0.012f
+        val chipHeight = chipSize + chipPadV * 2
+        val layouts = card.sides.map { side ->
+            val marker = side.youMarker
+            val markerWidth = marker?.let { markerPaint.measureText(it) + dotGap } ?: 0f
+            val nameMax = colW - 2 * dotR - dotGap - markerWidth
+            val name = fitLine(side.name, nameMax, h * 0.056f, h * 0.032f, ::boldWidth)
+            val chipTexts = side.chips.map { chip ->
+                fitLine(chip.text, colW - 2 * chipPadH, chipSize, chipSize * 0.7f, ::boldWidth)
+            }
+            val chipWidths = chipTexts.map { boldWidth(it.text, it.size) + 2 * chipPadH }
+            RecapSideLayout(side, name, markerWidth, flowChips(chipWidths, colW, chipGap), chipTexts, chipWidths)
+        }
+        val nameRowHeight = (h * 0.056f) * 1.15f
+        val accuracySize = h * 0.15f
+        val accuracyHeight = accuracySize * 0.95f
+        val labelSize = h * 0.034f
+        val labelHeight = labelSize * 1.3f
+        val chipRowCount = layouts.maxOfOrNull { it.chipRows.size } ?: 0
+        val chipBlockHeight = if (chipRowCount == 0) 0f else smallGap + chipRowCount * chipHeight + (chipRowCount - 1) * chipGap
+        val columnHeight = nameRowHeight + smallGap + accuracyHeight + labelHeight + chipBlockHeight
+
+        // ---- summary sentence and biggest moment
+        val textWidth = (w * 0.80f).toInt()
+        fun paragraph(text: String, size: Float, maxLines: Int, width: Int): StaticLayout =
+            StaticLayout.Builder.obtain(text, 0, text.length, recapPaint(ON_DARK_PRIMARY, size), width)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(0f, 1.1f)
+                .setMaxLines(maxLines)
+                .setEllipsize(TextUtils.TruncateAt.END)
+                .build()
+        fun lineCountAt(text: String, size: Float, width: Int): Int =
+            StaticLayout.Builder.obtain(text, 0, text.length, recapPaint(0, size), width).setLineSpacing(0f, 1.1f).build().lineCount
+
+        val summaryLayout = card.summary?.let { text ->
+            val fit = fitParagraph(h * 0.045f, h * 0.034f, maxLines = 3) { s -> lineCountAt(text, s, textWidth) }
+            paragraph(text, fit.size, 3, textWidth)
+        }
+        val momentDotR = h * 0.017f
+        val momentWidth = (textWidth - 2 * momentDotR - dotGap).toInt()
+        val momentLayout = card.momentLine?.let { text ->
+            val fit = fitParagraph(h * 0.038f, h * 0.03f, maxLines = 2) { s -> lineCountAt(text, s, momentWidth) }
+            paragraph(text, fit.size, 2, momentWidth)
+        }
+        val bottomHeight = (summaryLayout?.let { smallGap * 1.5f + 2f + smallGap * 1.5f + it.height } ?: 0f) +
+            (momentLayout?.let { smallGap * 1.5f + it.height } ?: 0f)
+
+        // ---- vertical placement: the measured block, centred
+        val total = headingHeight + bigGap + columnHeight + bottomHeight
+        var y = ((h - total) / 2f).coerceAtLeast(h * 0.03f)
+
+        canvas.drawText(
+            headingFit.text, (w - headingPaint.measureText(headingFit.text)) / 2f, y + headingFit.size * 0.95f, headingPaint,
+        )
+        y += headingHeight + bigGap
+
+        for ((i, layout) in layouts.withIndex()) {
+            val cx = centres[i]
+            val side = layout.side
+            var cy = y
+            // colour dot + name (+ marker), centred as one run
+            val namePaint = recapPaint(ON_DARK_PRIMARY, layout.name.size, bold = true)
+            val nameWidth = namePaint.measureText(layout.name.text)
+            val runWidth = 2 * dotR + dotGap + nameWidth + layout.markerWidth
+            var x = cx - runWidth / 2f
+            val rowMid = cy + nameRowHeight / 2f
+            canvas.drawCircle(
+                x + dotR, rowMid, dotR,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (side.isWhite) WHITE_FILL else BLACK_FILL; style = Paint.Style.FILL },
+            )
+            canvas.drawCircle(
+                x + dotR, rowMid, dotR,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = if (side.isWhite) ON_DARK_SECONDARY else BLACK_STROKE
+                    style = Paint.Style.STROKE
+                    strokeWidth = 2f
+                },
+            )
+            x += 2 * dotR + dotGap
+            canvas.drawText(layout.name.text, x, rowMid + layout.name.size * 0.35f, namePaint)
+            side.youMarker?.let { canvas.drawText(it, x + nameWidth + dotGap, rowMid + markerPaint.textSize * 0.35f, markerPaint) }
+            cy += nameRowHeight + smallGap
+
+            // accuracy
+            val accPaint = recapPaint(accuracyColor(side.band), accuracySize, bold = true)
+            canvas.drawText(side.accuracyText, cx - accPaint.measureText(side.accuracyText) / 2f, cy + accuracySize * 0.78f, accPaint)
+            cy += accuracyHeight
+            val labelPaint = recapPaint(ON_DARK_SECONDARY, labelSize)
+            canvas.drawText(card.accuracyLabel, cx - labelPaint.measureText(card.accuracyLabel) / 2f, cy + labelSize * 0.95f, labelPaint)
+            cy += labelHeight
+
+            // chips
+            if (layout.chipRows.isNotEmpty()) cy += smallGap
+            for (row in layout.chipRows) {
+                val rowWidth = row.sumOf { layout.chipWidths[it].toDouble() }.toFloat() + chipGap * (row.size - 1)
+                var chipX = cx - rowWidth / 2f
+                for (idx in row) {
+                    val chip = side.chips[idx]
+                    val fit = layout.chipTexts[idx]
+                    val bg = classificationColors[chip.classification] ?: GREEN_PRIMARY
+                    val rect = RectF(chipX, cy, chipX + layout.chipWidths[idx], cy + chipHeight)
+                    canvas.drawRoundRect(rect, chipHeight * 0.3f, chipHeight * 0.3f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg })
+                    canvas.drawText(fit.text, rect.left + chipPadH, rect.top + chipPadV + fit.size * 0.85f, recapPaint(CHIP_INK, fit.size, true))
+                    chipX += layout.chipWidths[idx] + chipGap
+                }
+                cy += chipHeight + chipGap
+            }
+        }
+        y += columnHeight
+
+        // divider, sentence, moment
+        val left = (w - textWidth) / 2f
+        if (summaryLayout != null) {
+            y += smallGap * 1.5f
+            canvas.drawRect(left, y, left + textWidth, y + 2f, Paint().apply { color = 0x33FFFFFF })
+            y += 2f + smallGap * 1.5f
+            canvas.save()
+            canvas.translate(left, y)
+            summaryLayout.draw(canvas)
+            canvas.restore()
+            y += summaryLayout.height
+        }
+        if (momentLayout != null) {
+            y += smallGap * 1.5f
+            var widest = 0f
+            for (line in 0 until momentLayout.lineCount) widest = maxOf(widest, momentLayout.getLineWidth(line))
+            val block = 2 * momentDotR + dotGap + widest
+            val blockLeft = (w - block) / 2f
+            val dotColor = card.momentClassification?.let { classificationColors[it] } ?: GREEN_PRIMARY
+            canvas.drawCircle(
+                blockLeft + momentDotR, y + momentLayout.getLineBottom(0) / 2f, momentDotR,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = dotColor },
+            )
+            canvas.save()
+            // The layout centres its lines inside its own width; shift so its widest line starts after the dot.
+            canvas.translate(blockLeft + 2 * momentDotR + dotGap - (momentWidth - widest) / 2f, y)
+            momentLayout.draw(canvas)
+            canvas.restore()
         }
     }
 

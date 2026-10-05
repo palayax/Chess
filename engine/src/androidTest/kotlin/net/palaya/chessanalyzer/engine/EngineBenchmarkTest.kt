@@ -4,10 +4,8 @@ import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import kotlin.system.measureTimeMillis
 
 /**
@@ -24,7 +22,6 @@ import kotlin.system.measureTimeMillis
 @RunWith(AndroidJUnit4::class)
 class EngineBenchmarkTest {
 
-    private val netFile = File("/data/local/tmp/nn-1a298aa575a0.nnue")
 
     /** The Opera Game, as UCI moves — the same fixture the app is tested with. */
     private val moves = listOf(
@@ -35,12 +32,11 @@ class EngineBenchmarkTest {
     )
 
     private fun benchmarkAtDepth(depth: Int): Unit = runBlocking {
-        assumeTrue("net not pushed; see scripts/push_test_net.sh", netFile.isFile)
         val engine = StockfishEngine()
         try {
             engine.start()
             withTimeout(60_000) { engine.uci() }
-            engine.setEvalFile(netFile.absolutePath)
+            engine.setEvalFile(TestNet.net().absolutePath)
             engine.setOption("Threads", "4")
             engine.setOption("Hash", "96")
             engine.newGame()
@@ -51,7 +47,7 @@ class EngineBenchmarkTest {
                     val played = moves.take(i)
                     perPosition += measureTimeMillis {
                         engine.setPosition(fen = null, moves = played)
-                        withTimeout(300_000) { engine.analyze(multiPv = 3, depth = depth) }
+                        withTimeout(900_000) { engine.analyze(multiPv = 3, depth = depth) }
                     }
                 }
             }

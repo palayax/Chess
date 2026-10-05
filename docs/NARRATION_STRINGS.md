@@ -18,7 +18,8 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `ChapterDamageReport` | *(empty)* | The Damage Report |  |
 | `ChapterWorkOn` | *(empty)* | What To Work On |  |
 | `CardOpeningLine` | name=Philidor Defense, eco=C41 | Philidor Defense (C41) |  |
-| `CardResultLine` | result=1-0, plies=34 | 1-0 · 34 plies |  |
+| `CardResultLine` | result=1-0, fullMoves=17 | 1-0 · 17 moves |  |
+| `CardResultLine` | result=1/2-1/2, fullMoves=1 | 1/2-1/2 · 1 move |  |
 | `CardAccuracyLine` | whiteAccuracy=85.0, blackAccuracy=80.1 | White 85.0% · Black 80.1% |  |
 | `CaptionOpening` | name=Philidor Defense, eco=C41 | Philidor Defense (C41) |  |
 | `CaptionMoves` | fromMove=5, toMove=9 | Moves 5–9 |  |
@@ -34,6 +35,22 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `CardFinalPlayerLine` | name=MorphyFan, accuracy=85.0, rating=1650 | MorphyFan — 85.0%, est. 1650 |  |
 | `CardFinalCountsLine` | whiteBlunders=1, blackBlunders=2, whiteMistakes=0, blackMistakes=1 | Blunders 1–2 · Mistakes 0–1 |  |
 | `CardWorkOnHeading` | *(empty)* | What to work on |  |
+| `WalkthroughIntro` | firstSan=h5, tactic=HANGING_PIECE, point=The pawn on g4 cannot be held - taking it wins material. | Watch what happens: h5 starts the line. The pawn on g4 cannot be held - taking it wins material. |  |
+| `WalkthroughIntro` | firstSan=null, tactic=FORK, point=null | Watch what happens. The tactic: fork. |  |
+| `GameSummary` | kind=DECIDED_BY_ERROR, subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=true, moveNumber=11, error=BLUNDER, fullMoves=null, byMate=false | You were fine until move 11, then a blunder decided it. |  |
+| `GameSummary` | kind=DECIDED_BY_ERROR, subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), opponent=null, viewerKnown=false, moveNumber=11, error=BLUNDER, fullMoves=null, byMate=false | Black was fine until move 11, then a blunder decided it. |  |
+| `GameSummary` | kind=SEALED_BY_ERROR, subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), opponent=Subject(color=WHITE, person=SECOND, gender=FEMININE), viewerKnown=true, moveNumber=21, error=MISTAKE, fullMoves=null, byMate=false | Your opponent was already under pressure, and a mistake on move 21 sealed it. |  |
+| `GameSummary` | kind=COMEBACK, subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=true, moveNumber=21, error=BLUNDER, fullMoves=null, byMate=false | You were behind when your opponent's blunder on move 21 turned the game around. |  |
+| `GameSummary` | kind=COMEBACK, subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), opponent=Subject(color=WHITE, person=THIRD, gender=UNSPECIFIED), viewerKnown=false, moveNumber=21, error=MISSED_WIN, fullMoves=null, byMate=false | Black was behind when White's missed win on move 21 turned the game around. |  |
+| `GameSummary` | kind=WON_DESPITE_ERROR, subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=true, moveNumber=23, error=BIG_SWING, fullMoves=null, byMate=false | You won, even after a big swing on move 23. |  |
+| `GameSummary` | kind=CLEAN_WIN, subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=true, moveNumber=null, error=null, fullMoves=30, byMate=true | You won by checkmate on move 30, and neither side made a big mistake. |  |
+| `GameSummary` | kind=CLEAN_WIN, subject=Subject(color=WHITE, person=THIRD, gender=UNSPECIFIED), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=false, moveNumber=null, error=null, fullMoves=null, byMate=false | White won, and neither side made a big mistake. |  |
+| `GameSummary` | kind=SHORT_GAME, subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), opponent=Subject(color=WHITE, person=SECOND, gender=FEMININE), viewerKnown=true, moveNumber=null, error=null, fullMoves=8, byMate=true | A short game: your opponent mated you in 8 moves. |  |
+| `GameSummary` | kind=SHORT_GAME, subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), opponent=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), viewerKnown=true, moveNumber=null, error=null, fullMoves=9, byMate=false | A short game: you won in 9 moves. |  |
+| `GameSummary` | kind=SHORT_GAME, subject=null, opponent=null, viewerKnown=false, moveNumber=null, error=null, fullMoves=7, byMate=false | A short game: it ended in a draw after 7 moves. |  |
+| `GameSummary` | kind=DRAW_WITH_SWING, subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), opponent=Subject(color=WHITE, person=SECOND, gender=FEMININE), viewerKnown=true, moveNumber=14, error=MISTAKE, fullMoves=null, byMate=false | It ended in a draw, but your opponent's mistake on move 14 was the big swing. |  |
+| `GameSummary` | kind=CLOSE_CLEAN, subject=null, opponent=null, viewerKnown=false, moveNumber=null, error=null, fullMoves=null, byMate=false | A close game: neither side made a big mistake. |  |
+| `GameSummary` | kind=UNFINISHED, subject=null, opponent=null, viewerKnown=false, moveNumber=null, error=null, fullMoves=23, byMate=false | The game stops after 23 moves without a result. |  |
 | `IntroNoNames` | *(empty)* | No names on this one, so it's White against Black. |  |
 | `IntroPlayers` | white=MorphyFan, whiteRating=1650, black=DukeAndCount, blackRating=null | MorphyFan has the white pieces, rated 1650. DukeAndCount is on the other side. |  |
 | `ResultDecisive` | winner=WHITE, byMate=true, fullMoves=17 | White finished it with mate in 17 moves. |  |
@@ -83,6 +100,8 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `MateWasAvailable` | mateIn=3, move=SpokenMove(color=WHITE, piece=QUEEN, from=d1, to=h5, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE) | There was mate in three on the board, starting with queen to h five. |  |
 | `ThreatLetIn` | *(empty)* | and that's the move that lets it in.<br>and now look what's available.<br>and the reply is unpleasant. |  |
 | `InaccuracyNote` | *(empty)* | It's not losing, it's just loose.<br>That's an inaccuracy — playable, but it gives something back.<br>Slightly off. |  |
+| `EvalShift` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), favours=true | The evaluation moves in your favour. |  |
+| `EvalShift` | subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), favours=false | The evaluation moves against Black. |  |
 | `PivotIn` | *(empty)* | Now hold on. Let's rewind, because there was something much better here. <br>Stop. Freeze it right there — this position had far more in it. <br>Hold on, back up a move. There was a much better idea sitting right here.  | Pause here. A stronger continuation was available. <br>Hold the position a moment: there was a better move than the one played.  |
 | `PivotReveal` | move=SpokenMove(color=WHITE, piece=KNIGHT, from=g1, to=f3, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE) | The move is knight to f three.<br>It starts with knight to f three.<br>The move was knight to f three. | The move is knight to f three.<br>The correct continuation begins with knight to f three. |
 | `PivotWalk` | *(empty)* | Let's play it out.<br>Let's walk it through, move by move.<br>Watch what happens if that goes in. | The line runs as follows.<br>Here it is, move by move. |
@@ -100,8 +119,9 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `BestDefence` | *(empty)* | That is the best defence on offer.<br>That is the toughest try in the position.<br>That is the engine's own choice, so nothing better exists. |  |
 | `PayoffLead` | *(empty)* | And there it is. <br>So add it up. <br>Now look at the end of that line.  | The result of the line: <br>At the end of the line,  |
 | `PayoffMate` | mateIn=2 | That is checkmate in two. |  |
-| `PayoffMaterial` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), gain=ROOK | You come out of it a rook up, for nothing. |  |
+| `PayoffMaterial` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), gain=ROOK | You come out of it a rook up. |  |
 | `PayoffOutcome` | subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), kind=DRAW_BY_REPETITION | Black forces a draw by repetition. |  |
+| `PayoffOutcome` | subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), kind=LINE_ENDS | That is as far as the line goes. |  |
 | `MateBehindIt` | mateIn=4 | And there was mate in four behind it. |  |
 | `PivotOut` | *(empty)* | Back in the real game, though, that got played instead —<br>But that is the line that never was. In the real game, this went on the board —<br>So, back to reality. What actually happened was this — | Returning to the game as played, the move actually chosen was this —<br>Back to the main line. What was played instead was this — |
 | `ChanceGone` | *(empty)* | And the chance is gone. It does not come back.<br>The moment passes, and that is that.<br>And with that, the window shuts. | The opportunity does not recur.<br>That continuation is no longer available. |
@@ -120,7 +140,8 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `NoMistakes` | name=MorphyFan | MorphyFan did not make a single mistake the engine cares about. |  |
 | `ErrorCounts` | name=DukeAndCount, blunders=1, mistakes=2, misses=1, inaccuracies=0 | DukeAndCount had one blunder, two mistakes and one missed win. |  |
 | `ShortGameCaveat` | *(empty)* | It's a short game, so treat those rating estimates as a rough guide rather than gospel. |  |
-| `LessonLead` | *(empty)* | So what do you take away from this? <br>Here's what to actually work on. <br>Three things to take out of this game.  |  |
+| `LessonLead` | count=3 | So what do you take away from this? <br>Here's what to actually work on. <br>Three things to take out of this game.  |  |
+| `LessonLead` | count=1 | So what do you take away from this? <br>Here's the one thing to actually work on.  |  |
 | `LessonRepeatedMiss` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), type=FORK, count=3, squares=[e5, c7] | You walked past three forks in this game. They were on e five and c seven. |  |
 | `LessonSingleMiss` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), type=FORK, moveNumber=12, square=e5 | The one thing you left on the board was a fork at move 12. The one that hurt was on e five. |  |
 | `LessonLateErrors` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), count=3, afterMove=10 | Every one of your three errors came after move 10, once the pieces were out and real decisions started. That's a calculation problem, not an opening problem — give yourself an extra thirty seconds the moment the position opens up. |  |
@@ -128,6 +149,6 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `LessonOneMistake` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), moveNumber=23, lossPercent=31.5 | One mistake. Move 23 cost 31.5 percent of the position on its own, and everything else you played was fine. A game like this is decided by one moment, so the drill is simple: on every move where material can change hands, stop and check the whole board. |  |
 | `LessonGifts` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), count=3 | You handed over a tactic three times in this game — moves that were fine in themselves but let something in. Before you commit, ask one question: what does this let them do next? |  |
 | `LessonMatedButNotTheMistake` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), turningMove=23 | You got mated at the end, but the mate wasn't the mistake — move 23 was. By the time the king was getting hit there was nothing left to defend with. Fix move 23 and the mate never happens. |  |
-| `LessonOpponentMissedToo` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), type=FORK, count=2, converted=1 | Worth knowing: the other side left two forks on the board too, and you converted one chances of your own. Both players are missing the same kind of thing, which means whoever drills it first wins the rematch. |  |
+| `LessonOpponentMissedToo` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), type=FORK, count=2, converted=1 | Worth knowing: the other side left two forks on the board too, and you converted one chance of your own. Both players are missing the same kind of thing, which means whoever drills it first wins the rematch. |  |
 | `LessonPositive` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), bestMoves=5, totalMoves=17, accuracy=85.0 | You found the engine's top move five times out of 17, for 85.0 percent. The plan-making is working; the gap is in the tactics, and tactics are the part you can drill. |  |
 | `LessonRatingAnchor` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), accuracy=85.0, rating=1650 | You came out of this at 85.0 percent, which the model reads as about 1650. The next step up is fewer than one blunder a game, and that's a habit, not talent. |  |

@@ -12,7 +12,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import net.palaya.chessanalyzer.R
+import net.palaya.chessanalyzer.core.analysis.EvalFormat
 import net.palaya.chessanalyzer.ui.model.MoveSequenceView
 import net.palaya.chessanalyzer.ui.theme.EvalWhiteFill
 import net.palaya.chessanalyzer.ui.theme.MoveClassification
@@ -50,10 +55,18 @@ fun EvalGraph(
     val lineColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
 
+    // The graph is a picture: TalkBack gets its length and where it ends. The same facts move by
+    // move are in the Board's chips, and the key moments are listed above it.
+    val description = if (evalHistory.isEmpty()) {
+        null
+    } else {
+        stringResource(R.string.cd_eval_graph, evalHistory.size, EvalFormat.score(evalHistory.last(), null))
+    }
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(120.dp),
+            .height(120.dp)
+            .semantics { if (description != null) contentDescription = description },
     ) {
         if (evalHistory.isEmpty()) return@Canvas
         val maxAbs = 600f

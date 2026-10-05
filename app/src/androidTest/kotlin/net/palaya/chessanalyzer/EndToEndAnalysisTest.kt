@@ -1,21 +1,17 @@
 package net.palaya.chessanalyzer
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.data.AnalysisService
-import net.palaya.chessanalyzer.data.EngineController
-import net.palaya.chessanalyzer.data.GameRepository
+import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 /**
  * The real user journey, end to end, on a device: a chess.com-format PGN goes in, Stockfish
@@ -26,9 +22,9 @@ import java.io.File
  * the engine loop, classification, tactics and the report all work together against a real game;
  * driving the same thing through the SAF picker would test Android's file picker, not this app.
  *
- * Requires the net to have been seeded into the app's files dir:
- *     adb push nn-....nnue /data/local/tmp/
- *     adb shell "run-as net.palaya.chessanalyzer sh -c 'cat /data/local/tmp/nn-....nnue > files/nn-....nnue'"
+ * Nothing is seeded and nothing is skipped: the Stockfish net and the Kokoro voice are bundled in
+ * the APK, and the first analysis of a fresh install sets them up itself (`FirstRunSetup`), exactly
+ * as a user's first launch does. If the bundled files were missing or damaged this test fails.
  */
 @RunWith(AndroidJUnit4::class)
 class EndToEndAnalysisTest {
@@ -55,30 +51,12 @@ class EndToEndAnalysisTest {
 
     @Test
     fun analysesARealChessComGameEndToEnd() = runBlocking {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val net = File(context.filesDir, "nn-1a298aa575a0.nnue")
-
-        // A `connectedAndroidTest` run reinstalls the app, which wipes filesDir — so a net seeded
-        // before the run is gone by the time the test executes, and this test would silently SKIP
-        // and report a vacuous pass. Re-seed from the adb-pushed copy ourselves, and only skip if
-        // that copy is genuinely absent (i.e. scripts/push_test_net.sh was never run).
-        val pushed = File("/data/local/tmp/nn-1a298aa575a0.nnue")
-        if (!net.isFile && pushed.isFile) {
-            pushed.inputStream().use { input ->
-                net.outputStream().use { output -> input.copyTo(output) }
-            }
-        }
-        assumeTrue(
-            "NNUE net not available at ${net.path} or ${pushed.path} — run scripts/push_test_net.sh",
-            net.isFile,
-        )
-
-        val engineController = EngineController(context.filesDir)
-        val repository = GameRepository(context.filesDir)
-        val service = AnalysisService(context, engineController, repository)
+        val app = TestApp.app
+        val service = TestApp.analysisService()
 
         var lastMove = 0
         var sawAnalyzingPhase = false
+        var lastSetupFraction = -1f
 
         val started = System.currentTimeMillis()
         val outcome = service.analyze(
@@ -88,10 +66,17 @@ class EndToEndAnalysisTest {
             settings = EngineSettings(depth = 12, multiPv = 3, username = "MorphyFan1857"),
             onProgress = { p ->
                 if (p.currentMoveIndex > 0) { lastMove = p.currentMoveIndex; sawAnalyzingPhase = true }
+                if (p.phase == AnalysisPhase.FIRST_RUN_SETUP) {
+                    assertTrue("setup progress must be monotonic", p.fractionComplete >= lastSetupFraction)
+                    lastSetupFraction = p.fractionComplete
+                }
             },
         )
         val elapsedMs = System.currentTimeMillis() - started
 
+        android.util.Log.i("E2E", "firstRunSetupReported=${lastSetupFraction >= 0f} (false when an earlier test already set up)")
+        assertTrue("the net must be installed in filesDir after an analysis", app.engineController.isNetPresent())
+        assertTrue("the voice must be installed after an analysis (setup runs before it)", app.voiceInstaller.isInstalled())
         assertTrue(
             "analysis did not succeed: $outcome",
             outcome is AnalysisService.Outcome.Success

@@ -38,9 +38,17 @@ sealed class Destination(val route: String) {
     data object Video : Destination("video/{gameId}") {
         fun createRoute(gameId: String) = "video/$gameId"
     }
+    /**
+     * Practise your own mistakes (docs/PRACTICE_DESIGN.md §5), a leaf of the Summary. The optional
+     * ply (-1 = none) opens it at that position: a Summary key-moment card's "Try it" and the
+     * Walkthrough's "Try it yourself" pass it, and the Summary's own row does not, so it opens at
+     * the first unsolved puzzle.
+     */
+    data object Practice : Destination("practice/{gameId}?ply={ply}") {
+        fun createRoute(gameId: String, ply: Int? = null) =
+            if (ply != null) "practice/$gameId?ply=$ply" else "practice/$gameId"
+    }
     data object Settings : Destination("settings")
-    /** The Google Cloud key setup wizard, reached only from Settings' Cloud voice section. */
-    data object CloudVoiceSetup : Destination("cloud_voice_setup")
     data object About : Destination("about")
 
     companion object {

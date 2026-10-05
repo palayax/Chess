@@ -226,4 +226,23 @@ class PgnParserTest {
         assertEquals(4, games[0].moves.size)
         replayAndVerify(games[0])
     }
+
+    @Test
+    fun `move numbers glued to their moves parse, with and without a tag section`() {
+        // No tags, no spaces after the numbers, and a glued black move number: all common in
+        // text pasted from websites.
+        val games = PgnParser.parse("1.e4 e5 2.Nf3 2...Nc6 3.Bb5 a6 *")
+        assertEquals(1, games.size)
+        assertEquals(listOf("e4", "e5", "Nf3", "Nc6", "Bb5", "a6"), games[0].moves.map { it.san })
+        assertTrue(games[0].tags.isEmpty())
+        replayAndVerify(games[0])
+        // The spaced form is unchanged, and a bare "12..." is still just a move number.
+        val spaced = PgnParser.parse("1. e4 1... e5 2. Nf3 *")
+        assertEquals(listOf("e4", "e5", "Nf3"), spaced[0].moves.map { it.san })
+    }
+
+    @Test
+    fun `garbage without a tag section still fails loudly`() {
+        assertThrows(PgnParseException::class.java) { PgnParser.parse("hello world") }
+    }
 }

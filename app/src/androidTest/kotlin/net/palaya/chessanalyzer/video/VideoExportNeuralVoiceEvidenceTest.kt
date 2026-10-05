@@ -5,6 +5,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import kotlin.math.sqrt
 import kotlinx.coroutines.runBlocking
+import net.palaya.chessanalyzer.TestApp
 import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -15,7 +16,7 @@ import org.junit.runner.RunWith
  * The *composition* proof for the "exported video was narrated by the device voice" defect:
  * [VideoExporterProviderRegressionTest] shows that whatever a provider returns reaches the MP4's
  * audio track (with a synthetic tone, which is what makes that assertion sharp), and
- * [NeuralTtsProviderInstrumentedTest] shows the real Kokoro model produces speech. Neither shows
+ * [NeuralTtsProviderInstrumentedTest] shows the real bundled Kokoro model produces speech. Neither shows
  * the two working *together* — which is precisely the thing that was broken, and precisely the
  * thing that was assumed rather than observed for three rounds.
  *
@@ -45,24 +46,12 @@ class VideoExportNeuralVoiceEvidenceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val script = TestScripts.syntheticScript()
 
-        val archive = File(NeuralTtsProviderInstrumentedTest.KOKORO_ARCHIVE_ON_DEVICE)
-        // Not assumeTrue: a missing archive is a loud failure, never a silent skip (CLAUDE.md).
-        assertTrue(
-            "Expected the Kokoro model archive pre-staged at " +
-                "${NeuralTtsProviderInstrumentedTest.KOKORO_ARCHIVE_ON_DEVICE} — run " +
-                "scripts/push_voice_models.sh before this test.",
-            archive.isFile,
-        )
+        // The voice is bundled in the APK: install it the way a user's first launch does. There is
+        // nothing to stage on the device, and a failure here fails the test (never a skip).
+        val modelDir = TestApp.installedVoiceDir()
 
         val evidenceDir = File(context.getExternalFilesDir(null), "export_voice_evidence")
             .apply { deleteRecursively(); mkdirs() }
-
-        val modelRoot = File(context.filesDir, "export_voice_evidence_models")
-            .apply { deleteRecursively(); mkdirs() }
-        val provisioner = VoiceModelProvisioner(modelRoot)
-        val provisioned = provisioner.provisionFromLocalArchiveForTesting(NeuralVoiceTier.KOKORO, archive)
-        check(provisioned is ProvisioningResult.Success) { "expected Kokoro provisioning to succeed, got $provisioned" }
-        val modelDir = provisioner.modelDir(NeuralVoiceTier.KOKORO)
 
         // ---- (1) Reference: one sentence straight from the model, never near the muxer. ----
         // A separate provider instance from the one the exporter drives, so releasing this one
@@ -71,7 +60,7 @@ class VideoExportNeuralVoiceEvidenceTest {
         val referenceWav = File(evidenceDir, "reference_kokoro.wav")
         val referenceProvider = NeuralTtsProvider(NeuralVoiceTier.KOKORO, modelDir)
         try {
-            assertTrue("reference provider should prepare against the provisioned model", referenceProvider.prepare())
+            assertTrue("reference provider should prepare against the installed model", referenceProvider.prepare())
             val synth = referenceProvider.synthesize(referenceText, referenceWav)
             assertTrue("reference synthesis should succeed, got $synth", synth is SynthesisResult.Success)
         } finally {

@@ -103,6 +103,38 @@ class MoveClassifierTest {
     }
 
     @Test
+    fun `a piece the opponent cannot legally take is not a sacrifice - the only attacker is pinned`() {
+        // Opera Game, 14.Rd1: the rook on d7 "attacks" d1 but is pinned to its king by the bishop on
+        // b5, so Rxd1 is illegal. Spec section 2 says a legal capture; the fake SEE says "hanging" the
+        // way the real one does (pseudo-legal), which is exactly what used to make this BRILLIANT.
+        val fen = "4kb1r/p2rqppp/5n2/1B2p1B1/4P3/1Q6/PPP2PPP/2K4R w k - 0 14"
+        val pos = Position.fromFen(fen)
+        val move = pos.parseSan("Rd1")
+        val after = pos.makeMove(move)
+        require(after.legalMoves().none { it.isCapture && it.to.toString() == "d1" }) { "fixture: the rook must be immune" }
+        val before = evalOf(fen, line(1, cp = 886, pv = listOf(move.toUci())))
+        val afterEval = evalOf(after.toFen(), line(1, cp = -882))
+        val result = classifierWith(FakeSee(hangingSquares = setOf("d1")))
+            .classify(pos, move, before, afterEval, isBookPosition = false, isBookMove = false, ply = 27)
+        assertEquals(MoveClassification.BEST, result)
+    }
+
+    @Test
+    fun `the same offer is still a sacrifice when the piece that attacks it is free to take it`() {
+        // Without the bishop on b5 the rook on d7 is not pinned: Rxd1+ is legal.
+        val fen = "4kb1r/p2rqppp/5n2/4p1B1/4P3/1Q6/PPP2PPP/2K4R w k - 0 14"
+        val pos = Position.fromFen(fen)
+        val move = pos.parseSan("Rd1")
+        val after = pos.makeMove(move)
+        require(after.legalMoves().any { it.isCapture && it.to.toString() == "d1" }) { "fixture: the rook must be takeable" }
+        val before = evalOf(fen, line(1, cp = 886, pv = listOf(move.toUci())))
+        val afterEval = evalOf(after.toFen(), line(1, cp = -882))
+        val result = classifierWith(FakeSee(hangingSquares = setOf("d1")))
+            .classify(pos, move, before, afterEval, isBookPosition = false, isBookMove = false, ply = 27)
+        assertEquals(MoveClassification.BRILLIANT, result)
+    }
+
+    @Test
     fun `sacrifice that leaves the mover losing is not BRILLIANT`() {
         val fen = "4k3/8/8/8/3n4/5N2/8/4K3 w - - 0 1"
         val pos = Position.fromFen(fen)

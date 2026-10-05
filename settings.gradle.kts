@@ -16,4 +16,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ChessAnalyzer"
-include(":app", ":core", ":engine")
+include(":app", ":core", ":engine", ":desktop")

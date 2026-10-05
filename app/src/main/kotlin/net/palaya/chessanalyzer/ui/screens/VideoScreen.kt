@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package net.palaya.chessanalyzer.ui.screens
 
@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.text.format.Formatter
 import android.view.ViewGroup
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,8 +36,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
@@ -43,6 +50,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -56,6 +65,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -70,7 +80,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -79,32 +93,31 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import java.io.File
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.R
+import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
+import net.palaya.chessanalyzer.ui.a11y.rememberAnnouncer
+import net.palaya.chessanalyzer.video.ExportTimeLeft
+import net.palaya.chessanalyzer.video.MediaStorePublisher
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import net.palaya.chessanalyzer.ui.a11y.isLandscape
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.style.TextDirection
 import net.palaya.chessanalyzer.core.narration.VideoScript
+import net.palaya.chessanalyzer.ui.model.nextPlaybackSpeed
+import net.palaya.chessanalyzer.ui.model.playbackSpeedNumber
 import net.palaya.chessanalyzer.ui.video.BoardSurfaceView
 import net.palaya.chessanalyzer.ui.video.PlayerUiState
 import net.palaya.chessanalyzer.ui.video.VideoPlayerController
-import net.palaya.chessanalyzer.video.DeviceTtsProvider
-import net.palaya.chessanalyzer.video.NarrationCoordinator
-import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.NarrationVoiceProvider
 import net.palaya.chessanalyzer.video.VideoExportService
 import net.palaya.chessanalyzer.video.VideoExporter
-
-/** Local UI state for the "Prepare narration" action — mirrors [VideoExporter.State]'s shape
- * closely enough to reuse the same progress-dialog pattern, without depending on export's type. */
-private sealed interface PrepareNarrationState {
-    data object Idle : PrepareNarrationState
-    data class Running(val completed: Int, val total: Int) : PrepareNarrationState
-    data class Done(val notice: String?) : PrepareNarrationState
-    data class Failed(val message: String) : PrepareNarrationState
-}
 
 /** Walks the [Context] wrapper chain to find the hosting [Activity] — needed to reach its
  * [android.view.Window] for immersive system bars and keep-screen-on, neither of which Compose
@@ -150,6 +163,7 @@ fun VideoScreen(
     // re-entering mid-export show the real in-flight progress instead of a fresh idle state.
     val exportState by VideoExportService.state.collectAsState()
     val exportedUri by VideoExportService.exportedUri.collectAsState()
+    val timeLeft by VideoExportService.timeLeft.collectAsState()
 
     // POST_NOTIFICATIONS (API 33+) is requested opportunistically and the result is deliberately
     // ignored: the export starts either way. The service runs as a foreground service regardless;
@@ -158,43 +172,6 @@ fun VideoScreen(
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { _ -> exportRequestedAfterPermission = true }
-
-    val narrationStore = remember { NarrationStore.forApp(context) }
-    var prepareState by remember { mutableStateOf<PrepareNarrationState>(PrepareNarrationState.Idle) }
-    var prepareJob by remember { mutableStateOf<Job?>(null) }
-    // Re-checked whenever the script or provider changes, and again once a prepare pass finishes —
-    // this is what lets the button honestly say "already done" instead of re-running for free.
-    var alreadyPrepared by remember(script, narrationProvider) { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(script, narrationProvider, prepareState) {
-        if (prepareState is PrepareNarrationState.Running) return@LaunchedEffect
-        val provider = narrationProvider ?: DeviceTtsProvider(context)
-        alreadyPrepared = withContext(Dispatchers.IO) {
-            NarrationCoordinator.isFullyPrepared(script, provider, narrationStore)
-        }
-    }
-
-    fun runPrepareNarration() {
-        if (prepareState is PrepareNarrationState.Running) return
-        val provider = narrationProvider ?: DeviceTtsProvider(context)
-        val fallback = DeviceTtsProvider(context)
-        val coordinator = NarrationCoordinator(provider, fallback, narrationStore)
-        prepareState = PrepareNarrationState.Running(0, script.segments.size)
-        prepareJob = scope.launch {
-            val progressJob = launch {
-                coordinator.progress.collect { p ->
-                    prepareState = PrepareNarrationState.Running(p.completed, p.total)
-                }
-            }
-            try {
-                val outcome = coordinator.synthesizeAll(script, File(context.cacheDir, "narration_prepare"))
-                prepareState = PrepareNarrationState.Done(outcome.notice)
-            } catch (e: Exception) {
-                prepareState = PrepareNarrationState.Failed(e.message ?: e.javaClass.simpleName)
-            } finally {
-                progressJob.cancel()
-            }
-        }
-    }
 
     var isFullScreen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
@@ -288,8 +265,9 @@ fun VideoScreen(
         // being hit.
         //
         // With a non-null provider VideoExporter goes through NarrationCoordinator + NarrationStore
-        // instead, so the export reuses the audio "Prepare narration" already produced and keeps the
-        // mandatory per-segment fallback to the device voice.
+        // instead, so the export reuses any audio the player already cached and keeps the mandatory
+        // per-segment fallback to the device voice. "Save video" is the only place narration is
+        // prepared on purpose; its progress ("Preparing narration... (n/N)") is the export dialog's.
         VideoExportService.start(context, script, narrationProvider)
     }
 
@@ -318,32 +296,38 @@ fun VideoScreen(
         topBar = {
             // No app bar at all in full screen — it exists to hide, not to shrink to a sliver.
             if (!isFullScreen) {
+                // Back arrow, the title, and the fullscreen icon: nothing else lives in the bar. The one
+                // primary action ("Save video") is the bottom button.
                 TopAppBar(
-                    title = { Text(script.title, maxLines = 1) },
+                    title = { AppBarTitle(stringResource(R.string.video_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
                         IconButton(onClick = { setFullScreen(true) }) {
                             Icon(Icons.Filled.Fullscreen, contentDescription = stringResource(R.string.video_enter_fullscreen))
                         }
-                        // Synthesize the whole review's narration once, visibly, rather than
-                        // letting it trickle out during playback/export. A no-op once cached.
-                        TextButton(
-                            onClick = { runPrepareNarration() },
-                            enabled = prepareState !is PrepareNarrationState.Running && alreadyPrepared != true,
-                        ) {
-                            Text(
-                                if (alreadyPrepared == true) {
-                                    stringResource(R.string.video_prepare_narration_ready)
-                                } else {
-                                    stringResource(R.string.video_prepare_narration_action)
-                                },
-                            )
-                        }
-                        TextButton(onClick = { exportTapped() }) {
-                            Text(stringResource(R.string.video_export_action))
-                        }
                     },
                 )
+            }
+        },
+        bottomBar = {
+            // One full-width primary button, pinned under the player. Hidden in full screen, like the bar.
+            if (!isFullScreen) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    Button(
+                        onClick = { exportTapped() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .heightIn(min = 52.dp),
+                    ) {
+                        Text(stringResource(R.string.video_export_action))
+                    }
+                }
             }
         },
     ) { innerPadding ->
@@ -357,11 +341,7 @@ fun VideoScreen(
                 onExitFullScreen = { setFullScreen(false) },
             )
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            ) {
+            val surface: @Composable () -> Unit = {
                 VideoBoardSurface(
                     script = script,
                     playerState = playerState,
@@ -369,7 +349,9 @@ fun VideoScreen(
                     onDoubleTap = { setFullScreen(true) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-
+            }
+            // Everything under (or, in landscape, beside) the picture.
+            val controls: @Composable () -> Unit = {
                 if (!playerState.narrationAvailable) {
                     Text(
                         text = stringResource(R.string.video_narration_unavailable),
@@ -396,40 +378,10 @@ fun VideoScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
 
-                // Speed control.
-                //
-                // A plain Row could not fit the label plus five chips on a phone: the last one
-                // ("2.0x") had no horizontal room left and wrapped its text one character per line,
-                // rendering as a tall "2 . 0 x" column. A LazyRow scrolls instead of wrapping, and
-                // `maxLines = 1` on the label makes a squeeze impossible rather than ugly.
-                Text(
-                    stringResource(R.string.video_speed),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-                )
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(listOf(0.75f, 1f, 1.25f, 1.5f, 2f)) { speed ->
-                        FilterChip(
-                            selected = playerState.speed == speed,
-                            onClick = { controller.setSpeed(speed) },
-                            label = { Text("${speed}x", maxLines = 1) },
-                        )
-                    }
-                }
-
-                // Chapters — tap to jump.
+                // Chapters: tap to jump. Chips alone, no label.
                 if (script.chapters.isNotEmpty()) {
-                    Text(
-                        stringResource(R.string.video_chapters),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
                     LazyRow(
+                        modifier = Modifier.padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -447,6 +399,31 @@ fun VideoScreen(
                     }
                 }
             }
+            if (isLandscape()) {
+                // Picture on the left, as large as the height allows (16:9), controls on the right.
+                // Before, the picture took the whole width and pushed every control off the screen.
+                BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                    val pictureWidth = minOf(maxWidth * 0.58f, maxHeight * (16f / 9f))
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        Box(modifier = Modifier.width(pictureWidth).align(Alignment.CenterVertically)) { surface() }
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.Center,
+                        ) { controls() }
+                    }
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        // Scrolls rather than clips at a large font scale or on a short window.
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    surface()
+                    controls()
+                }
+            }
         }
     }
 
@@ -457,70 +434,14 @@ fun VideoScreen(
             state = exportState,
             onDismiss = { VideoExportService.acknowledgeTerminalState() },
             onCancel = { VideoExportService.requestCancel() },
-            onShare = { uri -> shareVideo(context, uri) },
+            // Returns false when no share sheet could be opened, so the dialog can say so in words.
+            onShare = { file, uri -> shareExportedVideo(context, file, uri) },
             onOpen = { uri -> openVideo(context, uri) },
             exportedUri = exportedUri,
+            timeLeft = timeLeft,
         )
     }
 
-    val currentPrepareState = prepareState
-    if (currentPrepareState !is PrepareNarrationState.Idle) {
-        PrepareNarrationDialog(
-            state = currentPrepareState,
-            onDismiss = { prepareState = PrepareNarrationState.Idle },
-        )
-    }
-}
-
-/**
- * Progress for the explicit "prepare narration" action — the same shape of dialog as
- * [ExportProgressDialog]'s [net.palaya.chessanalyzer.video.VideoExporter.State.SynthesizingNarration]
- * case, kept as its own small composable because prepare has no rendering/finalizing phase of its
- * own: it is done the moment every segment's audio is cached.
- */
-@Composable
-private fun PrepareNarrationDialog(state: PrepareNarrationState, onDismiss: () -> Unit) {
-    val isTerminal = state is PrepareNarrationState.Done || state is PrepareNarrationState.Failed
-    AlertDialog(
-        onDismissRequest = { if (isTerminal) onDismiss() },
-        title = {
-            Text(
-                when (state) {
-                    is PrepareNarrationState.Done -> stringResource(R.string.video_prepare_narration_done_title)
-                    is PrepareNarrationState.Failed -> stringResource(R.string.video_export_failed_title)
-                    else -> stringResource(R.string.video_prepare_narration_action)
-                },
-            )
-        },
-        text = {
-            Column {
-                when (state) {
-                    is PrepareNarrationState.Running -> {
-                        Text(stringResource(R.string.video_export_synthesizing, state.completed, state.total.coerceAtLeast(1)))
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { if (state.total > 0) state.completed.toFloat() / state.total else 0f },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    is PrepareNarrationState.Done -> {
-                        Text(stringResource(R.string.video_prepare_narration_done_body))
-                        state.notice?.let { notice ->
-                            Spacer(Modifier.height(4.dp))
-                            Text(notice, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    is PrepareNarrationState.Failed -> Text(state.message)
-                    is PrepareNarrationState.Idle -> Unit
-                }
-            }
-        },
-        confirmButton = {
-            if (isTerminal) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.video_export_close)) }
-            }
-        },
-    )
 }
 
 /**
@@ -545,10 +466,14 @@ private fun VideoBoardSurface(
     val currentOnSingleTap by rememberUpdatedState(onSingleTap)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
 
+    // The frame is a drawing (board, side panel, burned-in caption); the narration is spoken audio, so
+    // TalkBack gets what the picture is, not the caption a second time.
+    val frameDescription = stringResource(R.string.cd_video_frame, script.title)
     AndroidView(
         modifier = modifier
             .then(if (fillAvailableSpace) Modifier else Modifier.fillMaxWidth())
             .aspectRatio(VideoExporter.VIDEO_WIDTH.toFloat() / VideoExporter.VIDEO_HEIGHT.toFloat())
+            .semantics { contentDescription = frameDescription }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { currentOnSingleTap() },
@@ -568,31 +493,81 @@ private fun VideoBoardSurface(
 
 @Composable
 private fun ScrubBar(playerState: PlayerUiState, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
-    Slider(
-        value = playerState.positionMs.toFloat(),
-        valueRange = 0f..playerState.totalDurationMs.toFloat().coerceAtLeast(1f),
-        onValueChange = { onSeek(it.toLong()) },
-        modifier = modifier,
+    // Time runs left to right in every language, like the transport row under it: pinned LTR so the
+    // thumb starts at the left in RTL too.
+    val label = stringResource(R.string.video_scrub)
+    val position = stringResource(
+        R.string.video_scrub_state,
+        android.text.format.DateUtils.formatElapsedTime(playerState.positionMs / 1000),
+        android.text.format.DateUtils.formatElapsedTime(playerState.totalDurationMs / 1000),
     )
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Slider(
+            value = playerState.positionMs.toFloat(),
+            valueRange = 0f..playerState.totalDurationMs.toFloat().coerceAtLeast(1f),
+            onValueChange = { onSeek(it.toLong()) },
+            // "Video position, 0:12 of 6:20": the bare slider said only a percentage.
+            modifier = modifier.semantics {
+                contentDescription = label
+                stateDescription = position
+            },
+        )
+    }
 }
 
+/**
+ * Previous, play/pause, next, with the two small player controls on either side: **one** speaker
+ * icon that mutes the narration while playback carries on, and **one** speed button that cycles
+ * 1x, 1.25x, 1.5x. Neither is remembered. The row is pinned LTR like the Board's transport: media
+ * controls keep their order and their arrows in every language, and the speed label is
+ * LRM-prefixed besides.
+ */
 @Composable
 private fun TransportRow(playerState: PlayerUiState, controller: VideoPlayerController, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        IconButton(onClick = { controller.skipPrevious() }) {
-            Icon(Icons.Filled.SkipPrevious, contentDescription = stringResource(R.string.video_previous_segment))
-        }
-        IconButton(onClick = { controller.togglePlayPause() }) {
-            Icon(
-                if (playerState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(if (playerState.isPlaying) R.string.video_pause else R.string.video_play),
-            )
-        }
-        IconButton(onClick = { controller.skipNext() }) {
-            Icon(Icons.Filled.SkipNext, contentDescription = stringResource(R.string.video_next_segment))
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val announce = rememberAnnouncer()
+            val mutedSpoken = stringResource(R.string.video_muted_announce)
+            val unmutedSpoken = stringResource(R.string.video_unmuted_announce)
+            Box(modifier = Modifier.widthIn(min = 72.dp), contentAlignment = Alignment.Center) {
+                IconButton(onClick = {
+                    // Said aloud as well as shown: the icon swaps, which a screen-reader user cannot see.
+                    announce(if (playerState.muted) unmutedSpoken else mutedSpoken)
+                    controller.toggleMuted()
+                }) {
+                    Icon(
+                        if (playerState.muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = stringResource(if (playerState.muted) R.string.video_unmute else R.string.video_mute),
+                    )
+                }
+            }
+            IconButton(onClick = { controller.skipPrevious() }) {
+                Icon(Icons.Filled.SkipPrevious, contentDescription = stringResource(R.string.video_previous_segment))
+            }
+            IconButton(onClick = { controller.togglePlayPause() }) {
+                Icon(
+                    if (playerState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(if (playerState.isPlaying) R.string.video_pause else R.string.video_play),
+                )
+            }
+            IconButton(onClick = { controller.skipNext() }) {
+                Icon(Icons.Filled.SkipNext, contentDescription = stringResource(R.string.video_next_segment))
+            }
+            Box(modifier = Modifier.widthIn(min = 72.dp), contentAlignment = Alignment.Center) {
+                val speedLabel = stringResource(R.string.video_speed_value, playbackSpeedNumber(playerState.speed))
+                val speedSpoken = stringResource(R.string.video_speed, speedLabel)
+                TextButton(
+                    onClick = { controller.setSpeed(nextPlaybackSpeed(playerState.speed)) },
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = speedSpoken },
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text(speedLabel, maxLines = 1, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -682,9 +657,11 @@ private fun ExportProgressDialog(
     exportedUri: Uri?,
     onDismiss: () -> Unit,
     onCancel: () -> Unit,
-    onShare: (Uri) -> Unit,
+    onShare: (java.io.File?, Uri?) -> Boolean,
     onOpen: (Uri) -> Unit,
+    timeLeft: ExportTimeLeft,
 ) {
+    var shareFailed by remember { mutableStateOf(false) }
     val isTerminal = state is VideoExporter.State.Completed ||
         state is VideoExporter.State.Failed ||
         state is VideoExporter.State.Cancelled
@@ -702,10 +679,25 @@ private fun ExportProgressDialog(
             )
         },
         text = {
-            Column {
+            // Scrolls: at a 2.0 font the completed dialog is taller than a landscape window.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 when (state) {
                     is VideoExporter.State.SynthesizingNarration -> {
                         Text(stringResource(R.string.video_export_synthesizing, state.completed, state.total.coerceAtLeast(1)))
+                        // Measured, not guessed: from the time the finished segments took (ExportTimeLeft).
+                        when (val left = timeLeft) {
+                            ExportTimeLeft.Hidden -> Unit
+                            ExportTimeLeft.LessThanMinute -> Text(
+                                stringResource(R.string.video_export_less_than_minute),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            is ExportTimeLeft.Minutes -> Text(
+                                pluralStringResource(R.plurals.video_export_minutes_left, left.minutes, left.minutes),
+                                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Spacer(Modifier.height(8.dp))
                         LinearProgressIndicator(
                             progress = { if (state.total > 0) state.completed.toFloat() / state.total else 0f },
@@ -726,9 +718,14 @@ private fun ExportProgressDialog(
                         CircularProgressIndicator()
                     }
                     is VideoExporter.State.Completed -> {
-                        val seconds = state.durationMs / 1000.0
-                        val mb = state.fileSizeBytes / (1024.0 * 1024.0)
-                        Text("%.1fs · %.1f MB".format(seconds, mb))
+                        val dialogContext = LocalContext.current
+                        Text(
+                            stringResource(
+                                R.string.video_export_completed_body,
+                                formatVideoDuration(dialogContext, state.durationMs),
+                                Formatter.formatShortFileSize(dialogContext, state.fileSizeBytes),
+                            )
+                        )
                         if (!state.narrationWasSpoken) {
                             Spacer(Modifier.height(4.dp))
                             Text(
@@ -746,6 +743,17 @@ private fun ExportProgressDialog(
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
+                        // Sharing could not be started (no app can take a video, or the file is gone):
+                        // a plain sentence, spoken when it appears, never a crash.
+                        if (shareFailed) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                stringResource(R.string.video_share_failed),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
                     }
                     is VideoExporter.State.Failed -> Text(state.message)
                     is VideoExporter.State.Cancelled -> Text(stringResource(R.string.video_export_cancelled_title))
@@ -754,29 +762,67 @@ private fun ExportProgressDialog(
             }
         },
         confirmButton = {
-            if (state is VideoExporter.State.Completed && exportedUri != null) {
-                TextButton(onClick = { onOpen(exportedUri) }) { Text(stringResource(R.string.video_export_open)) }
+            if (state is VideoExporter.State.Completed) {
+                // Close, Open and Share (Share last: it is the next step after saving). A flow row, so at a
+                // large font the three wrap onto two lines instead of clipping.
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                ) {
+                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(stringResource(R.string.video_export_close))
+                    }
+                    if (exportedUri != null) {
+                        TextButton(onClick = { onOpen(exportedUri) }, modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text(stringResource(R.string.video_export_open))
+                        }
+                    }
+                    TextButton(
+                        onClick = { shareFailed = !onShare(state.file, exportedUri) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text(stringResource(R.string.video_export_share)) }
+                }
             } else if (isTerminal) {
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.video_export_close)) }
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.video_export_close)) }
             } else {
-                TextButton(onClick = onCancel) { Text(stringResource(R.string.video_export_cancel)) }
-            }
-        },
-        dismissButton = {
-            if (state is VideoExporter.State.Completed && exportedUri != null) {
-                TextButton(onClick = { onShare(exportedUri) }) { Text(stringResource(R.string.video_export_share)) }
+                TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.video_export_cancel)) }
             }
         },
     )
 }
 
-private fun shareVideo(context: android.content.Context, uri: Uri) {
-    val intent = Intent(Intent.ACTION_SEND).apply {
+/**
+ * Opens the system share sheet for the exported MP4. A local intent: `ACTION_SEND` with the video
+ * as a `content://` stream from the app's own FileProvider (`res/xml/file_paths.xml`, whose
+ * `cache-path` covers `cacheDir/video_export/`, where the exporter writes), read access granted for
+ * that one URI. No permission is needed and nothing leaves the device until the person picks an
+ * app. Returns false, instead of throwing, when the share sheet cannot be started.
+ */
+internal fun shareExportedVideo(context: Context, file: java.io.File?, fallbackUri: Uri?): Boolean {
+    val intent = buildVideoShareIntent(context, file, fallbackUri) ?: return false
+    return try {
+        context.startActivity(Intent.createChooser(intent, context.getString(R.string.video_export_share)))
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+
+/** The `ACTION_SEND` intent for [file] (via the FileProvider), or for [fallbackUri] when the file is gone; null when neither exists. */
+internal fun buildVideoShareIntent(context: Context, file: java.io.File?, fallbackUri: Uri?): Intent? {
+    val uri: Uri = try {
+        if (file != null && file.isFile) MediaStorePublisher.shareUriFor(context, file) else fallbackUri
+    } catch (e: IllegalArgumentException) {
+        // A file outside every <paths> root: fall back to the MediaStore copy.
+        fallbackUri
+    } ?: return null
+    return Intent(Intent.ACTION_SEND).apply {
         type = "video/mp4"
         putExtra(Intent.EXTRA_STREAM, uri)
+        // The grant goes with the clip data (what the chooser and the target read), plus the flag.
+        clipData = android.content.ClipData.newRawUri(null, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(intent, context.getString(R.string.video_export_share)))
 }
 
 private fun openVideo(context: android.content.Context, uri: Uri) {
@@ -787,6 +833,19 @@ private fun openVideo(context: android.content.Context, uri: Uri) {
     try {
         context.startActivity(intent)
     } catch (e: Exception) {
-        shareVideo(context, uri)
+        // No video player installed: offer the share sheet instead (and ignore it if that fails too).
+        shareExportedVideo(context, null, uri)
+    }
+}
+
+/** "9 min 33 s" / "45 s": whole seconds, words from resources so they follow the app language. */
+internal fun formatVideoDuration(context: Context, durationMs: Long): String {
+    val totalSeconds = ((durationMs + 500) / 1000).coerceAtLeast(0)
+    val minutes = (totalSeconds / 60).toInt()
+    val seconds = (totalSeconds % 60).toInt()
+    return if (minutes > 0) {
+        context.getString(R.string.video_duration_min_sec, minutes, seconds)
+    } else {
+        context.getString(R.string.video_duration_sec, seconds)
     }
 }

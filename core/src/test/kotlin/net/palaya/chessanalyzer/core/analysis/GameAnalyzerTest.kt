@@ -163,4 +163,54 @@ class GameAnalyzerTest {
         // The game actually ends in checkmate (Rd8#).
         assertEquals("1-0", report.result)
     }
+
+    private class NoTactics : TacticsDetector {
+        override fun detect(position: Position, move: Move, pvUci: List<String>): List<TacticInstance> = emptyList()
+    }
+
+    @Test
+    fun `candidateLines holds one entry per MultiPV line, best first, SAN resolved, scores mover-relative and untouched`() {
+        val game = PgnParser.parse("1. e4 e5 *").single()
+        assertEquals(2, game.moves.size)
+
+        // Deliberately supplied out of multiPv order, to prove the analyzer sorts them.
+        val whiteLines = listOf(
+            EngineLineInput(2, 20, null, depth = 14, pvUci = listOf("d2d4", "d7d5")),
+            EngineLineInput(3, null, 4, depth = 14, pvUci = listOf("g1f3")),
+            EngineLineInput(1, 30, null, depth = 14, pvUci = listOf("e2e4", "e7e5")),
+            EngineLineInput(4, -15, null, depth = 14, pvUci = listOf("a1a8")), // not legal: SAN stays null
+            EngineLineInput(5, 0, null, depth = 14, pvUci = emptyList()) // no first move: no entry
+        )
+        // Black to move: scores are from BLACK's perspective and must NOT be flipped to White's.
+        val blackLines = listOf(
+            EngineLineInput(1, 40, null, depth = 14, pvUci = listOf("e7e5")),
+            EngineLineInput(2, -25, null, depth = 14, pvUci = listOf("d7d5"))
+        )
+        val last = game.moves.last().positionFenAfter
+        val evals = listOf(
+            PositionEval(game.moves[0].positionFenBefore, whiteLines, depth = 14),
+            PositionEval(game.moves[1].positionFenBefore, blackLines, depth = 14),
+            PositionEval(last, listOf(EngineLineInput(1, 0, null, depth = 14, pvUci = emptyList())), depth = 14)
+        )
+
+        val report = GameAnalyzer(MoveClassifier(NeutralSee()), NoTactics())
+            .analyze(game, evals, userColor = Color.WHITE, book = null)
+
+        assertEquals(
+            listOf(
+                CandidateLine(1, "e2e4", "e4", 30, null),
+                CandidateLine(2, "d2d4", "d4", 20, null),
+                CandidateLine(3, "g1f3", "Nf3", null, 4),
+                CandidateLine(4, "a1a8", null, -15, null)
+            ),
+            report.annotations[0].candidateLines
+        )
+        assertEquals(
+            listOf(CandidateLine(1, "e7e5", "e5", 40, null), CandidateLine(2, "d7d5", "d5", -25, null)),
+            report.annotations[1].candidateLines
+        )
+        // The best line is also what the rest of the annotation says.
+        assertEquals(report.annotations[0].bestMoveUci, report.annotations[0].candidateLines.first().uci)
+        assertEquals(report.annotations[1].bestMoveUci, report.annotations[1].candidateLines.first().uci)
+    }
 }

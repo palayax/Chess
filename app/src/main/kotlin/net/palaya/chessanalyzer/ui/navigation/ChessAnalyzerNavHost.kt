@@ -1,11 +1,12 @@
 package net.palaya.chessanalyzer.ui.navigation
 
 import android.net.Uri
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -17,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,15 +30,23 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import net.palaya.chessanalyzer.core.analysis.PracticeSet
+import net.palaya.chessanalyzer.ui.model.canTryIt
+import net.palaya.chessanalyzer.ui.model.initialPuzzleIndex
+import net.palaya.chessanalyzer.ui.model.keyMomentPlies
+import net.palaya.chessanalyzer.ui.model.practiceEntryState
+import net.palaya.chessanalyzer.ui.model.practicePlies
+import net.palaya.chessanalyzer.ui.model.sideChoice
 import net.palaya.chessanalyzer.ui.screens.AboutScreen
-import net.palaya.chessanalyzer.ui.screens.CloudVoiceSetupScreen
 import net.palaya.chessanalyzer.ui.screens.AnalysisProgressScreen
 import net.palaya.chessanalyzer.ui.screens.GameReportScreen
 import net.palaya.chessanalyzer.ui.screens.ImportScreen
+import net.palaya.chessanalyzer.ui.screens.PracticeScreen
 import net.palaya.chessanalyzer.ui.screens.ReviewScreen
 import net.palaya.chessanalyzer.ui.screens.SettingsScreen
 import net.palaya.chessanalyzer.ui.screens.TacticSimulationScreen
 import net.palaya.chessanalyzer.ui.screens.VideoScreen
+import kotlinx.coroutines.launch
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.ui.viewmodel.AnalysisViewModel
 import net.palaya.chessanalyzer.util.readTextFromUri
@@ -60,7 +70,11 @@ fun ChessAnalyzerNavHost(
     val settings by viewModel.settings.collectAsState()
     val narrationVoiceSettings by viewModel.narrationVoiceSettings.collectAsState()
     val recentGames by viewModel.recentGames.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
+    val pasteDraft by viewModel.pasteDraft.collectAsState()
+    // Home's transient messages (an unreadable file) are a Snackbar, not a Toast: it belongs to the
+    // screen, is themed, and does not outlive navigation.
+    val homeSnackbarHost = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     fun startAnalysis(pgnText: String) {
         val id = viewModel.newGameId()
@@ -86,7 +100,8 @@ fun ChessAnalyzerNavHost(
                 onFilePicked = { uri: Uri ->
                     val text = readTextFromUri(context.contentResolver, uri)
                     if (text.isNullOrBlank()) {
-                        Toast.makeText(context, context.getString(net.palaya.chessanalyzer.R.string.import_invalid_pgn), Toast.LENGTH_LONG).show()
+                        val message = context.getString(R.string.import_invalid_pgn)
+                        scope.launch { homeSnackbarHost.showSnackbar(message) }
                     } else {
                         startAnalysis(text)
                     }
@@ -99,6 +114,9 @@ fun ChessAnalyzerNavHost(
                 },
                 recentGames = recentGames,
                 onSettingsClick = { navController.navigate(Destination.Settings.route) },
+                pastedPgn = pasteDraft,
+                onPastedPgnChange = { viewModel.setPasteDraft(it) },
+                snackbarHostState = homeSnackbarHost,
             )
         }
 
@@ -108,35 +126,34 @@ fun ChessAnalyzerNavHost(
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
             val progress by viewModel.progress.collectAsState()
+            val error by viewModel.error.collectAsState()
 
-            LaunchedEffect(gameId) {
-                viewModel.runAnalysis(gameId) {
-                    navController.navigate(Destination.Review.createRoute(gameId)) {
-                        popUpTo(Destination.AnalysisProgress.route) { inclusive = true }
-                    }
+            // The analysis ends on the summary (the answer to "what went wrong"), not on the board.
+            // popUpTo removes the progress screen, so system back from the summary lands on Home
+            // instead of replaying an analysis that has already finished.
+            val openSummary: () -> Unit = {
+                navController.navigate(Destination.GameReport.createRoute(gameId)) {
+                    popUpTo(Destination.AnalysisProgress.route) { inclusive = true }
                 }
             }
+            // Leaving this screen by any route must stop the analysis too, or it would finish in
+            // the background and yank the user onto a summary they walked away from.
+            val leave: () -> Unit = {
+                viewModel.cancelAnalysis()
+                viewModel.clearError()
+                navController.popBackStack()
+            }
+
+            LaunchedEffect(gameId) { viewModel.runAnalysis(gameId, openSummary) }
+            BackHandler(onBack = leave)
 
             AnalysisProgressScreen(
                 progress = progress,
-                onCancel = {
-                    viewModel.cancelAnalysis()
-                    navController.popBackStack()
-                },
+                onCancel = leave,
+                error = error,
+                onRetry = { viewModel.runAnalysis(gameId, openSummary) },
+                onBack = leave,
             )
-
-            if (errorMessage != null) {
-                AlertDialog(
-                    onDismissRequest = { viewModel.clearError(); navController.popBackStack() },
-                    title = { Text(stringResource(R.string.dialog_analysis_failed_title)) },
-                    text = { Text(errorMessage ?: "") },
-                    confirmButton = {
-                        TextButton(onClick = { viewModel.clearError(); navController.popBackStack() }) {
-                            Text(stringResource(R.string.dialog_ok))
-                        }
-                    },
-                )
-            }
         }
 
         composable(
@@ -154,14 +171,17 @@ fun ChessAnalyzerNavHost(
                 ReviewScreen(
                     game = game,
                     initialPly = requestedPly.takeIf { it >= 0 },
+                    // The board opens from the user's side once the Summary has learned it.
+                    userColor = viewModel.reports[gameId]?.userColor,
+                    // The moments the Summary listed, so "Next key moment" visits exactly those.
+                    keyMomentPlies = viewModel.reports[gameId]?.keyMomentPlies.orEmpty(),
                     onShowMeClick = { move ->
                         if (move.core?.simulation != null) {
                             navController.navigate(Destination.Simulation.createRoute(gameId, move.ply))
                         }
                     },
                     onLearnPattern = { type -> navController.navigate(Destination.Reference.createRoute(type)) },
-                    onViewReportClick = { navController.navigate(Destination.GameReport.createRoute(gameId)) },
-                    onWatchReviewClick = { navController.navigate(Destination.Video.createRoute(gameId)) },
+                    onBack = { navController.popBackStack() },
                 )
             } else {
                 // Game text was registered but never analyzed in this process (e.g. deep link
@@ -182,19 +202,73 @@ fun ChessAnalyzerNavHost(
             // Re-gated whenever the significance threshold changes (the settings flow serves the
             // seeded default until DataStore emits; keying on the value re-runs this when it lands).
             val thresholdCp = settings.narrationThresholdCp
-            val report = remember(gameId, thresholdCp) { viewModel.uiReportFor(gameId, thresholdCp) }
+            // `reports` is snapshot state, so reading it here re-runs the lookup when the user answers
+            // "Which side were you?" (the answer swaps the stored report for a re-mapped one).
+            val sideKey = viewModel.reports[gameId]?.let { it.userColor to it.notMe }
+            val report = remember(gameId, thresholdCp, sideKey) { viewModel.uiReportFor(gameId, thresholdCp) }
             if (report != null) {
+                // The practice row and the "Try it" buttons. Both read snapshot state (the report's
+                // side, the solved map), so they follow the side chooser and a finished Practise.
+                val practiceSet = viewModel.practiceSetFor(gameId)
+                val solvedPlies = viewModel.solvedPliesFor(gameId)
                 GameReportScreen(
                     report = report,
+                    practiceEntry = practiceEntryState(report.sideChoice, practiceSet, solvedPlies),
+                    practicePlies = practicePlies(practiceSet),
+                    onPracticeClick = { navController.navigate(Destination.Practice.createRoute(gameId)) },
+                    onTryIt = { ply -> navController.navigate(Destination.Practice.createRoute(gameId, ply)) },
                     onKeyMomentClick = { ply ->
                         navController.navigate(Destination.Review.createRoute(gameId, ply))
                     },
+                    onShowMeClick = { ply ->
+                        navController.navigate(Destination.Simulation.createRoute(gameId, ply))
+                    },
+                    onSideChosen = { viewModel.setUserSideForGame(gameId, it) },
                     onTacticClick = { ply ->
                         navController.navigate(Destination.Review.createRoute(gameId, ply))
                     },
                     onLearnPattern = { type -> navController.navigate(Destination.Reference.createRoute(type)) },
                     onWatchReviewClick = { navController.navigate(Destination.Video.createRoute(gameId)) },
+                    onOpenBoardClick = { navController.navigate(Destination.Review.createRoute(gameId)) },
+                    onBack = { navController.popBackStack() },
                 )
+            } else {
+                // Nothing in memory for this game (process death restored the route but not the
+                // analysis): a blank screen is a dead end, so go back to Home.
+                LaunchedEffect(gameId) { navController.popBackStack() }
+            }
+        }
+
+        composable(
+            route = Destination.Practice.route,
+            arguments = listOf(
+                navArgument(Destination.ARG_GAME_ID) { type = NavType.StringType },
+                // Optional: -1 means "the first unsolved position", any other value opens at that ply.
+                navArgument(Destination.ARG_PLY) { type = NavType.IntType; defaultValue = -1 },
+            ),
+        ) { backStackEntry ->
+            val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
+            val requestedPly = backStackEntry.arguments?.getInt(Destination.ARG_PLY)?.takeIf { it >= 0 }
+            val puzzles = (viewModel.practiceSetFor(gameId) as? PracticeSet.Puzzles)?.puzzles
+            if (puzzles != null) {
+                val solvedPlies = viewModel.solvedPliesFor(gameId)
+                // Read once, when the screen is first composed: re-entry resumes at the first unsolved.
+                val initialIndex = remember(gameId, requestedPly) {
+                    initialPuzzleIndex(puzzles, viewModel.solvedPliesFor(gameId), requestedPly)
+                }
+                PracticeScreen(
+                    puzzles = puzzles,
+                    initialIndex = initialIndex,
+                    solvedPlies = solvedPlies,
+                    // The first sentence of the walkthrough says why the best move works.
+                    explanationFor = { ply -> viewModel.simulationFor(gameId, ply)?.perPlyExplanation?.firstOrNull() },
+                    onSolved = { ply -> viewModel.markSolved(gameId, ply) },
+                    onShowMissed = { ply -> navController.navigate(Destination.Simulation.createRoute(gameId, ply)) },
+                    onDone = { navController.popBackStack() },
+                )
+            } else {
+                // No puzzles (side changed to "Not me", or the game is not in memory): back out.
+                LaunchedEffect(gameId) { navController.popBackStack() }
             }
         }
 
@@ -208,9 +282,10 @@ fun ChessAnalyzerNavHost(
             if (simulation != null) {
                 TacticSimulationScreen(
                     simulation = simulation,
-                    title = stringResource(R.string.review_learn_pattern, tacticTypeName(simulation.tactic.type)),
+                    title = stringResource(R.string.reference_title, tacticTypeName(simulation.tactic.type)),
                     introText = simulation.tactic.description,
-                    doneLabel = stringResource(R.string.common_back),
+                    // No mistake in a textbook example, so no "Before the mistake".
+                    startCaption = stringResource(R.string.simulation_starting_position),
                     onDone = { navController.popBackStack() },
                 )
             } else {
@@ -236,11 +311,6 @@ fun ChessAnalyzerNavHost(
                     CircularProgressIndicator()
                 }
             } else if (script != null) {
-                // First time narration is actually wanted, pull down the default neural voice so
-                // the good voice is what users get without hunting through Settings. No-ops if the
-                // user already chose a provider or the model is present; narration falls back to
-                // the device voice while it is still downloading.
-                LaunchedEffect(Unit) { viewModel.ensureDefaultNeuralVoice() }
                 val narrationProvider = remember(narrationVoiceSettings) { viewModel.buildNarrationProvider() }
                 VideoScreen(
                     script = script,
@@ -275,6 +345,20 @@ fun ChessAnalyzerNavHost(
                     onSeeReference = if (hasReference) {
                         { navController.navigate(Destination.Reference.createRoute(type)) }
                     } else null,
+                    // "Try it yourself" on the last step, only when this move is a practice position.
+                    // Reached from Practise itself, it goes back to that puzzle (same state) instead of
+                    // stacking a second Practise on top.
+                    onTryIt = if (canTryIt(ply, practicePlies(viewModel.practiceSetFor(gameId)))) {
+                        {
+                            val cameFromPractice =
+                                navController.previousBackStackEntry?.destination?.route == Destination.Practice.route
+                            if (cameFromPractice) {
+                                navController.popBackStack()
+                            } else {
+                                navController.navigate(Destination.Practice.createRoute(gameId, ply))
+                            }
+                        }
+                    } else null,
                 )
             } else {
                 LaunchedEffect(Unit) { navController.popBackStack() }
@@ -282,62 +366,21 @@ fun ChessAnalyzerNavHost(
         }
 
         composable(Destination.Settings.route) {
-            var updateMessage by remember { mutableStateOf<String?>(null) }
             val narrationStorageBytes by viewModel.narrationStorageBytes.collectAsState()
-            val neuralModelState by viewModel.neuralModelState.collectAsState()
             // Cheap file-size scan; re-run every time this screen is (re)entered so the number
             // shown is never stale after a "Prepare narration"/export elsewhere populated the cache.
             LaunchedEffect(Unit) {
                 viewModel.refreshNarrationStorageBytes()
-                viewModel.refreshNeuralModelState()
             }
             SettingsScreen(
                 settings = settings,
+                onBack = { navController.popBackStack() },
                 onSettingsChange = { viewModel.updateSettings(it) },
-                onCheckForUpdates = {
-                    viewModel.checkForUpdates { info ->
-                        updateMessage = if (info != null) {
-                            context.getString(R.string.engine_update_available, info.latestVersion)
-                        } else {
-                            context.getString(R.string.engine_update_latest)
-                        }
-                    }
-                },
-                onViewGplNotice = { updateMessage = context.getString(R.string.gpl_notice) },
                 onOpenAbout = { navController.navigate(Destination.About.route) },
                 narrationVoiceSettings = narrationVoiceSettings,
                 onNarrationProviderChange = { viewModel.setNarrationProvider(it) },
                 narrationStorageBytes = narrationStorageBytes,
                 onClearNarrationStorage = { viewModel.clearNarrationStorage() },
-                neuralModelState = neuralModelState,
-                onNeuralTierChange = { viewModel.setNeuralTier(it) },
-                onDownloadNeuralModel = { viewModel.downloadNeuralModel(it) },
-                onCancelNeuralModelDownload = { viewModel.cancelNeuralModelDownload() },
-                onDeleteNeuralModel = { viewModel.deleteNeuralModel(it) },
-                onCloudVoiceChange = { viewModel.setCloudVoice(it) },
-                onOpenCloudSetup = {
-                    viewModel.resetCloudKeyCheck()
-                    navController.navigate(Destination.CloudVoiceSetup.route)
-                },
-                onRemoveCloudKey = { viewModel.removeCloudKey() },
-            )
-            if (updateMessage != null) {
-                AlertDialog(
-                    onDismissRequest = { updateMessage = null },
-                    title = { Text(stringResource(R.string.dialog_engine_title)) },
-                    text = { Text(updateMessage ?: "") },
-                    confirmButton = { TextButton(onClick = { updateMessage = null }) { Text(stringResource(R.string.dialog_ok)) } },
-                )
-            }
-        }
-
-        composable(Destination.CloudVoiceSetup.route) {
-            val checkState by viewModel.cloudKeyCheck.collectAsState()
-            CloudVoiceSetupScreen(
-                voice = narrationVoiceSettings.cloudVoice,
-                checkState = checkState,
-                onTestAndSave = { viewModel.testAndSaveCloudKey(it) },
-                onBack = { navController.popBackStack() },
             )
         }
 

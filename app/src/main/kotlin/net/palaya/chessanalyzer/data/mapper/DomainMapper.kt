@@ -2,6 +2,7 @@ package net.palaya.chessanalyzer.data.mapper
 
 import net.palaya.chessanalyzer.core.analysis.GameReport as CoreGameReport
 import net.palaya.chessanalyzer.core.analysis.KeyMoment as CoreKeyMoment
+import net.palaya.chessanalyzer.core.analysis.CommentaryGenerator
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.MoveClassification as CoreClassification
 import net.palaya.chessanalyzer.core.analysis.MoveSequence as CoreMoveSequence
@@ -11,10 +12,14 @@ import net.palaya.chessanalyzer.core.analysis.TacticInstance
 import net.palaya.chessanalyzer.core.analysis.TacticReferenceLibrary
 import net.palaya.chessanalyzer.core.analysis.TacticSignificance
 import net.palaya.chessanalyzer.core.chess.Color as CoreColor
+import net.palaya.chessanalyzer.core.narration.GameSummarySentence
+import net.palaya.chessanalyzer.core.narration.NarrationLocales
+import net.palaya.chessanalyzer.core.narration.NarrationStrings
 import net.palaya.chessanalyzer.core.pgn.PgnGame
 import net.palaya.chessanalyzer.ui.model.ClassificationCount
 import net.palaya.chessanalyzer.ui.model.GameHeader
 import net.palaya.chessanalyzer.ui.model.GameReport
+import net.palaya.chessanalyzer.ui.model.ImportedGame
 import net.palaya.chessanalyzer.ui.model.KeyMoment
 import net.palaya.chessanalyzer.ui.model.MoveRecord
 import net.palaya.chessanalyzer.ui.model.MoveSequenceView
@@ -40,6 +45,8 @@ import net.palaya.chessanalyzer.ui.theme.MoveClassification
 fun CoreClassification.toUi(): MoveClassification = MoveClassification.valueOf(name)
 
 fun CoreColor.toUiColor(): PieceColor = if (this == CoreColor.WHITE) PieceColor.WHITE else PieceColor.BLACK
+
+fun PieceColor.toCoreColor(): CoreColor = if (this == PieceColor.WHITE) CoreColor.WHITE else CoreColor.BLACK
 
 /** Builds a [GameHeader] from a parsed PGN's tag pairs, falling back to generic names. */
 fun PgnGame.toHeader(): GameHeader {
@@ -76,6 +83,29 @@ fun MoveAnnotation.toMoveRecord(): MoveRecord = MoveRecord(
     fenAfter = fenAfter,
     core = this,
 )
+
+/**
+ * The commentary of a game written for the side the user was (ANALYSIS_SPEC §7.1).
+ *
+ * The analysis writes every card text before the user has said which side they played, so the
+ * text names the sides by colour ("This lets White play ..."). Once the side is known - detected
+ * from the username, chosen on the Summary, or "Not me" - the text is written again from the
+ * annotations alone (no engine, no detector), so the cards and the key moments say "you" and
+ * "your opponent" exactly as the Summary's buckets and headings do. With no side, or "Not me"
+ * ([sideColor] null), the neutral colour wording is kept.
+ *
+ * @return the `:core` report with its [MoveAnnotation.text]s and key-moment summaries rewritten,
+ *   and [game] with its move cards rebuilt from it. Nothing but wording differs.
+ */
+fun applySideToCommentary(
+    game: ImportedGame,
+    report: CoreGameReport,
+    sideColor: CoreColor?,
+    generator: CommentaryGenerator = CommentaryGenerator(),
+): Pair<CoreGameReport, ImportedGame> {
+    val rewritten = generator.regenerate(report, sideColor)
+    return rewritten to game.copy(moves = rewritten.annotations.map { it.toMoveRecord() })
+}
 
 /**
  * Groups the [TacticInstance]s selected by [selector] out of each of this player's annotations
@@ -129,7 +159,31 @@ private fun CoreKeyMoment.toUi(): KeyMoment = KeyMoment(
     san = san,
     classification = classification.toUi(),
     description = summary,
+    loss = swing,
 )
+
+/** How many brilliancies the Summary lists beside the mistakes; they are rare, so this rarely bites. */
+internal const val MAX_BRILLIANT_MOMENTS = 2
+
+/**
+ * `:core`'s key moments are the five costliest *mistakes*. The Summary also wants the game's
+ * brilliancies ("Your key moments" is what to fix and what to be proud of), so they are added here
+ * from the annotations rather than by changing `:core`. Sorted by ply, one entry per ply.
+ */
+internal fun List<MoveAnnotation>.withBrilliancies(mistakes: List<KeyMoment>): List<KeyMoment> {
+    val brilliant = filter { it.classification == CoreClassification.BRILLIANT }
+        .take(MAX_BRILLIANT_MOMENTS)
+        .map {
+            KeyMoment(
+                ply = it.ply,
+                moveNumber = it.moveNumber,
+                san = it.san,
+                classification = it.classification.toUi(),
+                description = it.text,
+            )
+        }
+    return (mistakes + brilliant).distinctBy { it.ply }.sortedBy { it.ply }
+}
 
 /** The presentation view of one `:core` run of plies (ANALYSIS_SPEC §9.3). */
 fun CoreMoveSequence.toUi(): MoveSequenceView = MoveSequenceView(
@@ -157,14 +211,20 @@ fun List<MoveAnnotation>.toSequenceViews(tacticThresholdCp: Int = 0): List<MoveS
  * `AnalysisService.detectUserColor`) — the report screen uses it to frame the tactics sections
  * from the user's perspective ("you"/"your opponent") instead of plain White/Black.
  *
+ * @param notMe the user answered "Not me" to "Which side were you?": no side is the user's, so
+ *   [userColor] is dropped and the report keeps neutral White/Black framing.
  * @param tacticThresholdCp the significance threshold (ANALYSIS_SPEC §9.6) the four tactic
  *   buckets are gated at — the same value the narration uses. What the gate removes is not lost:
  *   it lands in the `minor*` lists for the report's disclosure row.
+ * @param strings the language of the one-sentence summary ([GameReport.summarySentence]); the
+ *   narration language, so the sentence and the narrated review never disagree.
  */
 fun CoreGameReport.toUiReport(
     header: GameHeader,
     userColor: PieceColor? = null,
     tacticThresholdCp: Int = 0,
+    notMe: Boolean = false,
+    strings: NarrationStrings = NarrationLocales.default,
 ): GameReport {
     // evalGraph in :core is white win-percent (0..100), which isn't what EvalGraph's
     // centipawn-based rendering expects. Rebuild a white-relative-centipawn series from the
@@ -181,8 +241,14 @@ fun CoreGameReport.toUiReport(
         evalHistory = evalHistory,
         plyClassifications = annotations.map { it.classification.toUi() },
         sequences = annotations.toSequenceViews(tacticThresholdCp),
-        keyMoments = keyMoments.map { it.toUi() },
-        userColor = userColor,
+        keyMoments = annotations.withBrilliancies(keyMoments.map { it.toUi() }),
+        // "Not me" and a colour are mutually exclusive: an explicit "not me" wins.
+        userColor = userColor.takeUnless { notMe },
         tacticThresholdCp = tacticThresholdCp,
+        notMe = notMe,
+        openingName = openingName,
+        plysWithSimulation = annotations.filter { it.simulation != null }.map { it.ply }.toSet(),
+        // Written from the same side facts the report carries, so the side chooser re-maps it too.
+        summarySentence = GameSummarySentence.text(this, userColor?.toCoreColor(), notMe, strings),
     )
 }

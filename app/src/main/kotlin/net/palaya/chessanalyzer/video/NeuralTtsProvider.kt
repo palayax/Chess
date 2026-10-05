@@ -4,7 +4,6 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -16,19 +15,20 @@ import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 
 /**
  * On-device neural narration via sherpa-onnx (Apache 2.0, k2-fsa) — the strictly-better-than-
- * [DeviceTtsProvider] default once its model has been downloaded (see [VoiceModelProvisioner]):
- * free, fully offline, no per-user API key, no redistribution licensing question. Slots into
+ * [DeviceTtsProvider] default, with its model bundled in the APK and extracted once (see
+ * [BundledVoiceInstaller]): free, fully offline, no per-user API key, no redistribution licensing
+ * question. Slots into
  * [NarrationCoordinator] behind the same [NarrationVoiceProvider] interface as
  * [DeviceTtsProvider].
  *
  * The narration pipeline this feeds ([NarrationCoordinator]/[NarrationStore]) always
  * pre-synthesizes a whole script ahead of playback/export rather than speaking in real time, so
- * this deliberately does not try to be the fastest option — [NeuralVoiceTier.KOKORO]'s slower,
- * more natural model is exactly as usable here as [NeuralVoiceTier.PIPER]'s faster one.
+ * this deliberately does not try to be the fastest option: Kokoro's slower, more natural model is
+ * exactly as usable here as a faster one would be.
  *
  * [modelDir] must already be a verified, fully-extracted model directory (see
- * [VoiceModelProvisioner.ensureModel]/[VoiceModelProvisioner.isInstalled]) — this class only
- * loads and runs it, it never downloads. [prepare] returns false (never throws) when the
+ * [BundledVoiceInstaller.ensureInstalled]/[BundledVoiceInstaller.isInstalled]) — this class only
+ * loads and runs it, it never installs anything. [prepare] returns false (never throws) when the
  * directory or its expected files are missing, which sends [NarrationCoordinator] straight to its
  * mandatory device-voice fallback with no silent gap.
  */
@@ -55,10 +55,10 @@ class NeuralTtsProvider(
     val cacheFingerprint: String get() =
         "${tier.name}/sid$speakerId/ls${"%.2f".format(java.util.Locale.ROOT, lengthScale)}"
 
-    /** Speakers the loaded model reports — 1 for Piper, 11 for Kokoro v0.19. -1 until [prepare]. */
+    /** Speakers the loaded model reports — 11 for Kokoro v0.19. -1 until [prepare]. */
     val speakerCount: Int get() = tts?.numSpeakers() ?: -1
 
-    /** Native output rate of the loaded model — 22050 for Piper, 24000 for Kokoro. -1 until [prepare]. */
+    /** Native output rate of the loaded model — 24000 for Kokoro. -1 until [prepare]. */
     val modelSampleRate: Int get() = tts?.sampleRate() ?: -1
 
     private val lock = Mutex()
@@ -70,7 +70,7 @@ class NeuralTtsProvider(
             val existing = tts
             if (existing != null) return@withLock true
             if (prepareFailed) return@withLock false
-            if (!VoiceModelProvisioner.requiredFilesFor(tier).all { File(modelDir, it).isFile }) {
+            if (!BundledVoiceInstaller.requiredFilesFor(tier).all { File(modelDir, it).isFile }) {
                 prepareFailed = true
                 return@withLock false
             }
@@ -143,7 +143,7 @@ class NeuralTtsProvider(
 
     /**
      * [com.k2fsa.sherpa.onnx.GeneratedAudio.samples] are floats normalized to [-1, 1] at whatever
-     * rate the model emits (22050 Hz for Piper, 24000 Hz for Kokoro here) — converted to 16-bit
+     * rate the model emits (24000 Hz for Kokoro) — converted to 16-bit
      * PCM and wrapped via [WavUtil.buildWavHeader] so downstream (sentence-stitching, AAC export,
      * MediaPlayer playback) sees the exact same WAV shape every other provider produces.
      * [WavUtil.readAsMono16] already resamples to whatever rate the export track needs, so no
@@ -166,12 +166,12 @@ class NeuralTtsProvider(
     companion object {
         private const val TAG = "NeuralTtsProvider"
 
-        /** Phonemizer data directory, present in both tiers' upstream archives under this name. */
+        /** Phonemizer data directory, present in the upstream archive under this name. */
         const val ESPEAK_DATA_DIR = "espeak-ng-data"
 
         /**
-         * Neither tier gets `lexicon`/`dictDir`/`lang`: `kokoro-int8-en-v0_19.tar.bz2` ships no
-         * lexicon file at all (verified by listing the archive — `model.int8.onnx`, `voices.bin`,
+         * Kokoro gets no `lexicon`/`dictDir`/`lang`: `kokoro-int8-en-v0_19` ships no lexicon
+         * file at all (verified by listing the archive: `model.int8.onnx`, `voices.bin`,
          * `tokens.txt`, `espeak-ng-data/`, `LICENSE`, `README.md`), so English is phonemized
          * entirely from `espeak-ng-data`. This matches upstream's own documented invocation for
          * this exact model, which passes only `--kokoro-model/-voices/-tokens/-data-dir`. The
@@ -181,25 +181,12 @@ class NeuralTtsProvider(
             val dir = modelDir.absolutePath
             val dataDir = "$dir/$ESPEAK_DATA_DIR"
             return when (tier) {
-                NeuralVoiceTier.PIPER -> OfflineTtsConfig(
-                    model = OfflineTtsModelConfig(
-                        vits = OfflineTtsVitsModelConfig(
-                            model = "$dir/${VoiceModelProvisioner.PIPER_MODEL_FILE}",
-                            tokens = "$dir/${VoiceModelProvisioner.PIPER_TOKENS_FILE}",
-                            dataDir = dataDir,
-                            lengthScale = lengthScale,
-                        ),
-                        numThreads = 2,
-                        debug = false,
-                        provider = "cpu",
-                    ),
-                )
                 NeuralVoiceTier.KOKORO -> OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
                         kokoro = OfflineTtsKokoroModelConfig(
-                            model = "$dir/${VoiceModelProvisioner.KOKORO_MODEL_FILE}",
-                            voices = "$dir/${VoiceModelProvisioner.KOKORO_VOICES_FILE}",
-                            tokens = "$dir/${VoiceModelProvisioner.KOKORO_TOKENS_FILE}",
+                            model = "$dir/${BundledVoiceInstaller.KOKORO_MODEL_FILE}",
+                            voices = "$dir/${BundledVoiceInstaller.KOKORO_VOICES_FILE}",
+                            tokens = "$dir/${BundledVoiceInstaller.KOKORO_TOKENS_FILE}",
                             dataDir = dataDir,
                             lengthScale = lengthScale,
                         ),

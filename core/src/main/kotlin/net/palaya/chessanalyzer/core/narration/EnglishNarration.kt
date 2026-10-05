@@ -5,6 +5,7 @@ import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.PieceType
 import net.palaya.chessanalyzer.core.chess.Square
+import net.palaya.chessanalyzer.core.text.EnglishGrammar
 
 /**
  * English narration. The reference implementation of [NarrationStrings] and the only place in
@@ -43,7 +44,7 @@ object EnglishNarration : NarrationStrings {
             Sentence.ChapterDamageReport -> one("The Damage Report")
             Sentence.ChapterWorkOn -> one("What To Work On")
             is Sentence.CardOpeningLine -> one(sentence.eco?.let { "${sentence.name} ($it)" } ?: sentence.name)
-            is Sentence.CardResultLine -> one("${sentence.result} · ${sentence.plies} plies")
+            is Sentence.CardResultLine -> one("${sentence.result} · ${cardMoveCount(sentence.fullMoves)}")
             is Sentence.CardAccuracyLine -> one("White ${sentence.whiteAccuracy}% · Black ${sentence.blackAccuracy}%")
             is Sentence.CaptionOpening -> one(
                 listOfNotNull(sentence.name, sentence.eco?.let { "($it)" }).joinToString(" ").ifBlank { "Opening" }
@@ -65,6 +66,8 @@ object EnglishNarration : NarrationStrings {
                 "Blunders ${sentence.whiteBlunders}–${sentence.blackBlunders} · Mistakes ${sentence.whiteMistakes}–${sentence.blackMistakes}"
             )
             Sentence.CardWorkOnHeading -> one("What to work on")
+            is Sentence.WalkthroughIntro -> one(walkthroughIntro(sentence))
+            is Sentence.GameSummary -> one(gameSummary(sentence))
 
             // -- intro ----------------------------------------------------------------
             Sentence.IntroNoNames -> one("No names on this one, so it's White against Black.")
@@ -183,6 +186,10 @@ object EnglishNarration : NarrationStrings {
                 "and now look what's available.",
                 "and the reply is unpleasant."
             )
+            is Sentence.EvalShift -> one(
+                if (sentence.favours) "The evaluation moves in ${possessive(sentence.subject)} favour."
+                else "The evaluation moves against ${subject(sentence.subject)}."
+            )
             Sentence.InaccuracyNote -> listOf(
                 "It's not losing, it's just loose.",
                 "That's an inaccuracy — playable, but it gives something back.",
@@ -254,7 +261,7 @@ object EnglishNarration : NarrationStrings {
             is Sentence.PayoffMate -> one("That is checkmate in ${number(sentence.mateIn)}.")
             is Sentence.PayoffMaterial -> {
                 val s = sentence.subject
-                one("${cap(subject(s))} ${conjugate(s, "come")} out of it ${materialGain(sentence.gain)} up, for nothing.")
+                one("${cap(subject(s))} ${conjugate(s, "come")} out of it ${materialGain(sentence.gain)} up.")
             }
             is Sentence.PayoffOutcome -> {
                 val s = sentence.subject
@@ -270,6 +277,7 @@ object EnglishNarration : NarrationStrings {
                         PayoffKind.MATING_NET -> "$who ${conjugate(s, "leave")} the king in a mating net."
                         PayoffKind.INVESTED_MATERIAL -> "$who ${have(s)} invested material in the attack."
                         PayoffKind.DECISIVE_ADVANTAGE -> "$who ${conjugate(s, "end")} up completely on top."
+                        PayoffKind.LINE_ENDS -> "That is as far as the line goes."
                     }
                 )
             }
@@ -352,11 +360,16 @@ object EnglishNarration : NarrationStrings {
             Sentence.ShortGameCaveat -> one("It's a short game, so treat those rating estimates as a rough guide rather than gospel.")
 
             // -- lessons ---------------------------------------------------------------------
-            Sentence.LessonLead -> listOf(
-                "So what do you take away from this? ",
-                "Here's what to actually work on. ",
-                "Three things to take out of this game. "
-            )
+            is Sentence.LessonLead -> buildList {
+                add("So what do you take away from this? ")
+                add(if (sentence.count == 1) "Here's the one thing to actually work on. " else "Here's what to actually work on. ")
+                // A lead that counts the lessons is only used when the count is right.
+                when (sentence.count) {
+                    2 -> add("Two things to take out of this game. ")
+                    3 -> add("Three things to take out of this game. ")
+                    4 -> add("Four things to take out of this game. ")
+                }
+            }
             is Sentence.LessonRepeatedMiss -> {
                 val squares = sentence.squares.map { Vocabulary.square(it) }
                 val where = when (squares.size) {
@@ -369,7 +382,7 @@ object EnglishNarration : NarrationStrings {
             is Sentence.LessonSingleMiss -> {
                 val at = sentence.moveNumber?.let { " at move $it" } ?: ""
                 val where = sentence.square?.let { " The one that hurt was on ${Vocabulary.square(it)}." } ?: ""
-                one("The one thing ${subject(sentence.subject)} left on the board was a ${tacticName(sentence.type)}$at.$where")
+                one("The one thing ${subject(sentence.subject)} left on the board was ${EnglishGrammar.withArticle(tacticName(sentence.type))}$at.$where")
             }
             is Sentence.LessonLateErrors -> one(
                 "Every one of ${possessive(sentence.subject)} ${number(sentence.count)} errors came after move ${sentence.afterMove}, " +
@@ -398,12 +411,12 @@ object EnglishNarration : NarrationStrings {
                 val their = if (s.person == Person.SECOND) "your" else "their"
                 one(
                     "Worth knowing: the other side left ${countedTactic(sentence.type, sentence.count)} on the board too, and " +
-                        "${subject(s)} converted ${number(sentence.converted)} chances of $their own. " +
+                        "${subject(s)} converted ${number(sentence.converted)} ${plural("chance", sentence.converted)} of $their own. " +
                         "Both players are missing the same kind of thing, which means whoever drills it first wins the rematch."
                 )
             }
             is Sentence.LessonPositive -> one(
-                "${cap(subject(sentence.subject))} found the engine's top move ${number(sentence.bestMoves)} times out of ${sentence.totalMoves}, " +
+                "${cap(subject(sentence.subject))} found the engine's top move ${timesWord(sentence.bestMoves)} out of ${sentence.totalMoves}, " +
                     "for ${sentence.accuracy} percent. The plan-making is working; the gap is in the tactics, and tactics are the part you can drill."
             )
             is Sentence.LessonRatingAnchor -> one(
@@ -416,6 +429,78 @@ object EnglishNarration : NarrationStrings {
     // -----------------------------------------------------------------------
     // Subjects and verb agreement
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // On-screen lines: the walkthrough intro and the one-sentence game summary
+    // -----------------------------------------------------------------------
+
+    /**
+     * Two sentences, never one clause grafted into another: the detector's description is a
+     * finished, capitalised sentence of its own (it may start with a move such as "Qxa1+"), so it
+     * is placed after a full stop rather than lowercased behind "a line that".
+     */
+    private fun walkthroughIntro(s: Sentence.WalkthroughIntro): String {
+        val lead = s.firstSan?.let { "Watch what happens: $it starts the line." } ?: "Watch what happens."
+        val point = s.point ?: "The tactic: ${tacticName(s.tactic)}."
+        return "$lead $point"
+    }
+
+    private fun gameSummary(s: Sentence.GameSummary): String {
+        val subject = s.subject?.let { summaryWho(it, s.viewerKnown) }
+        val opponent = s.opponent?.let { summaryWho(it, s.viewerKnown) }
+        val was = s.subject?.let { if (it.person == Person.SECOND) "were" else "was" } ?: "was"
+        val bare = errorName(s.error)
+        val named = EnglishGrammar.withArticle(bare)
+        val onMove = s.moveNumber?.let { " on move $it" } ?: ""
+        return when (s.kind) {
+            SummaryKind.DECIDED_BY_ERROR ->
+                "${cap(subject.orEmpty())} $was fine until ${s.moveNumber?.let { "move $it, then " } ?: ""}$named decided it."
+            SummaryKind.SEALED_BY_ERROR ->
+                "${cap(subject.orEmpty())} $was already under pressure, and $named$onMove sealed it."
+            SummaryKind.COMEBACK ->
+                "${cap(subject.orEmpty())} $was behind when " +
+                    "${s.opponent?.let { summaryPossessive(it, s.viewerKnown) }.orEmpty()} $bare$onMove turned the game around."
+            SummaryKind.WON_DESPITE_ERROR ->
+                "${cap(subject.orEmpty())} won, even after $named$onMove."
+            SummaryKind.CLEAN_WIN -> {
+                val how = if (s.byMate) " by checkmate" + (s.fullMoves?.let { " on move $it" } ?: "") else ""
+                "${cap(subject.orEmpty())} won$how, and neither side made a big mistake."
+            }
+            SummaryKind.SHORT_GAME -> {
+                val length = s.fullMoves?.let { moveCount(it) } ?: "a few moves"
+                when {
+                    subject != null && opponent != null && s.byMate -> "A short game: $subject mated $opponent in $length."
+                    subject != null -> "A short game: $subject won in $length."
+                    else -> "A short game: it ended in a draw after $length."
+                }
+            }
+            SummaryKind.DRAW_WITH_SWING ->
+                "It ended in a draw, but ${s.subject?.let { summaryPossessive(it, s.viewerKnown) }.orEmpty()} $bare$onMove was the big swing."
+            SummaryKind.CLOSE_CLEAN -> "A close game: neither side made a big mistake."
+            SummaryKind.UNFINISHED ->
+                "The game stops after ${s.fullMoves?.let { moveCount(it) } ?: "a few moves"} without a result."
+        }
+    }
+
+    /** "you" for the viewer, "your opponent" for the other side once the viewer is known, else the colour. */
+    private fun summaryWho(s: Subject, viewerKnown: Boolean): String = when {
+        s.person == Person.SECOND -> "you"
+        viewerKnown -> "your opponent"
+        else -> side(s.color)
+    }
+
+    private fun summaryPossessive(s: Subject, viewerKnown: Boolean): String = when {
+        s.person == Person.SECOND -> "your"
+        viewerKnown -> "your opponent's"
+        else -> "${side(s.color)}'s"
+    }
+
+    private fun errorName(error: SummaryError?): String = when (error) {
+        SummaryError.BLUNDER -> "blunder"
+        SummaryError.MISTAKE -> "mistake"
+        SummaryError.MISSED_WIN -> "missed win"
+        SummaryError.BIG_SWING, null -> "big swing"
+    }
 
     private fun subject(s: Subject): String = if (s.person == Person.SECOND) "you" else side(s.color)
 
@@ -561,6 +646,17 @@ object EnglishNarration : NarrationStrings {
     }
 
     private fun moveCount(fullMoves: Int): String = if (fullMoves == 1) "one move" else "$fullMoves moves"
+
+    /** The on-screen form of a move count: digits, singular for exactly one ("1 move", "17 moves"). */
+    private fun cardMoveCount(fullMoves: Int): String = if (fullMoves == 1) "1 move" else "$fullMoves moves"
+
+    /** "once", "twice", "five times": how often something happened, never "one times". */
+    private fun timesWord(n: Int): String = when (n) {
+        0 -> "not once"
+        1 -> "once"
+        2 -> "twice"
+        else -> "${number(n)} times"
+    }
 
     private fun plural(word: String, n: Int): String = when {
         n == 1 -> word

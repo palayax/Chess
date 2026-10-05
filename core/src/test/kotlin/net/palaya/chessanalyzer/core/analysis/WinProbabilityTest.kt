@@ -129,4 +129,14 @@ class WinProbabilityTest {
         val wronglyComputed = WinProbability.loss(before, after, Color.WHITE)
         assertTrue(loss > wronglyComputed)
     }
+
+    @Test
+    fun `mate in zero means the side to move is mated, so it saturates negative`() {
+        // AnalysisService records a checkmated position as mateIn = 0. It used to come back as
+        // +10000, which gave every mating move a wrong-sign centipawn value.
+        assertTrue(WinProbability.cpFromMate(0) < 0)
+        assertEquals(-10000, WinProbability.cpFromMate(0))
+        assertEquals(0.0, WinProbability.winPercentOfLine(
+            EngineLineInput(multiPv = 1, scoreCp = null, mateIn = 0, depth = 0, pvUci = emptyList())), 0.0)
+    }
 }

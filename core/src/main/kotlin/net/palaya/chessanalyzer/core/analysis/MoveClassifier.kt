@@ -135,10 +135,16 @@ class MoveClassifier(private val see: SeeEvaluator) {
             val piece = positionAfter.pieceAt(square) ?: continue
             if (piece.color != moverColor) continue
             if (PieceValues.of(piece.type) < 300) continue
-            if (see.isHanging(positionAfter, square)) return true
+            // "To a *legal* capture" (spec §2): a piece the opponent cannot actually take - because
+            // the only piece that attacks it is pinned to its king - is not en prise. (14.Rd1 in the
+            // Opera Game was a "sacrifice" to a rook that is pinned on d7 by the bishop on b5.)
+            if (see.isHanging(positionAfter, square) && canBeCapturedLegally(positionAfter, square)) return true
         }
         return false
     }
+
+    private fun canBeCapturedLegally(position: Position, square: Square): Boolean =
+        position.legalMoves().any { it.isCapture && it.to == square }
 
     /**
      * The refutation must genuinely lose material for the opponent — approximated here as:

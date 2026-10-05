@@ -1,0 +1,14 @@
+# Pins for the models bundled into the APK (RUN_PLAN Round 13, docs/BUNDLED_MODELS_DESIGN.md).
+# Java-properties format: read by scripts/fetch_models.sh and (later) by the Gradle verifyBundledModels task.
+# The NNUE net NAME is deliberately not here: its single source of truth is
+# vendor/Stockfish/src/evaluate.h EvalFileDefaultName (CLAUDE.md engine gotcha 5). Only its size is pinned.
+net.size=98511183
+net.url.base=https://tests.stockfishchess.org/api/nn/
+
+kokoro.archive.url=https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2
+kokoro.archive.sha256=c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd
+kokoro.archive.size=103248205
+# The plain .tar inside the archive is what ships in the APK. Pinned by fetch_models.sh on its first
+# successful run (it computes the hash of the bunzip2 output and writes it here).
+kokoro.tar.sha256=7190c4801645bf31d10996477a04082019d9cf492ad3d5aeef7b1f7cf10a5dea
+kokoro.tar.size=158269440

@@ -1,0 +1,32 @@
+# Real Stockfish 19 output (pc/bin/stockfish, Threads 1, MultiPV 3), captured 2026-09-25.
+# Lines starting with '#' are fixture comments and are dropped by the test loader.
+# Lines marked HAND-ADDED are not from that capture: Stockfish only prints bound and currmove
+# lines on searches longer than ~3 s, so they are written in its exact format.
+# --- search 1: back-rank mate in 1, "position fen 6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1", go depth 6
+info string NNUE evaluation using nn-1a298aa575a0.nnue (109MiB, (86896, 1024, 32, 32, 1))
+info depth 1 seldepth 2 multipv 1 score mate 1 nodes 82 nps 82000 hashfull 0 tbhits 0 time 1 pv d1d8
+info depth 1 seldepth 3 multipv 2 score cp 773 nodes 82 nps 82000 hashfull 0 tbhits 0 time 1 pv f2f3 g8h8
+info depth 1 seldepth 3 multipv 3 score cp 773 nodes 82 nps 82000 hashfull 0 tbhits 0 time 1 pv g2g3 g8h8
+info depth 5 seldepth 2 multipv 1 score mate 1 nodes 1270 nps 635000 hashfull 0 tbhits 0 time 2 pv d1d8
+info depth 5 seldepth 7 multipv 2 score cp 738 nodes 1270 nps 635000 hashfull 0 tbhits 0 time 2 pv g1h1 g7g6 d1d8 g8g7
+info depth 5 seldepth 6 multipv 3 score cp 710 nodes 1270 nps 635000 hashfull 0 tbhits 0 time 2 pv f2f4 f7f6 d1d8 g8f7
+info depth 6 seldepth 2 multipv 1 score mate 1 nodes 1471 nps 735500 hashfull 0 tbhits 0 time 2 pv d1d8
+info depth 6 seldepth 7 multipv 2 score cp 714 nodes 1471 nps 735500 hashfull 0 tbhits 0 time 2 pv g1h1 f7f6 d1d8 g8f7 d8d7 f7g8
+info depth 6 seldepth 7 multipv 3 score cp 710 nodes 1471 nps 735500 hashfull 0 tbhits 0 time 2 pv f2f4 f7f6 d1d8 g8f7
+bestmove d1d8
+# --- search 2: "position fen r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 2 3", go depth 8
+info depth 7 seldepth 2 multipv 1 score mate 1 nodes 1779 nps 444750 hashfull 0 tbhits 0 time 4 pv f3f7
+info depth 7 seldepth 10 multipv 2 score cp 295 nodes 1779 nps 444750 hashfull 0 tbhits 0 time 4 pv c4f7 e8e7 f7b3 d8e8 g1e2 g8f6 e1g1
+info depth 7 seldepth 13 multipv 3 score cp 26 nodes 1779 nps 444750 hashfull 0 tbhits 0 time 4 pv d2d4 g8f6 d4d5 c6a5
+info depth 8 seldepth 2 multipv 1 score mate 1 nodes 2243 nps 448600 hashfull 0 tbhits 0 time 5 pv f3f7
+# HAND-ADDED: an aspiration-window fail on line 3, then its resolution (the latest one must win)
+info depth 8 seldepth 10 multipv 3 score cp 120 lowerbound nodes 2100 nps 448000 hashfull 0 tbhits 0 time 5 pv a2a3
+# HAND-ADDED: currmove progress lines carry no score and no pv
+info depth 8 currmove g1e2 currmovenumber 3
+info depth 8 seldepth 10 multipv 2 score cp 317 nodes 2243 nps 448600 hashfull 0 tbhits 0 time 5 pv c4f7 e8e7 g1e2 g8f6 f7b3 d8e8
+info depth 8 seldepth 10 multipv 3 score cp 90 nodes 2243 nps 448600 hashfull 0 tbhits 0 time 5 pv a2a3 g8f6 g1e2 c6d4 e2d4 e5d4
+bestmove f3f7
+# --- search 3: the checkmated position "3R2k1/5ppp/8/8/8/8/5PPP/6K1 b - - 1 1", go depth 5
+info string NNUE evaluation using nn-1a298aa575a0.nnue (109MiB, (86896, 1024, 32, 32, 1))
+info depth 0 score mate 0
+bestmove (none)

@@ -36,7 +36,68 @@ import net.palaya.chessanalyzer.core.chess.parseUci
  */
 class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) : TacticsDetector {
 
+    /**
+     * What the app reports for [move]: every motif the detectors found ([detectRaw]), reduced to
+     * the few that are worth saying (ANALYSIS_SPEC 5.3 "Reporting"). The detectors are
+     * deliberately generous - one move routinely trips several of them for the same underlying
+     * fact - and a presentation that lists all of them narrates nonsense: a rook that delivers
+     * mate was a "fork", a "double attack", a "hanging piece" and a "skewer" as well.
+     *
+     *  1. A **checkmating move** is described by its mating pattern ([MATING_TYPES]) and by
+     *     nothing else.
+     *  2. A motif that merely restates another one on the same move is dropped: a
+     *     [TacticType.HANGING_PIECE] on a square another motif already names *and accounts for at
+     *     least as much material* (the fork or pin is the mechanism, the hanging piece is its
+     *     consequence; an x-ray worth nothing explains nothing), a [TacticType.DOUBLE_ATTACK] that a
+     *     fork of the same targets already covers, and a plain [TacticType.PROMOTION_TACTIC] next
+     *     to the [TacticType.UNDERPROMOTION] that is the interesting half of the same move.
+     *  3. What is left is ranked - mating motifs first, then confidence, then material swing - and
+     *     at most [MAX_TACTICS_PER_MOVE] survive.
+     */
     override fun detect(position: Position, move: Move, pvUci: List<String>): List<TacticInstance> {
+        val raw = detectRaw(position, move, pvUci)
+        val mates = raw.filter { it.type in MATING_TYPES }
+        val relevant = if (position.makeMove(move).isCheckmate()) mates else dropRedundant(raw)
+        return relevant
+            .sortedWith(
+                compareByDescending<TacticInstance> { it.type in MATING_TYPES }
+                    .thenByDescending { it.confidence }
+                    .thenByDescending { it.materialSwing }
+            )
+            .take(MAX_TACTICS_PER_MOVE)
+    }
+
+    private fun dropRedundant(all: List<TacticInstance>): List<TacticInstance> {
+        val forkTargets = all
+            .filter { it.type == TacticType.FORK || it.type == TacticType.PAWN_FORK }
+            .flatMapTo(HashSet()) { it.targetSquares }
+        val withoutCoveredDoubleAttacks = all.filterNot {
+            it.type == TacticType.DOUBLE_ATTACK && it.targetSquares.isNotEmpty() &&
+                forkTargets.containsAll(it.targetSquares)
+        }
+        val withoutPlainPromotion =
+            if (withoutCoveredDoubleAttacks.any { it.type == TacticType.UNDERPROMOTION }) {
+                withoutCoveredDoubleAttacks.filterNot { it.type == TacticType.PROMOTION_TACTIC }
+            } else {
+                withoutCoveredDoubleAttacks
+            }
+        return withoutPlainPromotion.filterNot { hanging ->
+            hanging.type == TacticType.HANGING_PIECE &&
+                withoutPlainPromotion.any { other ->
+                    other !== hanging && other.type != TacticType.HANGING_PIECE &&
+                        other.materialSwing >= hanging.materialSwing &&
+                        hanging.targetSquares.any { it in other.targetSquares }
+                }
+        }
+    }
+
+    /**
+     * Every motif the detectors recognise on [move], unreduced: no mate suppression, no
+     * redundancy filter, no cap. This is what the detector tests and the reference-corpus
+     * cross-check assert against, because they are about *detection*; [detect] is the
+     * presentation of it.
+     */
+    fun detectRaw(position: Position, move: Move, pvUci: List<String>): List<TacticInstance> {
         val c = Ctx(position, move, pvUci)
         val out = ArrayList<TacticInstance>(8)
 
@@ -212,6 +273,14 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
     // FORK / PAWN_FORK
     // -----------------------------------------------------------------------
 
+    /**
+     * True when the opponent can take the piece that just moved without losing material - an even
+     * trade counts, because the threats it made die with it and nothing was won by them.
+     */
+    private fun forkerCapturedForFree(c: Ctx): Boolean =
+        Attacks.attackersOf(c.after, c.landing, c.them).isNotEmpty() &&
+            bestCaptureSee(c.after, c.landing, c.them) >= 0
+
     private fun detectFork(c: Ctx, out: MutableList<TacticInstance>) {
         if (c.move.isCastle) return
         val targets = Attacks.attackedEnemiesFrom(c.after, c.landing)
@@ -235,6 +304,12 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
             }
         }
         if (qualifying.size < 2) return
+
+        // The fork only works if the forker survives to cash it in. When the opponent can simply
+        // take the forking piece without losing material (an even trade counts: the fork is gone
+        // and nothing was won by it), what happened is a capture or an exchange, not a fork. This
+        // is the classic Bxd7+ Nxd7 "fork" of king and queen, where the bishop is simply taken.
+        if (forkerCapturedForFree(c)) return
 
         val swing = swingAcrossTargets(winnables, includesKing)
         // The forker may itself be en prise; a fork that does not survive the recapture is
@@ -282,6 +357,9 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
         if (swing <= 0) return
 
         val attackers = c.pairsAfter.filter { it.second in fresh }.map { it.first }.distinct()
+        // Same survival test as a fork: when the moved piece is the only attacker and can simply
+        // be taken, the "double attack" ends with the next reply.
+        if (attackers == listOf(c.landing) && forkerCapturedForFree(c)) return
         out.add(
             TacticInstance(
                 type = TacticType.DOUBLE_ATTACK,
@@ -444,7 +522,7 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
             involvedSquares = listOf(t.slider),
             materialSwing = swing,
             description = "${capitalise(named(slider, t.slider))} skewers ${named(front, t.front)}; " +
-                "when it moves, ${named(rear, t.rear)} behind it falls.",
+                "when it moves, ${named(rear, t.rear)} behind it is attacked.",
             confidence = confidence(pvConfirms(c, listOf(t.rear)))
         )
     }
@@ -537,10 +615,13 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
             if (wasLoose) continue
 
             val undefended = Attacks.attackersOf(c.after, sq, c.them).isEmpty()
+            // What the board shows, no more: the piece is attacked and (nothing defends it | taking
+            // it would win material). The opponent is to move and may save it, so "can be taken for
+            // nothing" / "cannot be held" were claims about a future the detector never checked.
             val text = if (undefended) {
-                "${capitalise(named(piece, sq))} is left hanging and can be taken for nothing."
+                "${capitalise(named(piece, sq))} is attacked and nothing defends it."
             } else {
-                "${capitalise(named(piece, sq))} cannot be held - taking it wins material."
+                "${capitalise(named(piece, sq))} is attacked, and taking it would win material."
             }
             out.add(
                 TacticInstance(
@@ -562,6 +643,11 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
     // -----------------------------------------------------------------------
 
     private fun detectTrapped(c: Ctx, out: MutableList<TacticInstance>) {
+        // "No safe square" is a statement about a piece's own mobility, so it is only meaningful
+        // when the opponent is free to move it. While their king is in check the legal-move list
+        // is whatever answers the check, and every other piece looks "trapped" simply because it
+        // is not allowed to move at all. A checking move therefore traps nothing.
+        if (c.after.isInCheck()) return
         val theirMoves = c.after.legalMoves()
         val movedControls = Attacks.attacksFrom(c.after, c.landing).toHashSet()
 
@@ -1219,6 +1305,14 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
         val guardedTarget = exploited in guarded
         val blockedLine = defenderSquare in lineBetween(ourFollowUp.from, exploited)
         if (!guardedTarget && !blockedLine) return
+        // "Dragged away from guarding X" needs the defender to end up somewhere that no longer
+        // guards X. A defender that simply captures on X (exd6 ... Qxd6) is exchanged there, not
+        // deflected from it, and one that still sees X from its new square was not deflected at all.
+        val afterReply = posBeforeFollowUp
+        if (guardedTarget && !blockedLine) {
+            if (theirReply.to == exploited) return
+            if (exploited in Attacks.attacksFrom(afterReply, theirReply.to)) return
+        }
 
         val mate = posBeforeFollowUp.makeMove(ourFollowUp).isCheckmate()
         val swing = if (mate) MATE_SWING else maxOf(0, bestCaptureSee(posBeforeFollowUp, exploited, c.us))
@@ -1353,11 +1447,16 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
         val ourFollowUp = c.ourPvMove(2) ?: return
         val posBeforeFollowUp = c.positionBeforePly(2) ?: return
         val vacatedSquare = c.move.from
+        // A clearance gets *another* piece through: the piece that just moved coming back along the
+        // line it left (Bxb5 ... Be2) clears nothing for anyone, and a pawn stepping onto the square
+        // the moved piece vacated is not using a line. (Both were reported: "Bxb5 clears c4 so that
+        // Be2 can come through", "Nf5 clears h4 so that h4 can come through".)
+        if (ourFollowUp.from == c.landing) return
         val travels = vacatedSquare in lineBetween(ourFollowUp.from, ourFollowUp.to) ||
             ourFollowUp.to == vacatedSquare
         if (!travels) return
         val mover = posBeforeFollowUp.pieceAt(ourFollowUp.from) ?: return
-        if (mover.color != c.us) return
+        if (mover.color != c.us || mover.type == PieceType.PAWN) return
 
         out.add(
             TacticInstance(
@@ -1445,26 +1544,63 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
     }
 
     /**
-     * WINDMILL: the PV shows one of our pieces returning to the same square again and again,
-     * each time with check, collecting material in between - Torre's rook shuttling to g7
-     * against Lasker. The tell is the repeated landing square, not the checks alone.
+     * WINDMILL (ANALYSIS_SPEC 5.3): a repeating discovered-check-plus-capture cycle. Torre's rook
+     * shuttles to g7 against Lasker: the rook gives a direct check, steps off the bishop's
+     * diagonal to take something with a *discovered* check, goes back, and so on while the king
+     * only ever has king moves.
+     *
+     * The first version only asked for "a slider lands on the same square twice, two captures and
+     * three checks somewhere in the PV", which any long forcing line satisfies: 15.Bxd7+ Qxd7
+     * Qb8+ ... Rxd7+ was a "windmill" because a bishop and, later, a rook both landed on d7. The
+     * cycle has to be the whole line, so this requires, inside one unbroken run of the mover's
+     * checks:
+     *  - at least [WINDMILL_MIN_CHECKS] consecutive checking moves, every reply a king move (a
+     *    windmill leaves the defender no choice);
+     *  - at least two *discovered* checks (the checking piece is not the one that moved) and at
+     *    least two captures;
+     *  - the *same* piece returning to a square it already landed on - the "blade" coming round
+     *    again, not two different pieces visiting one square.
      */
     private fun detectWindmill(c: Ctx, out: MutableList<TacticInstance>) {
         val ourIndices = c.pvMoves.indices.filter { it % 2 == 0 }
-        if (ourIndices.size < 4) return
+        if (ourIndices.size < WINDMILL_MIN_CHECKS) return
 
-        val landings = HashMap<Square, Int>()
-        var captures = 0
-        var checks = 0
+        // Longest run of consecutive own moves that all give check, replies all king moves.
+        var best: List<Int> = emptyList()
+        var run = ArrayList<Int>()
         for (i in ourIndices) {
+            val posAfter = c.positionAfterPly(i) ?: break
+            if (!posAfter.isInCheck(c.them)) {
+                run = ArrayList()
+                continue
+            }
+            val previousReplyForced = i == 0 || c.pvMoves[i - 1].piece == PieceType.KING
+            if (run.isNotEmpty() && !previousReplyForced) run = ArrayList()
+            run.add(i)
+            if (run.size > best.size) best = ArrayList(run)
+        }
+        if (best.size < WINDMILL_MIN_CHECKS) return
+
+        var captures = 0
+        var discovered = 0
+        var nextId = 0
+        val idAt = HashMap<Square, Int>()
+        val landings = HashMap<Pair<Int, Square>, Int>()
+        for (i in best) {
             val m = c.pvMoves[i]
             val posAfter = c.positionAfterPly(i) ?: continue
             if (m.isCapture) captures++
-            if (posAfter.isInCheck(c.them)) checks++
-            if (isSlider(m.piece)) landings[m.to] = (landings[m.to] ?: 0) + 1
+            val kingSq = posAfter.kingSquare(c.them)
+            if (Attacks.attackersOf(posAfter, kingSq, c.us).any { it != m.to }) discovered++
+            val id = idAt.remove(m.from) ?: nextId++
+            idAt[m.to] = id
+            if (isSlider(m.piece)) {
+                val key = id to m.to
+                landings[key] = (landings[key] ?: 0) + 1
+            }
         }
         val hub = landings.entries.firstOrNull { it.value >= 2 } ?: return
-        if (captures < 2 || checks < 3) return
+        if (captures < 2 || discovered < 2) return
 
         out.add(
             TacticInstance(
@@ -1472,27 +1608,36 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
                 byColor = c.us,
                 moveUci = c.uci,
                 targetSquares = listOf(c.after.kingSquare(c.them)),
-                involvedSquares = listOf(c.landing, hub.key),
+                involvedSquares = listOf(c.landing, hub.key.second),
                 materialSwing = captures * valueOf(PieceType.PAWN),
                 description = "${c.san} sets up a windmill: the rook keeps coming back to " +
-                    "${hub.key} with check, taking material each time round.",
+                    "${hub.key.second} with check, taking material each time round.",
                 confidence = PV_CONFIDENCE
             )
         )
     }
 
-    private companion object {
-        const val STATIC_CONFIDENCE = 0.6
-        const val PV_CONFIDENCE = 0.95
-        const val MIN_CONFIDENCE = 0.6
+    companion object {
+        private const val STATIC_CONFIDENCE = 0.6
+        private const val PV_CONFIDENCE = 0.95
+        private const val MIN_CONFIDENCE = 0.6
 
         /** Mate is not material, but it has to sort above every material motif. */
-        const val MATE_SWING = 10_000
+        private const val MATE_SWING = 10_000
 
-        const val MATE_PV_PLIES = 11
-        const val BREAKTHROUGH_PLIES = 5
-        const val PERPETUAL_PLIES = 6
-        const val PERPETUAL_NODES = 400
-        const val FORTRESS_DEFICIT = 500
+        private const val MATE_PV_PLIES = 11
+        private const val BREAKTHROUGH_PLIES = 5
+        private const val PERPETUAL_PLIES = 6
+        private const val PERPETUAL_NODES = 400
+        private const val FORTRESS_DEFICIT = 500
+
+        /** A windmill is at least this many checks in a row (ANALYSIS_SPEC 5.3). */
+        private const val WINDMILL_MIN_CHECKS = 4
+
+        /** ANALYSIS_SPEC 5.3 "Reporting": at most this many motifs survive per move. */
+        const val MAX_TACTICS_PER_MOVE = 2
+
+        /** The motifs that describe a mate. They rank above every other motif. */
+        val MATING_TYPES = setOf(TacticType.MATE_NET, TacticType.BACK_RANK_MATE, TacticType.SMOTHERED_MATE)
     }
 }

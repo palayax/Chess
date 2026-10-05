@@ -36,10 +36,7 @@ class BoardSurfaceView @JvmOverloads constructor(
         when (val instr = instruction) {
             is RenderInstruction.Board -> BoardFrameRenderer.renderBoardFrame(canvas, width, height, instr.spec)
             is RenderInstruction.Card ->
-                BoardFrameRenderer.renderCardFrame(
-                    canvas, width, height, instr.heading, instr.lines, instr.caption,
-                    subLines = instr.subLines,
-                )
+                BoardFrameRenderer.renderCardFrame(canvas, width, height, instr.content, instr.caption)
             null -> BoardFrameRenderer.renderCardFrame(canvas, width, height, fallbackTitle, listOf(fallbackSubtitle))
         }
     }

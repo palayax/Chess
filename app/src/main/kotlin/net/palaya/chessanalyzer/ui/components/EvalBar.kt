@@ -10,13 +10,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
+import net.palaya.chessanalyzer.R
 import net.palaya.chessanalyzer.core.analysis.EvalFormat
 import net.palaya.chessanalyzer.ui.theme.EvalBlackFill
 import net.palaya.chessanalyzer.ui.theme.EvalWhiteFill
@@ -47,11 +56,17 @@ fun EvalBar(
         label = "evalBarFraction",
     )
 
+    // One formatter for the bar, the move list and the video panel (ANALYSIS_SPEC §9.4),
+    // so the same position cannot read "+0.9" here and "0.9" there. Mate renders as mate.
+    val label = EvalFormat.score(evalCentipawns, mateIn)
+    val spoken = stringResource(R.string.cd_eval_bar, label)
     Box(
         modifier = modifier
             .width(width)
             .fillMaxHeight()
-            .background(EvalBlackFill),
+            .background(EvalBlackFill)
+            // TalkBack: "Evaluation +0.9" instead of a bare, unexplained number.
+            .clearAndSetSemantics { contentDescription = spoken },
         contentAlignment = Alignment.BottomCenter,
     ) {
         Canvas(modifier = Modifier.fillMaxHeight().width(width)) {
@@ -63,20 +78,29 @@ fun EvalBar(
                 size = Size(size.width, whiteHeight),
             )
         }
-        // One formatter for the bar, the move list and the video panel (ANALYSIS_SPEC §9.4),
-        // so the same position cannot read "+0.9" here and "0.9" there. Mate renders as mate.
-        val label = EvalFormat.score(evalCentipawns, mateIn)
         val labelIsOnWhiteSide = (mateIn?.let { it > 0 } ?: (evalCentipawns >= 0)) != orientationFlipped
-        Text(
-            text = label,
-            modifier = Modifier
-                .align(if (labelIsOnWhiteSide) Alignment.BottomCenter else Alignment.TopCenter)
-                .background(if (labelIsOnWhiteSide) EvalWhiteFill else EvalBlackFill)
-                .width(width),
-            textAlign = TextAlign.Center,
-            color = if (labelIsOnWhiteSide) EvalBlackFill else EvalWhiteFill,
-            style = MaterialTheme.typography.labelSmall,
-        )
+        // The bar is a fixed-width graphic, so its read-out must not grow with the system font
+        // scale: at 1.5x "+0.2" wrapped to two lines and clipped. The sp size is pinned by
+        // resolving it against a density whose fontScale is 1.
+        val density = LocalDensity.current
+        // Also pinned LTR: "+2.0" has no strong-direction character, so under an RTL locale bidi
+        // resolution rendered it "2.0+" (seen on-device, docs/screenshots/r13_u6_14_360_rtl_font10.png).
+        CompositionLocalProvider(
+            LocalDensity provides Density(density.density, fontScale = 1f),
+            LocalLayoutDirection provides LayoutDirection.Ltr,
+        ) {
+            Text(
+                text = label,
+                modifier = Modifier
+                    .align(if (labelIsOnWhiteSide) Alignment.BottomCenter else Alignment.TopCenter)
+                    .background(if (labelIsOnWhiteSide) EvalWhiteFill else EvalBlackFill)
+                    .width(width),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                color = if (labelIsOnWhiteSide) EvalBlackFill else EvalWhiteFill,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
 }
-

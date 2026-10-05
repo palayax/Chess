@@ -59,6 +59,7 @@ class SimulationBuilder {
         val winner = tactic.byColor
         val payoffTarget = maxOf(tactic.materialSwing, minimumPayoffCp)
 
+        var previous: Move? = null
         for (uci in pvUci) {
             if (truncatedUci.size >= maxPlies) break
             val move = try {
@@ -77,10 +78,12 @@ class SimulationBuilder {
                     move = move,
                     san = san,
                     after = next,
-                    tactic = if (tactic.moveUci == uci) tactic else null
+                    tactic = if (tactic.moveUci == uci) tactic else null,
+                    previous = previous
                 )
             )
 
+            previous = move
             pos = next
             if (next.isCheckmate()) break
             // Spec section 6: truncate at 8 plies OR once the payoff has actually been realised.
@@ -88,8 +91,9 @@ class SimulationBuilder {
         }
 
         val payoff = payoffDescription(startPosition, pos, sanList.size, winner, tactic, payoffOverride)
-        if (explanations.isNotEmpty()) {
-            // Spec section 6: the final frame states the payoff.
+        if (explanations.isNotEmpty() && payoff.isNotBlank()) {
+            // Spec section 6: the final frame states the payoff - when there is one that the board
+            // proves. A line that mates or nets material says so; one that does neither says nothing.
             explanations[explanations.lastIndex] = "${explanations.last()} ${colorName(winner)} $payoff."
         }
         return TacticSimulation(
@@ -125,16 +129,26 @@ class SimulationBuilder {
         move: Move,
         san: String,
         after: Position,
-        tactic: TacticInstance?
+        tactic: TacticInstance?,
+        previous: Move?
     ): String {
         val exchange = if (move.isCapture || move.promotion != null) ExchangeEvaluator.see(before, move) else 0
         val clauses = ArrayList<String>()
         clauses += movementClause(before, move, exchange)
 
-        materialClause(move, exchange)?.let { clauses += it }
+        // Taking back on the square the opponent just captured on is the second half of a trade.
+        // Exchange evaluation sees only the recapture ("Qxd6 ... winning a pawn" straight after
+        // "exd6"), so a recapture is judged by the two captures together: what this side took minus
+        // what it had just lost. An even pair says nothing; a pair that wins material says so.
+        val takesBack = previous != null && previous.isCapture && move.isCapture && previous.to == move.to
+        if (takesBack) {
+            tradeClause(move, previous!!, before)?.let { clauses += it }
+        } else {
+            materialClause(move, exchange)?.let { clauses += it }
+        }
         val motif = tactic
             ?.takeUnless { restatesTheCapture(it, move) }
-            ?.let { motifClause(it, before) }
+            ?.let { motifClause(it, before, after, move) }
         if (motif != null) {
             clauses += motif
         } else {
@@ -211,12 +225,26 @@ class SimulationBuilder {
         }
     }
 
+    /** "winning a pawn" / "winning material" for a recapture that nets that over the pair of captures, else null. */
+    private fun tradeClause(move: Move, previous: Move, before: Position): String? {
+        val taken = capturedValue(move, before)
+        val lost = previous.capturedPiece?.let { PieceValues.of(it) } ?: PieceValues.of(PieceType.PAWN)
+        val net = taken - lost
+        if (net < minimumPayoffCp) return null
+        return ExchangeEvaluator.describeGain(net)?.let { "winning $it" } ?: "winning material"
+    }
+
+    private fun capturedValue(move: Move, before: Position): Int = when {
+        move.isEnPassant -> PieceValues.of(PieceType.PAWN)
+        else -> before.pieceAt(move.to)?.type?.let { PieceValues.of(it) } ?: 0
+    }
+
     /**
      * Names the motif and the concrete pieces and squares it hits. Squares are read off the
      * position BEFORE the move (the victims are still standing there), and the mover's own
      * pieces are never listed as targets.
      */
-    private fun motifClause(tactic: TacticInstance, before: Position): String? {
+    private fun motifClause(tactic: TacticInstance, before: Position, after: Position, move: Move): String? {
         val targets = describeSquares(tactic.targetSquares, before, excludeColor = tactic.byColor)
         val involved = describeSquares(tactic.involvedSquares, before, excludeColor = tactic.byColor)
         return when (tactic.type) {
@@ -231,16 +259,23 @@ class SimulationBuilder {
             TacticType.DISCOVERED_ATTACK -> "uncovering an attack from behind it"
             TacticType.DISCOVERED_CHECK -> "uncovering a discovered check"
             TacticType.DOUBLE_CHECK -> "giving double check"
-            TacticType.HANGING_PIECE ->
-                if (targets != null) "collecting $targets" else null
+            // The piece is attacked, not collected: the opponent moves next. Said only when the board
+            // shows the target attacked by the mover and with nothing defending it.
+            TacticType.HANGING_PIECE -> undefendedTargets(tactic, after, move.color)?.let { "attacking $it, which nothing defends" }
             TacticType.TRAPPED_PIECE ->
                 if (targets != null) "trapping $targets" else "trapping the piece"
-            TacticType.DEFLECTION, TacticType.REMOVING_THE_DEFENDER ->
-                if (targets != null) "dragging $targets off the defence" else "removing the defender"
+            // The target squares of these motifs are what the defender was holding, not the defender:
+            // the defender is the first involved square (read off the position before the move).
+            TacticType.DEFLECTION ->
+                if (involved != null) "dragging ${involved.substringBefore(" and ").substringBefore(", ")} away from the defence"
+                else "dragging a defender away"
+            TacticType.REMOVING_THE_DEFENDER -> "removing the defender"
             TacticType.DECOY ->
                 if (involved != null) "luring $involved onto a fatal square" else "luring the defender onto a fatal square"
-            TacticType.OVERLOADED_PIECE ->
-                if (targets != null) "overloading $targets" else "overloading the last defender"
+            TacticType.OVERLOADED_PIECE -> {
+                val overloaded = describeSquares(tactic.involvedSquares.take(1), before, excludeColor = tactic.byColor)
+                if (overloaded != null) "overloading $overloaded" else "overloading the last defender"
+            }
             TacticType.INTERFERENCE -> "cutting the defending line in two"
             TacticType.CLEARANCE -> "clearing the line for the pieces behind it"
             TacticType.ZWISCHENZUG -> "slipping in an in-between move before the recapture"
@@ -257,6 +292,25 @@ class SimulationBuilder {
             TacticType.X_RAY, TacticType.BATTERY ->
                 if (targets != null) "lining up on $targets" else "lining the heavy pieces up"
             TacticType.FORTRESS -> "sealing the position shut"
+        }
+    }
+
+    /**
+     * "the pawn on e5" for each target of a HANGING_PIECE motif that the mover really does attack in
+     * [after] and that nothing defends; null when no target passes, so nothing is claimed.
+     */
+    private fun undefendedTargets(tactic: TacticInstance, after: Position, mover: Color): String? {
+        val parts = tactic.targetSquares.distinctBy { it.index }.mapNotNull { square ->
+            val piece = after.pieceAt(square) ?: return@mapNotNull null
+            if (piece.color == mover || piece.type == PieceType.KING) return@mapNotNull null
+            if (BoardFacts.attackers(after, square, mover).isEmpty()) return@mapNotNull null
+            if (BoardFacts.defenders(after, square).isNotEmpty()) return@mapNotNull null
+            "the ${PieceValues.name(piece.type)} on $square"
+        }
+        return when (parts.size) {
+            0 -> null
+            1 -> parts[0]
+            else -> parts.dropLast(1).joinToString(", ") + " and " + parts.last()
         }
     }
 
@@ -357,8 +411,12 @@ class SimulationBuilder {
     // -----------------------------------------------------------------------
 
     /**
-     * The real payoff of the line: mate distance when the line actually mates, otherwise the
-     * material [winner] has netted between the start position and the end of the truncated line.
+     * The real payoff of the line, or "" when the board proves none: mate distance when the line
+     * actually mates, otherwise the material [winner] has netted between the start position and the
+     * end of the truncated line - *settled*, so that a line that stops right after a capture is not
+     * credited with a piece the opponent can take straight back. A line that neither mates nor nets
+     * material says nothing rather than a vague "gains a decisive advantage" the data cannot back
+     * (ANALYSIS_SPEC section 6.1).
      */
     private fun payoffDescription(
         start: Position,
@@ -373,7 +431,7 @@ class SimulationBuilder {
             return "mates in $fullMoves"
         }
         // Draws are a payoff too: the stalemate trick and the perpetual are played from a lost
-        // position, and the desperado from a doomed one — "wins material" is the wrong scale.
+        // position, and the desperado from a doomed one - "wins material" is the wrong scale.
         if (finalPosition.isStalemate()) return "forces stalemate: a draw from a lost position"
         when (tactic.type) {
             TacticType.PERPETUAL_CHECK -> return "forces a draw by repetition"
@@ -382,14 +440,13 @@ class SimulationBuilder {
             TacticType.PASSED_PAWN_BREAKTHROUGH -> return "creates a passed pawn nobody can catch"
             else -> Unit
         }
-        val gain = ExchangeEvaluator.netGain(start, finalPosition, winner)
+        val gain = ExchangeEvaluator.settledGain(start, finalPosition, winner)
         ExchangeEvaluator.describeGain(gain)?.let { return "wins $it" }
-        if (gain > 0) return "wins material"
-        // Nothing cashed in yet: a reference knows what comes next, a game excursion does not.
+        if (gain >= minimumPayoffCp) return "wins material"
+        // Nothing cashed in: a reference knows what comes next (the corpus verified it), a game
+        // excursion does not and says nothing.
         payoffOverride?.let { return it }
-        if (finalPosition.isInCheck(winner.opposite())) return "keeps the king under fire"
-        if (tactic.type == TacticType.MATE_NET) return "leaves the king in a mating net"
-        if (gain <= -minimumPayoffCp) return "has invested material in the attack"
-        return "gains a decisive advantage"
+        if (tactic.type == TacticType.MATE_NET && tactic.confidence >= 0.95) return "leaves the king in a mating net"
+        return ""
     }
 }

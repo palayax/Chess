@@ -153,10 +153,18 @@ enum class MaterialPayoff { WHOLE_QUEEN, ROOK, PIECE, SERIOUS_MATERIAL, PAWN, BE
 /** Material actually netted along a line, by unit. See [NarrationVocabulary.materialGain]. */
 enum class MaterialGain { QUEEN, ROOK, PIECE, PAWN }
 
-/** What a missed line delivers when it does not simply cash material or mate. */
+/**
+ * What a missed line delivers when it does not simply cash material or mate.
+ *
+ * [LINE_ENDS] is the honest answer for a line whose end the boards do not turn into a claim. The two
+ * kinds before it, [INVESTED_MATERIAL] and [DECISIVE_ADVANTAGE], were that answer's predecessors ("X
+ * has invested material in the attack", "X ends up completely on top"): nothing in the data
+ * supported either, so the generator no longer emits them. They stay in the enum so a locale's table
+ * stays complete.
+ */
 enum class PayoffKind {
     DRAW_BY_REPETITION, STALEMATE, DESPERADO, PASSED_PAWN, SMALL_MATERIAL,
-    KING_UNDER_FIRE, MATING_NET, INVESTED_MATERIAL, DECISIVE_ADVANTAGE
+    KING_UNDER_FIRE, MATING_NET, INVESTED_MATERIAL, DECISIVE_ADVANTAGE, LINE_ENDS
 }
 
 /** The prize a puzzle prompt promises. */
@@ -194,6 +202,42 @@ enum class OpeningFamily(vararg val keywords: String) {
     RETI("Reti"),
     BIRD("Bird")
 }
+
+/**
+ * Which story [Sentence.GameSummary] tells. The rules that pick one are in ANALYSIS_SPEC §12 and
+ * implemented by [GameSummarySentence]; a locale only renders the facts it is handed.
+ */
+enum class SummaryKind {
+    /** The biggest swing was the loser's error, from a position that was fine. */
+    DECIDED_BY_ERROR,
+
+    /** The biggest swing was the loser's error, from a position that was already worse. */
+    SEALED_BY_ERROR,
+
+    /** The eventual winner was clearly behind until the loser's error. */
+    COMEBACK,
+
+    /** The biggest swing was the winner's own error, and the winner still won. */
+    WON_DESPITE_ERROR,
+
+    /** A decisive result and no big error from either side. */
+    CLEAN_WIN,
+
+    /** A game under the short-game length (a win, a mate or a draw). */
+    SHORT_GAME,
+
+    /** A draw in which one error was nevertheless the biggest swing. */
+    DRAW_WITH_SWING,
+
+    /** No big error from either side, and nothing in the result to add. */
+    CLOSE_CLEAN,
+
+    /** The PGN carries no result. */
+    UNFINISHED
+}
+
+/** What kind of error a summary names, from the classification of the turning-point move. */
+enum class SummaryError { BLUNDER, MISTAKE, MISSED_WIN, BIG_SWING }
 
 /** Notation that [NotationGuard] found in free text, parsed so a locale can speak it. */
 sealed interface ParsedNotation {
@@ -259,8 +303,8 @@ sealed interface Sentence {
     /** "Philidor Defense (C41)" — a title-card line. */
     data class CardOpeningLine(val name: String, val eco: String?) : Sentence
 
-    /** "1-0 · 34 plies" */
-    data class CardResultLine(val result: String, val plies: Int) : Sentence
+    /** "1-0 · 17 moves" (full moves, as the Summary counts them: a player counts moves, not plies). */
+    data class CardResultLine(val result: String, val fullMoves: Int) : Sentence
 
     /** "White 85.0% · Black 80.1%" */
     data class CardAccuracyLine(val whiteAccuracy: String, val blackAccuracy: String) : Sentence
@@ -467,6 +511,12 @@ sealed interface Sentence {
     /** "It's not losing, it's just loose." */
     data object InaccuracyNote : Sentence
 
+    /**
+     * "The evaluation moves in White's favour." - what a quiet move did, when it carried no tactic
+     * and did not change who is better, but did move the evaluation enough to be worth a line.
+     */
+    data class EvalShift(val subject: Subject, val favours: Boolean) : Sentence
+
     // -- The missed-tactic excursion ----------------------------------------------------------
 
     /** "Now hold on. Let's rewind, because there was something much better here." */
@@ -588,10 +638,51 @@ sealed interface Sentence {
     /** "It's a short game, so treat those rating estimates as a rough guide rather than gospel." */
     data object ShortGameCaveat : Sentence
 
+    // -- On-screen summary line ---------------------------------------------------------------
+
+    /**
+     * "Watch what happens: h5 starts the line. The pawn on g4 cannot be held - taking it wins
+     * material." The lead-in of a missed-tactic walkthrough, on screen, so [firstSan] is notation.
+     *
+     * [point] is the detector's own one-sentence description of the motif, already normalised by
+     * [SimulationIntro] to a single capitalised sentence with one full stop, **or null** when the
+     * motif has no description. It is English prose from `core.tactics`; a locale that cannot
+     * translate it should say something about [tactic] instead and ignore [point].
+     */
+    data class WalkthroughIntro(val firstSan: String?, val tactic: TacticType, val point: String?) : Sentence
+
+    /**
+     * One sentence on how the game unfolded, built by [GameSummarySentence] from the report alone.
+     * "You were fine until move 11, then a blunder decided it." / "White won, and neither side
+     * made a big mistake." / "A close game: neither side made a big mistake."
+     *
+     * [subject] is the side the sentence is about (the player who made the turning move, or the
+     * winner) and [opponent] the other; both are null for the kinds about the game as a whole.
+     * [viewerKnown] says the user's side is known, which is what turns a third-person [opponent]
+     * into "your opponent" instead of a colour. [moveNumber] is the full-move number of the turning
+     * move, [fullMoves] the length of the game; each is set only for the kinds that state it.
+     */
+    data class GameSummary(
+        val kind: SummaryKind,
+        val subject: Subject? = null,
+        val opponent: Subject? = null,
+        val viewerKnown: Boolean = false,
+        val moveNumber: Int? = null,
+        val error: SummaryError? = null,
+        val fullMoves: Int? = null,
+        val byMate: Boolean = false
+    ) : Sentence {
+        override val poolKey: String get() = "GameSummary.$kind"
+    }
+
     // -- Lessons ------------------------------------------------------------------------------
 
-    /** Lead-in fragment before the first lesson: "So what do you take away from this? " */
-    data object LessonLead : Sentence
+    /**
+     * Lead-in fragment before the first lesson: "So what do you take away from this? "
+     * [count] is how many lessons follow, so a lead that counts them ("Three things to take out of
+     * this game") is only ever used when it is true.
+     */
+    data class LessonLead(val count: Int) : Sentence
 
     /** "You walked past three forks in this game. They were on e five, c seven and f three." */
     data class LessonRepeatedMiss(val subject: Subject, val type: TacticType, val count: Int, val squares: List<Square>) : Sentence

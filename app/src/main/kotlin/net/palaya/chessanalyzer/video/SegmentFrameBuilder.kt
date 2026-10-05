@@ -5,7 +5,6 @@ import net.palaya.chessanalyzer.core.chess.parseUci
 import net.palaya.chessanalyzer.core.narration.BoardDirective
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.SegmentKind
-import net.palaya.chessanalyzer.core.narration.VideoGameHeader
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.data.mapper.fenToBoardState
 import net.palaya.chessanalyzer.data.mapper.toUiSquare
@@ -16,7 +15,8 @@ import net.palaya.chessanalyzer.ui.model.algebraicToSquare
 /** What one instant within a segment should render as. */
 sealed interface RenderInstruction {
     data class Board(val spec: BoardFrameRenderer.BoardFrameSpec) : RenderInstruction
-    data class Card(val heading: String, val lines: List<String>, val caption: String, val subLines: List<String> = emptyList()) : RenderInstruction
+    /** A title card: its words as [CardContent] (fitted by the renderer) and the caption bar under it ("" = none). */
+    data class Card(val content: CardContent, val caption: String) : RenderInstruction
 }
 
 /**
@@ -141,14 +141,12 @@ object SegmentFrameBuilder {
                 )
             )
 
-            is BoardDirective.Card -> {
-                val subLines = when (segment.kind) {
-                    SegmentKind.INTRO -> introSubLines(script.header)
-                    SegmentKind.OUTRO_SUMMARY, SegmentKind.OUTRO_LESSONS -> outroSubLines(script)
-                    else -> emptyList()
-                }
-                RenderInstruction.Card(directive.heading, directive.lines, segment.caption, subLines)
-            }
+            // R6c: the words of a title card come from CardContents (each fact once, whole-percent accuracy,
+            // names isolated), and the intro and the final numbers carry no caption bar (the card says it).
+            is BoardDirective.Card -> RenderInstruction.Card(
+                CardContents.forSegment(script, segment.kind, directive.heading, directive.lines),
+                CardContents.captionFor(segment.kind, segment.caption),
+            )
         }
 
         // A missed-tactic excursion can now be more than one segment (a pivot-in beat, one
@@ -169,36 +167,6 @@ object SegmentFrameBuilder {
         } else {
             result
         }
-    }
-
-    /** "White: Name (rating)  ·  Black: Name (rating)", result, opening — only for present fields. */
-    private fun introSubLines(header: VideoGameHeader?): List<String> {
-        if (header == null) return emptyList()
-        val lines = ArrayList<String>()
-        val white = header.whiteRating?.let { "${header.whiteName} ($it)" } ?: header.whiteName
-        val black = header.blackRating?.let { "${header.blackName} ($it)" } ?: header.blackName
-        lines.add("White: $white   ·   Black: $black")
-        if (header.result.isNotBlank()) lines.add("Result: ${header.result}")
-        header.openingName?.let { name ->
-            lines.add(if (header.openingEco != null) "$name (${header.openingEco})" else name)
-        }
-        return lines
-    }
-
-    /** Accuracy + estimated rating per side, using real names from [VideoScript.header] when present. */
-    private fun outroSubLines(script: VideoScript): List<String> {
-        val lines = ArrayList<String>()
-        script.whiteAccuracy?.let { acc ->
-            val name = script.header?.whiteName ?: "White"
-            val rating = script.whiteEstimatedRating?.let { " (est. $it)" } ?: ""
-            lines.add("$name: ${"%.1f".format(acc)}% accuracy$rating")
-        }
-        script.blackAccuracy?.let { acc ->
-            val name = script.header?.blackName ?: "Black"
-            val rating = script.blackEstimatedRating?.let { " (est. $it)" } ?: ""
-            lines.add("$name: ${"%.1f".format(acc)}% accuracy$rating")
-        }
-        return lines
     }
 
     private fun buildPlayLine(

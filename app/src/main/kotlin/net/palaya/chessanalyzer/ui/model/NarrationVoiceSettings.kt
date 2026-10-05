@@ -1,29 +1,44 @@
 package net.palaya.chessanalyzer.ui.model
 
-import net.palaya.chessanalyzer.core.narration.cloud.GoogleCloudVoice
-
 /**
  * Which [net.palaya.chessanalyzer.video.NarrationVoiceProvider] narration should use.
  *
- * [NEURAL] (on-device Kokoro/Piper) is the intended default; [DEVICE] is the floor every
- * fallback lands on; [CLOUD] is Google Cloud Text-to-Speech with the user's own API key, an opt-in
- * upgrade that is never selected automatically and never a prerequisite for anything.
+ * [NEURAL] (the on-device Kokoro voice, bundled in the APK) is the default; [DEVICE] is the floor
+ * every fallback lands on and the user's "use the phone's built-in voice instead" choice. Everything runs locally: there is no cloud option. A Google Cloud TTS
+ * provider (`CLOUD`) existed until Round 13 and was removed because it needs a billing account,
+ * which breaks the owner's "free, no credit card, local only" rule.
  */
-enum class NarrationProviderChoice { DEVICE, NEURAL, CLOUD }
+enum class NarrationProviderChoice {
+    DEVICE,
+    NEURAL;
+
+    companion object {
+        /**
+         * Reads a persisted provider name, tolerating anything this build no longer knows. The
+         * removed `CLOUD` value (written by pre-Round-13 builds that had the Google Cloud voice),
+         * a corrupt string or a missing value all come back as null; callers fall back to
+         * [NEURAL], the default. Never throws — an old DataStore value must not be able to crash settings.
+         */
+        fun fromPersistedOrNull(name: String?): NarrationProviderChoice? =
+            name?.let { n -> entries.firstOrNull { it.name == n } }
+    }
+}
 
 /**
- * Which on-device neural voice model tier [NarrationProviderChoice.NEURAL] uses. Both run fully
- * offline via sherpa-onnx (Apache 2.0) once downloaded — see
- * [net.palaya.chessanalyzer.video.VoiceModelProvisioner] for the pinned URL/SHA-256/size of each
- * and [net.palaya.chessanalyzer.video.NeuralTtsProvider] for how a tier is turned into audio.
+ * The on-device neural voice [NarrationProviderChoice.NEURAL] uses. It runs fully offline via
+ * sherpa-onnx (Apache 2.0) from a model bundled in the APK; see
+ * [net.palaya.chessanalyzer.video.BundledVoiceInstaller] for how it reaches app storage and
+ * [net.palaya.chessanalyzer.video.NeuralTtsProvider] for how it is turned into audio.
+ *
+ * Kokoro is the only tier. Piper, the smaller voice that existed for the metered-network fallback,
+ * was dropped with the model downloads (Round 13); a persisted `neural_voice_tier = PIPER` from an
+ * older build no longer parses and resolves to [KOKORO].
  */
 enum class NeuralVoiceTier(
     val label: String,
     val qualityHint: String,
     /**
-     * Which of the model's built-in speakers to synthesize with. Piper's
-     * `en_US-ljspeech-medium` is single-speaker, so 0 is the only valid value there. Kokoro
-     * v0.19 ships **11** English speakers (ids 0-10, see
+     * Which of the model's built-in speakers to synthesize with. Kokoro v0.19 ships **11** English speakers (ids 0-10, see
      * [net.palaya.chessanalyzer.video.KokoroVoices]) and defaulting to 0 would be an accident
      * rather than a choice — see [KOKORO_DEFAULT_SPEAKER_ID] for why this one.
      */
@@ -61,9 +76,6 @@ enum class NeuralVoiceTier(
      */
     val measuredWpm: Int,
 ) {
-    /** Piper (VITS) trained on the public-domain LJ Speech dataset — smaller, faster. */
-    PIPER("Piper", "Smaller, faster", speakerId = 0, lengthScale = 1.0f, measuredWpm = 165),
-
     /** Kokoro-82M, Apache 2.0 — larger, slower, noticeably more natural. */
     KOKORO(
         "Kokoro",
@@ -85,62 +97,21 @@ enum class NeuralVoiceTier(
 const val KOKORO_DEFAULT_SPEAKER_ID: Int = 1
 
 /**
- * User-facing narration-voice preferences (Settings screen). The provider/tier choice is not
- * sensitive and lives in plain DataStore; [apiKey] is the one field that matters for security —
- * see [net.palaya.chessanalyzer.data.NarrationSettingsRepository] for how it's actually stored
- * (Keystore-encrypted, never logged, never compiled into the app).
+ * User-facing narration-voice preferences (Settings screen). Nothing here is sensitive; it all
+ * lives in plain DataStore (see [net.palaya.chessanalyzer.data.NarrationSettingsRepository]).
  *
- * Whether a [neuralTier]'s model is actually present on disk is deliberately NOT a field here —
- * that is runtime storage state, re-derived cheaply from [net.palaya.chessanalyzer.video.VoiceModelProvisioner]
- * whenever Settings opens, the same way [net.palaya.chessanalyzer.video.NarrationStore]'s size is
- * (see `AnalysisViewModel.narrationStorageBytes`) — not a persisted preference.
+ * Whether the voice is installed is deliberately NOT a field here: it is runtime storage state,
+ * re-derived from [net.palaya.chessanalyzer.video.BundledVoiceInstaller], not a persisted preference.
  */
 data class NarrationVoiceSettings(
-    val provider: NarrationProviderChoice = NarrationProviderChoice.DEVICE,
-    /**
-     * Kokoro is the intended default voice — it is the whole reason the neural tier exists. A
-     * device that only has Piper installed (metered connection, or a user who downloaded Piper
-     * by hand) still narrates with Piper: `AnalysisViewModel.buildNarrationProvider()` falls back
-     * to whichever tier is actually on disk rather than dropping to the robotic device voice.
-     */
+    val provider: NarrationProviderChoice = NarrationProviderChoice.NEURAL,
+    /** Kokoro, the only tier. Kept as a field so a persisted older value still has somewhere to resolve. */
     val neuralTier: NeuralVoiceTier = NeuralVoiceTier.KOKORO,
     /**
-     * The user's own Google Cloud API key for [NarrationProviderChoice.CLOUD], held in
-     * Keystore-backed encrypted storage. Empty until the setup wizard has validated and saved one.
-     * The security design (user-supplied, never embedded in the APK, never logged, encrypted at
-     * rest) is the whole reason a cloud voice can be offered at all.
-     */
-    val apiKey: String = "",
-    /** Which Google Cloud voice [NarrationProviderChoice.CLOUD] speaks with. */
-    val cloudVoice: GoogleCloudVoice = GoogleCloudVoice.DEFAULT,
-    /** Whether the API key is sitting in Keystore-backed encrypted storage right now. */
-    val apiKeyIsEncrypted: Boolean = true,
-    /**
-     * True once the user has picked a narration provider themselves in Settings — including
-     * picking Device again. [provider] alone cannot express this: its default IS [DEVICE], so
-     * "still on the default" and "deliberately chose Device" are indistinguishable without this
-     * flag, and the automatic promotion to the neural voice would happily override a deliberate
-     * choice. Persisted, so the promotion can only ever happen to a user who never expressed one.
+     * True once the user has picked a narration provider themselves in Settings, including picking
+     * Device (the "use the phone's built-in voice instead" switch). [provider] alone cannot express
+     * this when both values are reachable defaults of an older build.
      */
     val providerExplicitlyChosen: Boolean = false,
-) {
-    /** True once a Cloud key has been saved — the gate on selecting [NarrationProviderChoice.CLOUD] at all. */
-    val hasCloudKey: Boolean get() = apiKey.isNotBlank()
-}
+)
 
-/**
- * Runtime (not persisted) state of the on-device neural voice models — which tiers are actually
- * downloaded on THIS device right now, how much disk each uses, and any in-flight download. Kept
- * separate from [NarrationVoiceSettings] the same way `AnalysisViewModel.narrationStorageBytes`
- * is kept separate from it: this is storage state re-derived from
- * [net.palaya.chessanalyzer.video.VoiceModelProvisioner], not a user preference.
- */
-data class NeuralModelUiState(
-    val installedTiers: Set<NeuralVoiceTier> = emptySet(),
-    val installedSizeBytes: Map<NeuralVoiceTier, Long> = emptyMap(),
-    val downloadingTier: NeuralVoiceTier? = null,
-    val downloadProgress: Float = 0f,
-    val lastError: String? = null,
-) {
-    fun isInstalled(tier: NeuralVoiceTier): Boolean = tier in installedTiers
-}

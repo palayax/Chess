@@ -30,7 +30,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+        // Only on a genuine launch. A recreation (rotation, font scale, language) re-delivers the same
+        // launch intent, and re-reading it would import the shared game a second time and push a
+        // fresh analysis over whatever screen the user was on.
+        if (savedInstanceState == null) {
+            pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+        }
 
         setContent {
             var pendingImportPgn by pendingImportPgnState

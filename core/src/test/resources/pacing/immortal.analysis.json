@@ -1,0 +1,3243 @@
+{
+    "schema": "palaya.analysis/1",
+    "gameId": "f3af5d62f205",
+    "pgnSha256": "e6641d1b50d7341c3623dc2e25714d3901ca50fe56a61578a5f0625b54d70a25",
+    "gameIndex": 1,
+    "tags": {
+        "Event": "Casual Game",
+        "Site": "London ENG",
+        "Date": "1851.06.21",
+        "Round": "?",
+        "White": "Adolf Anderssen",
+        "Black": "Lionel Kieseritzky",
+        "Result": "1-0",
+        "ECO": "C33"
+    },
+    "engine": {
+        "name": "Stockfish 19",
+        "binarySha256": "45bc8e4969147db9c2eb533810637994619bff0eacc81ccfd9854394901bcbd0",
+        "threads": 4,
+        "hashMb": 512,
+        "multiPv": 3,
+        "depth": 12,
+        "movetimeCapMs": 30000
+    },
+    "fingerprint": "011649e72fe32fcc993a9f3192620e9ac28ea63c6b66be1cc2842d1af94d8c3f",
+    "evals": [
+        {
+            "ply": 0,
+            "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 34,
+                    "depth": 12,
+                    "pvUci": [
+                        "e2e4",
+                        "e7e5",
+                        "g1f3",
+                        "g8f6",
+                        "d2d4",
+                        "f6e4",
+                        "f1d3",
+                        "d7d5",
+                        "f3e5",
+                        "f8d6",
+                        "e1g1",
+                        "e8g8",
+                        "b1c3",
+                        "e4c3",
+                        "b2c3"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 28,
+                    "depth": 12,
+                    "pvUci": [
+                        "g1f3",
+                        "d7d5",
+                        "d2d4",
+                        "g8f6",
+                        "c2c4",
+                        "e7e6",
+                        "b1c3",
+                        "f8b4",
+                        "c1g5",
+                        "h7h6",
+                        "g5f6",
+                        "d8f6",
+                        "d1a4",
+                        "b8c6"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 28,
+                    "depth": 12,
+                    "pvUci": [
+                        "d2d4",
+                        "g8f6",
+                        "g1f3",
+                        "e7e6",
+                        "c2c4",
+                        "d7d5",
+                        "b1c3",
+                        "f8b4",
+                        "c1g5",
+                        "d5c4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 1,
+            "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -30,
+                    "depth": 12,
+                    "pvUci": [
+                        "e7e5",
+                        "g1f3",
+                        "b8c6",
+                        "b1c3",
+                        "g8f6",
+                        "f1b5",
+                        "f8b4",
+                        "c3d5",
+                        "f6d5",
+                        "e4d5",
+                        "c6d4",
+                        "f3d4",
+                        "e5d4",
+                        "e1g1"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -31,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c5",
+                        "g1f3",
+                        "e7e6",
+                        "d2d4",
+                        "c5d4",
+                        "f3d4",
+                        "a7a6",
+                        "f1d3",
+                        "d8c7",
+                        "e1g1",
+                        "g8f6",
+                        "e4e5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -35,
+                    "depth": 12,
+                    "pvUci": [
+                        "e7e6",
+                        "b1c3",
+                        "d7d5",
+                        "d2d4",
+                        "g8f6",
+                        "e4e5",
+                        "f6d7",
+                        "c3e2",
+                        "c7c5",
+                        "g1f3",
+                        "b8c6",
+                        "c2c3",
+                        "c5d4",
+                        "c3d4",
+                        "f7f6",
+                        "e2f4",
+                        "f8b4",
+                        "c1d2",
+                        "b4d2",
+                        "d1d2"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 2,
+            "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 32,
+                    "depth": 12,
+                    "pvUci": [
+                        "g1f3",
+                        "b8c6",
+                        "f1b5",
+                        "a7a6",
+                        "b5a4",
+                        "f8e7",
+                        "e1g1",
+                        "b7b5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 9,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "g8f6",
+                        "g1f3",
+                        "b8c6",
+                        "f1b5",
+                        "c6d4",
+                        "f3d4",
+                        "e5d4",
+                        "e4e5",
+                        "d4c3",
+                        "e5f6",
+                        "d8f6",
+                        "d2c3",
+                        "f6e5",
+                        "b5e2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 8,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1c4",
+                        "g8f6",
+                        "d2d3",
+                        "c7c6",
+                        "g1f3",
+                        "d7d5",
+                        "c4b3",
+                        "a7a5",
+                        "a2a4",
+                        "f8b4",
+                        "c2c3",
+                        "b4d6",
+                        "e4d5",
+                        "c6d5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 3,
+            "fen": "rnbqkbnr/pppp1ppp/8/4p3/4PP2/8/PPPP2PP/RNBQKBNR b KQkq f3 0 2",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 48,
+                    "depth": 12,
+                    "pvUci": [
+                        "e5f4",
+                        "g1f3",
+                        "g7g5",
+                        "d2d4",
+                        "g5g4",
+                        "f3e5",
+                        "d8h4",
+                        "g2g3",
+                        "f4g3",
+                        "d1g4",
+                        "g3g2",
+                        "g4h4",
+                        "g2h1q",
+                        "b1c3",
+                        "f8e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 32,
+                    "depth": 12,
+                    "pvUci": [
+                        "d7d5",
+                        "e4d5",
+                        "e5f4",
+                        "g1f3",
+                        "g8f6",
+                        "f1c4"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 2,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c6",
+                        "g1f3",
+                        "e5f4",
+                        "d2d4",
+                        "g8f6",
+                        "e4e5",
+                        "f6d5",
+                        "b1c3",
+                        "f8b4",
+                        "c1d2",
+                        "d5e3",
+                        "d2e3",
+                        "f4e3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 4,
+            "fen": "rnbqkbnr/pppp1ppp/8/8/4Pp2/8/PPPP2PP/RNBQKBNR w KQkq - 0 3",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -40,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1c4",
+                        "b8c6",
+                        "d2d4",
+                        "d8h4",
+                        "e1f1",
+                        "d7d6",
+                        "g1f3",
+                        "c8g4",
+                        "f3h4",
+                        "g4d1",
+                        "c2c3",
+                        "g7g5",
+                        "h4f3",
+                        "f8h6",
+                        "h2h4"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -42,
+                    "depth": 12,
+                    "pvUci": [
+                        "g1f3",
+                        "g7g5",
+                        "h2h4",
+                        "g5g4",
+                        "f3e5",
+                        "d8e7",
+                        "d2d4",
+                        "d7d6",
+                        "e5g4",
+                        "e7e4",
+                        "d1e2",
+                        "e4e2",
+                        "f1e2",
+                        "h7h5",
+                        "g4f2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -50,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1e2",
+                        "d7d5",
+                        "e4d5",
+                        "f8d6",
+                        "d2d4",
+                        "c7c6",
+                        "d5c6",
+                        "d8h4",
+                        "e1f1",
+                        "b8c6",
+                        "g1f3",
+                        "h4h6"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 5,
+            "fen": "rnbqkbnr/pppp1ppp/8/8/2B1Pp2/8/PPPP2PP/RNBQK1NR b KQkq - 1 3",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 58,
+                    "depth": 12,
+                    "pvUci": [
+                        "d8h4",
+                        "e1f1",
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "b1c3",
+                        "f8e7",
+                        "d2d4",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "d4e5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 50,
+                    "depth": 12,
+                    "pvUci": [
+                        "d7d6",
+                        "b1c3",
+                        "d8h4",
+                        "e1f1",
+                        "g8f6",
+                        "g1f3"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 49,
+                    "depth": 12,
+                    "pvUci": [
+                        "b8c6",
+                        "d2d4",
+                        "d8h4",
+                        "e1f1",
+                        "d7d6",
+                        "g1f3",
+                        "h4h6",
+                        "d1d2",
+                        "c8g4",
+                        "h2h4",
+                        "f8e7",
+                        "b1c3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 6,
+            "fen": "rnb1kbnr/pppp1ppp/8/8/2B1Pp1q/8/PPPP2PP/RNBQK1NR w KQkq - 2 4",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -52,
+                    "depth": 12,
+                    "pvUci": [
+                        "e1f1",
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "b1c3",
+                        "c7c6",
+                        "d1e2",
+                        "f6h5",
+                        "h1g1",
+                        "b7b5",
+                        "c4b3",
+                        "a7a5",
+                        "a2a4"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -171,
+                    "depth": 12,
+                    "pvUci": [
+                        "e1e2",
+                        "f7f5",
+                        "d2d3",
+                        "f5e4",
+                        "d3e4",
+                        "f8c5",
+                        "d1d5",
+                        "h4e7",
+                        "c1f4",
+                        "d7d6",
+                        "b1c3",
+                        "g8f6",
+                        "d5d3",
+                        "b8c6"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -745,
+                    "depth": 12,
+                    "pvUci": [
+                        "g2g3",
+                        "f4g3",
+                        "c4f7",
+                        "e8f7",
+                        "d1f3",
+                        "g8f6",
+                        "h2g3",
+                        "h4e4",
+                        "f3e4",
+                        "f6e4",
+                        "b1c3",
+                        "e4g3",
+                        "h1h2"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 7,
+            "fen": "rnb1kbnr/pppp1ppp/8/8/2B1Pp1q/8/PPPP2PP/RNBQ1KNR b kq - 3 4",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 49,
+                    "depth": 12,
+                    "pvUci": [
+                        "d7d6",
+                        "b1c3",
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "d2d4",
+                        "f8e7",
+                        "e4e5",
+                        "d6e5",
+                        "d4e5",
+                        "f6h5",
+                        "h1g1",
+                        "c8e6",
+                        "c3d5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 48,
+                    "depth": 12,
+                    "pvUci": [
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "d2d4",
+                        "f8e7",
+                        "b1c3",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "d4e5",
+                        "f6h5",
+                        "c3d5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 43,
+                    "depth": 12,
+                    "pvUci": [
+                        "d7d5",
+                        "c4d5",
+                        "g8f6",
+                        "d2d4",
+                        "f6d5",
+                        "e4d5",
+                        "f8d6",
+                        "c2c4",
+                        "e8g8",
+                        "g1f3",
+                        "h4h6",
+                        "c4c5",
+                        "d6e7",
+                        "b1c3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 8,
+            "fen": "rnb1kbnr/p1pp1ppp/8/1p6/2B1Pp1q/8/PPPP2PP/RNBQ1KNR w kq b6 0 5",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 39,
+                    "depth": 12,
+                    "pvUci": [
+                        "c4b5",
+                        "c7c6",
+                        "b5e2",
+                        "g8f6",
+                        "b1c3",
+                        "d7d6",
+                        "d2d4",
+                        "f8e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 21,
+                    "depth": 12,
+                    "pvUci": [
+                        "g1f3",
+                        "h4h5",
+                        "c4e2",
+                        "b5b4",
+                        "a2a3",
+                        "g8f6",
+                        "d2d3",
+                        "h5h6",
+                        "d1d2",
+                        "f6h5",
+                        "h1g1",
+                        "b8c6",
+                        "a3b4",
+                        "f8b4",
+                        "c2c3",
+                        "b4e7",
+                        "g2g4",
+                        "f4g3",
+                        "d2h6",
+                        "g7h6",
+                        "h2g3",
+                        "h8g8",
+                        "f1f2",
+                        "h5f6",
+                        "b1d2",
+                        "f6g4",
+                        "f2e1"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -5,
+                    "depth": 12,
+                    "pvUci": [
+                        "c4b3",
+                        "g8e7",
+                        "g1f3",
+                        "h4f6",
+                        "h2h4",
+                        "a7a5",
+                        "a2a3",
+                        "a5a4",
+                        "b3a2",
+                        "b8c6",
+                        "d2d4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 9,
+            "fen": "rnb1kbnr/p1pp1ppp/8/1B6/4Pp1q/8/PPPP2PP/RNBQ1KNR b kq - 0 5",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -20,
+                    "depth": 12,
+                    "pvUci": [
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "d2d4",
+                        "f6e4",
+                        "d1e2",
+                        "f7f5",
+                        "b1c3",
+                        "c8b7",
+                        "d4d5",
+                        "f8d6",
+                        "c3e4",
+                        "f5e4",
+                        "e2e4",
+                        "e8d8",
+                        "c1d2",
+                        "b8a6",
+                        "a1e1",
+                        "a6c5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -39,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c6",
+                        "b5e2",
+                        "g8f6",
+                        "b1c3",
+                        "d7d5",
+                        "e4d5",
+                        "f6d5",
+                        "c3d5",
+                        "c6d5",
+                        "e2f3",
+                        "c8b7",
+                        "g1e2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -40,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8b7",
+                        "b1c3",
+                        "g8f6",
+                        "g1f3",
+                        "h4h6",
+                        "d2d3",
+                        "f8c5",
+                        "d1e1",
+                        "e8g8",
+                        "e1h4",
+                        "h6h4",
+                        "f3h4",
+                        "b8c6",
+                        "c1f4",
+                        "d7d5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 10,
+            "fen": "rnb1kb1r/p1pp1ppp/5n2/1B6/4Pp1q/8/PPPP2PP/RNBQ1KNR w kq - 1 6",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 30,
+                    "depth": 12,
+                    "pvUci": [
+                        "g1f3",
+                        "h4h6",
+                        "b1c3",
+                        "f8b4",
+                        "e4e5",
+                        "f6g4",
+                        "c3d5",
+                        "b4a5",
+                        "b2b4",
+                        "c8b7",
+                        "b5c4",
+                        "c7c6",
+                        "d5e7",
+                        "a5c7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 2,
+                    "depth": 12,
+                    "pvUci": [
+                        "d1e2",
+                        "f6h5",
+                        "d2d4",
+                        "f8e7",
+                        "b1c3",
+                        "b8c6",
+                        "e2c4",
+                        "e8g8",
+                        "g1f3",
+                        "h4g4",
+                        "c1d2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -20,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "f6g4",
+                        "g1h3",
+                        "b8c6",
+                        "b5e2",
+                        "h7h5",
+                        "c3d5",
+                        "c6d4",
+                        "d5c7",
+                        "e8d8",
+                        "c7a8",
+                        "f4f3",
+                        "e2f3",
+                        "g4e3",
+                        "d2e3",
+                        "c8a6",
+                        "f1g1",
+                        "d4f3",
+                        "g2f3",
+                        "h4h3",
+                        "c1d2"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 11,
+            "fen": "rnb1kb1r/p1pp1ppp/5n2/1B6/4Pp1q/5N2/PPPP2PP/RNBQ1K1R b kq - 2 6",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -28,
+                    "depth": 12,
+                    "pvUci": [
+                        "h4h6",
+                        "b1c3",
+                        "f8b4",
+                        "e4e5",
+                        "b4c3",
+                        "d2c3",
+                        "f6e4",
+                        "d1d5",
+                        "e4g3",
+                        "h2g3",
+                        "h6h1",
+                        "f1f2",
+                        "c7c6",
+                        "d5c5",
+                        "b8a6",
+                        "b5a6",
+                        "c8a6",
+                        "c3c4",
+                        "h1d1",
+                        "b2b3",
+                        "e8c8",
+                        "c5a7",
+                        "a6b7",
+                        "c1a3",
+                        "d1c2",
+                        "f2g1",
+                        "f4g3",
+                        "a3d6"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -52,
+                    "depth": 12,
+                    "pvUci": [
+                        "h4h5",
+                        "b1c3",
+                        "f8b4",
+                        "e4e5",
+                        "e8g8",
+                        "e5f6",
+                        "b4c3",
+                        "b2c3",
+                        "h5b5",
+                        "d1e2",
+                        "b5e2",
+                        "f1e2",
+                        "f8e8",
+                        "e2f2",
+                        "b8c6",
+                        "d2d3",
+                        "g7f6",
+                        "c1f4"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -84,
+                    "depth": 12,
+                    "pvUci": [
+                        "h4g4",
+                        "b1c3",
+                        "c8b7",
+                        "d1e2",
+                        "f8e7",
+                        "d2d3",
+                        "f6h5",
+                        "c1d2",
+                        "e8g8",
+                        "a1e1",
+                        "b8c6",
+                        "c3d5",
+                        "e7d8",
+                        "d3d4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 12,
+            "fen": "rnb1kb1r/p1pp1ppp/5n1q/1B6/4Pp2/5N2/PPPP2PP/RNBQ1K1R w kq - 3 7",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 27,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "c7c6",
+                        "b5c4",
+                        "f8b4",
+                        "e4e5",
+                        "d7d5",
+                        "e5f6",
+                        "d5c4",
+                        "a2a3",
+                        "b4a5",
+                        "d1e1",
+                        "c8e6",
+                        "e1e5",
+                        "a5c3",
+                        "d2c3",
+                        "h6f6",
+                        "e5f6",
+                        "g7f6",
+                        "c1f4"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 26,
+                    "depth": 12,
+                    "pvUci": [
+                        "d2d4",
+                        "f8e7",
+                        "b1c3",
+                        "c7c6",
+                        "b5d3",
+                        "d7d5",
+                        "e4d5",
+                        "e8g8",
+                        "f3e5",
+                        "f6d5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 6,
+                    "depth": 12,
+                    "pvUci": [
+                        "b5c4",
+                        "f8b4",
+                        "b1c3",
+                        "e8g8",
+                        "d2d3",
+                        "b8c6",
+                        "c3e2",
+                        "b4d6",
+                        "h2h4",
+                        "f6g4",
+                        "d3d4",
+                        "g4e3",
+                        "c1e3",
+                        "f4e3",
+                        "f1g1",
+                        "a8b8",
+                        "b2b3",
+                        "d6e7",
+                        "d1d3",
+                        "c6b4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 13,
+            "fen": "rnb1kb1r/p1pp1ppp/5n1q/1B6/4Pp2/3P1N2/PPP3PP/RNBQ1K1R b kq - 0 7",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 9,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c6",
+                        "b5a4",
+                        "f8c5",
+                        "b1c3",
+                        "e8g8",
+                        "c3e2",
+                        "c5e3",
+                        "c1e3"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 2,
+                    "depth": 12,
+                    "pvUci": [
+                        "f8c5",
+                        "b1c3",
+                        "c7c6",
+                        "e4e5",
+                        "f6g4",
+                        "d3d4",
+                        "c5b6",
+                        "b5d3",
+                        "e8g8",
+                        "d1e2",
+                        "d7d6",
+                        "e5d6",
+                        "h6d6"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -19,
+                    "depth": 12,
+                    "pvUci": [
+                        "b8c6",
+                        "d1d2",
+                        "a8b8",
+                        "b5c6",
+                        "d7c6",
+                        "d2a5",
+                        "f6d7",
+                        "b1a3",
+                        "f8e7",
+                        "a3c4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 14,
+            "fen": "rnb1kb1r/p1pp1ppp/7q/1B5n/4Pp2/3P1N2/PPP3PP/RNBQ1K1R w kq - 1 8",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 59,
+                    "depth": 12,
+                    "pvUci": [
+                        "h1g1",
+                        "c7c6",
+                        "b5a4",
+                        "f8c5",
+                        "g2g4",
+                        "c5g1",
+                        "f1g1",
+                        "h6g6",
+                        "f3h4",
+                        "g6f6",
+                        "d1e1",
+                        "f6d4",
+                        "e1f2",
+                        "d4f2",
+                        "g1f2",
+                        "h5f6",
+                        "c1f4",
+                        "f6g4",
+                        "f2g3"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 9,
+                    "depth": 12,
+                    "pvUci": [
+                        "d1e1",
+                        "g7g5",
+                        "h1g1",
+                        "h5g7",
+                        "g2g3",
+                        "g7e6",
+                        "g3f4",
+                        "g5f4",
+                        "b1c3",
+                        "h6h3",
+                        "f1e2",
+                        "f8c5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -1,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1e1",
+                        "c7c6",
+                        "b5c4",
+                        "f8c5",
+                        "d3d4",
+                        "c5b6",
+                        "b1c3",
+                        "e8g8",
+                        "g2g4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 15,
+            "fen": "rnb1kb1r/p1pp1ppp/7q/1B5n/4Pp1N/3P4/PPP3PP/RNBQ1K1R b kq - 2 8",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 49,
+                    "depth": 12,
+                    "pvUci": [
+                        "g7g6",
+                        "b1c3",
+                        "f8e7",
+                        "g2g3",
+                        "e8g8",
+                        "c3d5",
+                        "e7h4",
+                        "g3h4",
+                        "c7c6",
+                        "d5e7",
+                        "g8h8",
+                        "e7c8",
+                        "c6b5",
+                        "c8e7",
+                        "d7d6"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 45,
+                    "depth": 12,
+                    "pvUci": [
+                        "h6g5",
+                        "h4f5",
+                        "g7g6",
+                        "h2h4",
+                        "g5f6",
+                        "b1c3",
+                        "c8b7",
+                        "d1f3",
+                        "f6f5",
+                        "e4f5",
+                        "b7f3",
+                        "g2f3",
+                        "c7c6",
+                        "b5c4",
+                        "f8g7",
+                        "c4b3",
+                        "h5g3",
+                        "f1g2",
+                        "g3h1"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 3,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c6",
+                        "h4f5",
+                        "h6g5",
+                        "b5a4",
+                        "b8a6",
+                        "b1c3",
+                        "a6c5",
+                        "g2g4",
+                        "g7g6",
+                        "h2h4",
+                        "g5f6",
+                        "g4h5",
+                        "g6f5",
+                        "d1f3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 16,
+            "fen": "rnb1kb1r/p1pp1ppp/8/1B4qn/4Pp1N/3P4/PPP3PP/RNBQ1K1R w kq - 3 9",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -40,
+                    "depth": 12,
+                    "pvUci": [
+                        "h4f5",
+                        "g7g6",
+                        "h2h4",
+                        "g5f6",
+                        "b1c3",
+                        "c8b7",
+                        "d1f3",
+                        "f8b4",
+                        "c3e2",
+                        "a7a6",
+                        "b5a4",
+                        "g6f5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -332,
+                    "depth": 12,
+                    "pvUci": [
+                        "g2g3",
+                        "g5b5",
+                        "b1c3",
+                        "b5c5",
+                        "c3d5",
+                        "h5f6",
+                        "c2c4",
+                        "d7d6",
+                        "b2b4",
+                        "c5c6",
+                        "c1b2",
+                        "c8h3",
+                        "f1e1",
+                        "f6d5",
+                        "e4d5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -553,
+                    "depth": 12,
+                    "pvUci": [
+                        "d1e1",
+                        "g5b5",
+                        "b1c3",
+                        "b5b7",
+                        "h4f5",
+                        "d7d6",
+                        "c3d5",
+                        "a7a5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 17,
+            "fen": "rnb1kb1r/p1pp1ppp/8/1B3Nqn/4Pp2/3P4/PPP3PP/RNBQ1K1R b kq - 4 9",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 57,
+                    "depth": 12,
+                    "pvUci": [
+                        "g7g6",
+                        "h2h4",
+                        "g5f6",
+                        "b1c3",
+                        "c8b7",
+                        "d1f3",
+                        "f6f5",
+                        "e4f5",
+                        "b7f3",
+                        "g2f3",
+                        "b8c6",
+                        "b5c6",
+                        "d7c6",
+                        "c3e2"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -17,
+                    "depth": 12,
+                    "pvUci": [
+                        "b8c6",
+                        "b1c3",
+                        "g7g6",
+                        "f5g3",
+                        "c6d4",
+                        "g3h5",
+                        "g6h5",
+                        "h2h4",
+                        "g5h6",
+                        "d1d2",
+                        "f8d6",
+                        "d2f2",
+                        "d6e5",
+                        "b5c4",
+                        "h8g8"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -35,
+                    "depth": 12,
+                    "pvUci": [
+                        "c7c6",
+                        "b5a4",
+                        "b8a6",
+                        "b1c3",
+                        "a6c5",
+                        "g2g4",
+                        "h5f6",
+                        "h1g1",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "g4h5",
+                        "g6h5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 18,
+            "fen": "rnb1kb1r/p2p1ppp/2p5/1B3Nqn/4Pp2/3P4/PPP3PP/RNBQ1K1R w kq - 0 10",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 39,
+                    "depth": 12,
+                    "pvUci": [
+                        "b5a4",
+                        "b8a6",
+                        "b1c3",
+                        "a6c5",
+                        "g2g4",
+                        "h5f6",
+                        "h1g1",
+                        "c5a4",
+                        "c3a4",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "g4h5",
+                        "g6h5",
+                        "c1f4",
+                        "d7d5",
+                        "d1h5",
+                        "h8h5",
+                        "f5g7",
+                        "f8g7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -39,
+                    "depth": 12,
+                    "pvUci": [
+                        "g2g4",
+                        "g7g6",
+                        "h1g1",
+                        "g6f5",
+                        "g4h5",
+                        "g5h4",
+                        "d1f3",
+                        "c6b5",
+                        "e4f5",
+                        "b8c6",
+                        "c1f4",
+                        "c8b7",
+                        "f4g5",
+                        "h4h2",
+                        "f3e4",
+                        "f8e7",
+                        "g5e7",
+                        "c6e7",
+                        "e4b7",
+                        "a8c8"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -64,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "c6b5",
+                        "g2g4",
+                        "g7g6",
+                        "h2h4",
+                        "g5d8",
+                        "g4h5",
+                        "g6f5",
+                        "d1f3",
+                        "c8b7",
+                        "c1f4",
+                        "d7d6",
+                        "a1e1",
+                        "f8e7",
+                        "c3d5",
+                        "b8d7",
+                        "e4f5",
+                        "d7e5",
+                        "f3e4",
+                        "d8d7",
+                        "d3d4",
+                        "b5b4",
+                        "d4e5",
+                        "d7b5",
+                        "e4d3",
+                        "b5d3",
+                        "c2d3",
+                        "b7d5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 19,
+            "fen": "rnb1kb1r/p2p1ppp/2p5/1B3Nqn/4PpP1/3P4/PPP4P/RNBQ1K1R b kq g3 0 10",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 79,
+                    "depth": 12,
+                    "pvUci": [
+                        "h5f6",
+                        "h1g1",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "b5a4",
+                        "d7d5",
+                        "c1f4",
+                        "f6g4",
+                        "d1e1",
+                        "f8c5",
+                        "e4d5",
+                        "e8d8",
+                        "d5c6",
+                        "b8c6",
+                        "e1e4",
+                        "c8f5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 63,
+                    "depth": 12,
+                    "pvUci": [
+                        "g7g6",
+                        "g4h5",
+                        "g6f5",
+                        "h1g1",
+                        "g5h4",
+                        "d1f3",
+                        "c6b5",
+                        "e4f5",
+                        "e8d8",
+                        "b1c3",
+                        "f8h6",
+                        "g1g4",
+                        "h4h2",
+                        "c3b5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 16,
+                    "depth": 12,
+                    "pvUci": [
+                        "c6b5",
+                        "g4h5",
+                        "g7g6",
+                        "h1g1",
+                        "g5f6",
+                        "b1c3",
+                        "g6f5",
+                        "c1f4",
+                        "c8b7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 20,
+            "fen": "rnb1kb1r/p2p1ppp/2p2n2/1B3Nq1/4PpP1/3P4/PPP4P/RNBQ1K1R w kq - 1 11",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -64,
+                    "depth": 12,
+                    "pvUci": [
+                        "h1g1",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "b5a4",
+                        "d7d5",
+                        "c1f4",
+                        "f6g4",
+                        "d1e1",
+                        "f8c5",
+                        "e4d5",
+                        "e8d8",
+                        "d5c6",
+                        "b8c6",
+                        "e1e4",
+                        "g6f5",
+                        "a4c6",
+                        "g4h2",
+                        "f1e2",
+                        "f5e4",
+                        "c6e4",
+                        "c5g1",
+                        "b1c3",
+                        "c8g4",
+                        "e2d2"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -93,
+                    "depth": 12,
+                    "pvUci": [
+                        "b5a4",
+                        "g7g6",
+                        "e4e5",
+                        "g6f5",
+                        "e5f6",
+                        "f5g4",
+                        "d1e1",
+                        "e8d8",
+                        "b1c3",
+                        "d7d5",
+                        "c3e2",
+                        "f8d6",
+                        "e1a5",
+                        "d6c7",
+                        "a5c7",
+                        "d8c7",
+                        "c1f4",
+                        "g5f4",
+                        "e2f4",
+                        "b8d7",
+                        "a1e1"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -118,
+                    "depth": 12,
+                    "pvUci": [
+                        "d1f3",
+                        "g5g4",
+                        "f3g4",
+                        "f6g4",
+                        "b5a4",
+                        "g7g6",
+                        "h2h3",
+                        "g4f6",
+                        "e4e5",
+                        "f6h5",
+                        "f5d6",
+                        "f8d6",
+                        "e5d6",
+                        "h5g3",
+                        "f1g2",
+                        "g3h1",
+                        "c1f4",
+                        "e8g8",
+                        "g2h1",
+                        "c8b7",
+                        "b1c3",
+                        "g8g7",
+                        "a1e1"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 21,
+            "fen": "rnb1kb1r/p2p1ppp/2p2n2/1B3Nq1/4PpP1/3P4/PPP4P/RNBQ1KR1 b kq - 2 11",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 57,
+                    "depth": 12,
+                    "pvUci": [
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "g4g5",
+                        "f6g4",
+                        "b5a4",
+                        "d7d5",
+                        "d1e1",
+                        "f8c5",
+                        "c1f4"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -58,
+                    "depth": 12,
+                    "pvUci": [
+                        "d7d5",
+                        "h2h4",
+                        "g5g6",
+                        "h4h5",
+                        "g6g5",
+                        "b1d2",
+                        "f6g4",
+                        "g1g4",
+                        "g5h5",
+                        "b5a4",
+                        "d5e4",
+                        "d3e4",
+                        "h5h3",
+                        "f1e1",
+                        "h3h1",
+                        "e1e2",
+                        "h1h2",
+                        "e2d3"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -172,
+                    "depth": 12,
+                    "pvUci": [
+                        "c6b5",
+                        "h2h4",
+                        "g5g6",
+                        "h4h5",
+                        "f6h5",
+                        "g4h5",
+                        "g6c6",
+                        "b1c3",
+                        "d7d5",
+                        "h5h6",
+                        "c8f5",
+                        "e4f5",
+                        "g7g6",
+                        "d1f3",
+                        "b8d7",
+                        "c1f4",
+                        "e8c8",
+                        "f3d5",
+                        "c6d5",
+                        "c3d5",
+                        "d7b6",
+                        "d5c3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 22,
+            "fen": "rnb1kb1r/p2p1ppp/5n2/1p3Nq1/4PpP1/3P4/PPP4P/RNBQ1KR1 w kq - 0 12",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 189,
+                    "depth": 12,
+                    "pvUci": [
+                        "h2h4",
+                        "g5g6",
+                        "h4h5",
+                        "f6h5",
+                        "g4h5",
+                        "g6c6",
+                        "c1f4",
+                        "d7d5",
+                        "e4d5",
+                        "c6d5",
+                        "d1e2",
+                        "e8d8",
+                        "f5e3",
+                        "d5d4",
+                        "e2f3",
+                        "b8d7",
+                        "b1c3",
+                        "c8b7",
+                        "f4g5",
+                        "d8c8",
+                        "f3f5",
+                        "d4c5",
+                        "f5f7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -68,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1a3",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "a3b5",
+                        "h5g4",
+                        "c1f4",
+                        "d7d6",
+                        "d1e1",
+                        "b8c6",
+                        "e1c3",
+                        "e8d7",
+                        "b5d4",
+                        "c6d4",
+                        "f5d4",
+                        "a8b8"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -80,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "h7h5",
+                        "h2h4",
+                        "g5g6",
+                        "c3b5",
+                        "h5g4",
+                        "c1f4",
+                        "d7d6",
+                        "d1e1",
+                        "b8c6",
+                        "e1c3",
+                        "e8d7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 23,
+            "fen": "rnb1kb1r/p2p1ppp/5n2/1p3Nq1/4PpPP/3P4/PPP5/RNBQ1KR1 b kq h3 0 12",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -224,
+                    "depth": 12,
+                    "pvUci": [
+                        "g5g6",
+                        "h4h5",
+                        "f6h5",
+                        "g4h5",
+                        "g6c6",
+                        "c1f4",
+                        "d7d5",
+                        "e4d5",
+                        "c6d5",
+                        "f5g7",
+                        "e8d8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -658,
+                    "depth": 12,
+                    "pvUci": [
+                        "h7h6",
+                        "h4g5",
+                        "h6g5",
+                        "d1e2",
+                        "g7g6",
+                        "e4e5",
+                        "b8c6",
+                        "e5f6",
+                        "e8d8",
+                        "f5g7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -688,
+                    "depth": 12,
+                    "pvUci": [
+                        "g5f5",
+                        "g4f5",
+                        "f8c5",
+                        "g1g2",
+                        "d7d5",
+                        "d1f3",
+                        "d5e4",
+                        "d3e4",
+                        "b8c6",
+                        "c1f4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 24,
+            "fen": "rnb1kb1r/p2p1ppp/5nq1/1p3N2/4PpPP/3P4/PPP5/RNBQ1KR1 w kq - 1 13",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 215,
+                    "depth": 12,
+                    "pvUci": [
+                        "h4h5",
+                        "f6h5",
+                        "g4h5",
+                        "g6e6",
+                        "b1c3",
+                        "g7g6",
+                        "c3d5",
+                        "b8a6",
+                        "d1f3",
+                        "c8b7",
+                        "f5d4",
+                        "e6e5",
+                        "d4b5",
+                        "b7d5",
+                        "c1f4",
+                        "e5b2"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -46,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "h7h5",
+                        "c3b5",
+                        "f6g4",
+                        "b5c7",
+                        "e8d8",
+                        "c7a8",
+                        "g4h2",
+                        "f1f2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -55,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1a3",
+                        "f6g8",
+                        "a3b5",
+                        "g6c6",
+                        "c2c4",
+                        "a7a6",
+                        "b5c3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 25,
+            "fen": "rnb1kb1r/p2p1ppp/5nq1/1p3N1P/4PpP1/3P4/PPP5/RNBQ1KR1 b kq - 0 13",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -240,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6h5",
+                        "g4h5",
+                        "g6c6",
+                        "b1c3",
+                        "d7d5",
+                        "c1f4",
+                        "c8f5",
+                        "e4f5",
+                        "b5b4",
+                        "d1e2",
+                        "e8d8",
+                        "h5h6",
+                        "b4c3",
+                        "h6g7",
+                        "f8g7",
+                        "g1g7",
+                        "c3b2",
+                        "a1b1",
+                        "h8e8",
+                        "e2f2"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -263,
+                    "depth": 12,
+                    "pvUci": [
+                        "g6g5",
+                        "d1f3",
+                        "f6g8",
+                        "b1c3",
+                        "g5f6",
+                        "c1f4",
+                        "f6c6",
+                        "a2a4",
+                        "b5b4",
+                        "c3b5",
+                        "d7d6",
+                        "f5d6",
+                        "f8d6",
+                        "b5d6",
+                        "e8e7",
+                        "g4g5",
+                        "c8e6",
+                        "d3d4",
+                        "b8d7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -553,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6g4",
+                        "h5g6",
+                        "g4h2",
+                        "f1e2",
+                        "f4f3",
+                        "e2f2",
+                        "h7g6",
+                        "f5e3",
+                        "b8c6",
+                        "d3d4",
+                        "c8b7",
+                        "b1c3",
+                        "e8c8"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 26,
+            "fen": "rnb1kb1r/p2p1ppp/5n2/1p3NqP/4PpP1/3P4/PPP5/RNBQ1KR1 w kq - 1 14",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 268,
+                    "depth": 12,
+                    "pvUci": [
+                        "d1f3",
+                        "g7g6",
+                        "c1f4",
+                        "f6g4",
+                        "g1g4",
+                        "g5h5",
+                        "b1c3",
+                        "c8b7",
+                        "a1e1",
+                        "e8d8",
+                        "f3g3",
+                        "g6f5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 11,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1d2",
+                        "f6g4",
+                        "d1g4",
+                        "g5g4",
+                        "g1g4",
+                        "g7g6",
+                        "f5d4",
+                        "d7d6",
+                        "g4f4",
+                        "c8d7",
+                        "f4f2",
+                        "f8g7",
+                        "c2c3"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -65,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "b8c6",
+                        "c3b5",
+                        "a8b8",
+                        "f5d6",
+                        "f8d6",
+                        "b5d6",
+                        "e8f8"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 27,
+            "fen": "rnb1kb1r/p2p1ppp/5n2/1p3NqP/4PpP1/3P1Q2/PPP5/RNB2KR1 b kq - 2 14",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -208,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8b7",
+                        "c1f4",
+                        "f6g4",
+                        "f4g5",
+                        "g4h2",
+                        "f1f2",
+                        "h2f3",
+                        "f2f3",
+                        "d7d5",
+                        "b1c3",
+                        "d5e4",
+                        "d3e4",
+                        "g7g6",
+                        "g1d1",
+                        "b8a6",
+                        "f5d6",
+                        "f8d6",
+                        "d1d6",
+                        "e8g8",
+                        "c3d5",
+                        "f7f5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -299,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6g4",
+                        "g1g4",
+                        "g5h5",
+                        "b1c3",
+                        "d7d6",
+                        "c1f4",
+                        "b5b4",
+                        "c3d5",
+                        "b8c6",
+                        "f3g2",
+                        "c8f5",
+                        "e4f5",
+                        "e8d7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -305,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6g8",
+                        "c1f4",
+                        "g5f6",
+                        "b1c3",
+                        "f6c6",
+                        "a2a4",
+                        "b5a4",
+                        "a1a4",
+                        "c6b7",
+                        "c3d5",
+                        "b8c6",
+                        "d5c7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 28,
+            "fen": "rnb1kbnr/p2p1ppp/8/1p3NqP/4PpP1/3P1Q2/PPP5/RNB2KR1 w kq - 3 15",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 333,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "g5f6",
+                        "c1f4",
+                        "g7g5",
+                        "f4g3",
+                        "b8c6",
+                        "c3b5",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "g3e5",
+                        "c6e5",
+                        "f3a8",
+                        "f6c6",
+                        "b5d6",
+                        "f8d6",
+                        "a8c6",
+                        "e5c6",
+                        "f5d6",
+                        "e8e7",
+                        "d6c8",
+                        "e7d7",
+                        "c8a7",
+                        "c6a7",
+                        "a1e1",
+                        "a7c6",
+                        "g1g2",
+                        "g8f6"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 331,
+                    "depth": 12,
+                    "pvUci": [
+                        "c1f4",
+                        "g5f6",
+                        "b1c3",
+                        "g7g5",
+                        "f4g3",
+                        "b8c6",
+                        "c3b5",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "g3e5",
+                        "c6e5",
+                        "f3a8",
+                        "f6c6",
+                        "b5d6",
+                        "f8d6",
+                        "a8c6",
+                        "e5c6",
+                        "f5d6",
+                        "e8e7",
+                        "d6c8",
+                        "e7d7",
+                        "c8a7",
+                        "c6a7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 239,
+                    "depth": 12,
+                    "pvUci": [
+                        "e4e5",
+                        "b8c6",
+                        "c1f4",
+                        "g5d8",
+                        "b1c3",
+                        "d8b6",
+                        "c3d5",
+                        "b6c5",
+                        "f4e3",
+                        "c5c2",
+                        "a1c1",
+                        "c6e5",
+                        "d5c7",
+                        "c2c7",
+                        "f3a8"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 29,
+            "fen": "rnb1kbnr/p2p1ppp/8/1p3NqP/4PBP1/3P1Q2/PPP5/RN3KR1 b kq - 0 15",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -278,
+                    "depth": 12,
+                    "pvUci": [
+                        "g5f6",
+                        "b1c3",
+                        "f6c6",
+                        "a2a4",
+                        "b5a4",
+                        "a1a4",
+                        "d7d6",
+                        "a4c4",
+                        "c6b7",
+                        "f4d6",
+                        "c8f5",
+                        "c4c7",
+                        "b7b6",
+                        "f3f5",
+                        "g8e7",
+                        "c7e7",
+                        "f8e7",
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -303,
+                    "depth": 12,
+                    "pvUci": [
+                        "g5d8",
+                        "b1c3",
+                        "b8c6",
+                        "c3b5",
+                        "d7d6",
+                        "e4e5",
+                        "d6d5",
+                        "f5d6",
+                        "f8d6",
+                        "b5d6",
+                        "e8f8",
+                        "c2c4",
+                        "g7g5",
+                        "c4d5",
+                        "c6d4",
+                        "f3f2",
+                        "g5f4",
+                        "f2d4",
+                        "d8g5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -845,
+                    "depth": 12,
+                    "pvUci": [
+                        "g5h6",
+                        "f5h6",
+                        "g8h6",
+                        "g1g3",
+                        "f7f6",
+                        "d3d4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 30,
+            "fen": "rnb1kbnr/p2p1ppp/5q2/1p3N1P/4PBP1/3P1Q2/PPP5/RN3KR1 w kq - 1 16",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 317,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1c3",
+                        "f6c6",
+                        "a2a4",
+                        "b5a4",
+                        "a1a4",
+                        "d7d6",
+                        "a4c4",
+                        "c6b7",
+                        "c3d5",
+                        "c8e6",
+                        "f4d6",
+                        "b8c6",
+                        "f3f4",
+                        "e6f5",
+                        "g4f5",
+                        "a8d8",
+                        "d6f8",
+                        "e8f8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 141,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3g3",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "f4e5",
+                        "f6c6",
+                        "e5b8",
+                        "f7f6"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 60,
+                    "depth": 12,
+                    "pvUci": [
+                        "b1d2",
+                        "f6b2",
+                        "a1e1",
+                        "c8b7",
+                        "f3g3",
+                        "b8c6",
+                        "g1g2",
+                        "g7g6",
+                        "c2c4",
+                        "g6f5",
+                        "e4f5",
+                        "f8e7",
+                        "d2e4"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 31,
+            "fen": "rnb1kbnr/p2p1ppp/5q2/1p3N1P/4PBP1/2NP1Q2/PPP5/R4KR1 b kq - 2 16",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -329,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6c6",
+                        "a2a4",
+                        "b5a4",
+                        "a1a4",
+                        "b8a6",
+                        "a4c4",
+                        "c6b7",
+                        "f4d6",
+                        "g8e7",
+                        "d6e7",
+                        "f8e7",
+                        "c3d5",
+                        "e7f8",
+                        "h5h6",
+                        "g7h6",
+                        "f3f4",
+                        "b7b8",
+                        "e4e5",
+                        "b8b2"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -345,
+                    "depth": 12,
+                    "pvUci": [
+                        "g7g5",
+                        "f4g3",
+                        "b8c6",
+                        "c3b5",
+                        "d7d6",
+                        "e4e5",
+                        "d6e5",
+                        "g3e5",
+                        "c6e5",
+                        "f3a8",
+                        "f6c6",
+                        "a8c6",
+                        "e5c6",
+                        "b5d6",
+                        "f8d6",
+                        "f5d6",
+                        "e8e7",
+                        "d6c8",
+                        "e7d7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -366,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8a6",
+                        "c3d5",
+                        "f6b2",
+                        "d5c7",
+                        "e8d8",
+                        "f1g2",
+                        "g8h6",
+                        "c7a8",
+                        "h6f5",
+                        "g4f5",
+                        "b2c2",
+                        "g2h1"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 32,
+            "fen": "rnb1k1nr/p2p1ppp/5q2/1pb2N1P/4PBP1/2NP1Q2/PPP5/R4KR1 w kq - 3 17",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 637,
+                    "depth": 12,
+                    "pvUci": [
+                        "d3d4",
+                        "c5f8",
+                        "f4e5",
+                        "f6a6",
+                        "c3d5",
+                        "b5b4",
+                        "f1g2",
+                        "e8d8",
+                        "f5g7",
+                        "c8b7",
+                        "f3f7",
+                        "f8g7",
+                        "e5g7",
+                        "b7d5",
+                        "e4d5",
+                        "g8e7",
+                        "g7h8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 471,
+                    "depth": 12,
+                    "pvUci": [
+                        "c3b5",
+                        "f6b2",
+                        "f5d6",
+                        "c5d6",
+                        "b5d6",
+                        "e8e7",
+                        "a1e1",
+                        "b8c6",
+                        "d6f7",
+                        "g8h6",
+                        "f7h8",
+                        "c8a6",
+                        "f4g5",
+                        "e7e6",
+                        "g5h6",
+                        "g7h6",
+                        "f3f5",
+                        "e6d6"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 379,
+                    "depth": 12,
+                    "pvUci": [
+                        "a1e1",
+                        "f6c6",
+                        "c3d5",
+                        "b8a6",
+                        "f5g7",
+                        "e8d8",
+                        "g1g2",
+                        "c8b7",
+                        "g7f5",
+                        "a8c8",
+                        "a2a3"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 33,
+            "fen": "rnb1k1nr/p2p1ppp/5q2/1pbN1N1P/4PBP1/3P1Q2/PPP5/R4KR1 b kq - 4 17",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -359,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6b2",
+                        "a1e1",
+                        "b8c6",
+                        "c2c3",
+                        "b2a3",
+                        "g1g2",
+                        "g7g6",
+                        "d3d4",
+                        "c5f8",
+                        "f4c1",
+                        "a3a4"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -552,
+                    "depth": 12,
+                    "pvUci": [
+                        "f6c6",
+                        "f5g7",
+                        "e8f8",
+                        "g7f5",
+                        "d7d6",
+                        "d3d4",
+                        "c8f5",
+                        "d4c5",
+                        "f5e6",
+                        "f4d6",
+                        "f8e8",
+                        "d5c7",
+                        "e8d7",
+                        "c7e6",
+                        "f7e6",
+                        "f3f8",
+                        "c6e4",
+                        "f8f7",
+                        "d7c6",
+                        "f7c7",
+                        "c6d5",
+                        "a1d1",
+                        "d5c4",
+                        "d1d3",
+                        "b8c6",
+                        "b2b3",
+                        "c4b4"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -872,
+                    "depth": 12,
+                    "pvUci": [
+                        "b8c6",
+                        "d5f6",
+                        "g7f6",
+                        "f3g3",
+                        "c8b7",
+                        "g1g2",
+                        "g8e7",
+                        "a1e1"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 34,
+            "fen": "rnb1k1nr/p2p1ppp/8/1pbN1N1P/4PBP1/3P1Q2/PqP5/R4KR1 w kq - 0 18",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 384,
+                    "depth": 12,
+                    "pvUci": [
+                        "a1e1",
+                        "c8b7",
+                        "f3g3",
+                        "b8c6",
+                        "g1g2",
+                        "c6e7",
+                        "d3d4",
+                        "e7f5",
+                        "e4f5",
+                        "g8e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 373,
+                    "depth": 12,
+                    "pvUci": [
+                        "d3d4",
+                        "c5f8",
+                        "f1g2",
+                        "c8b7",
+                        "a1b1",
+                        "b2c2",
+                        "g2h3",
+                        "g7g6",
+                        "g1c1",
+                        "c2a2",
+                        "b1b5",
+                        "b7c6",
+                        "f5d6",
+                        "f8d6",
+                        "f4d6",
+                        "b8a6",
+                        "d5f6",
+                        "e8d8",
+                        "b5e5",
+                        "g8f6",
+                        "f3f6",
+                        "d8c8",
+                        "f6h8",
+                        "c8b7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 328,
+                    "depth": 12,
+                    "pvUci": [
+                        "a1d1",
+                        "b8c6",
+                        "c2c3",
+                        "c8b7",
+                        "g1g2",
+                        "b2a3",
+                        "d5c7",
+                        "e8d8",
+                        "c7b5"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 35,
+            "fen": "rnb1k1nr/p2p1ppp/3B4/1pbN1N1P/4P1P1/3P1Q2/PqP5/R4KR1 b kq - 1 18",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -11,
+                    "depth": 12,
+                    "pvUci": [
+                        "b2a1",
+                        "f1e2",
+                        "a1b2",
+                        "e2d2",
+                        "c5b6",
+                        "d6b4",
+                        "e8d8",
+                        "f5d6",
+                        "f7f6",
+                        "b4c3",
+                        "b2a3",
+                        "d6f7",
+                        "d8e8",
+                        "c3b4",
+                        "a3a4",
+                        "f7d6",
+                        "e8d8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -231,
+                    "depth": 12,
+                    "pvUci": [
+                        "c5g1",
+                        "a1e1",
+                        "g1b6",
+                        "e4e5",
+                        "e8d8",
+                        "d5b6",
+                        "a7b6",
+                        "f3e3",
+                        "a8a6",
+                        "e3g5",
+                        "f7f6",
+                        "g5g7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -420,
+                    "depth": 12,
+                    "pvUci": [
+                        "c5d4",
+                        "a1e1",
+                        "d4g1",
+                        "f1g1",
+                        "c8b7",
+                        "d6b8",
+                        "a8b8",
+                        "f5d6",
+                        "e8d8",
+                        "d6f7",
+                        "d8e8"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 36,
+            "fen": "rnb1k1nr/p2p1ppp/3B4/1p1N1N1P/4P1P1/3P1Q2/PqP5/R4Kb1 w kq - 0 19",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 281,
+                    "depth": 12,
+                    "pvUci": [
+                        "a1e1",
+                        "b8c6",
+                        "f1g1",
+                        "g7g6",
+                        "c2c3",
+                        "g6f5",
+                        "e4f5",
+                        "g8e7",
+                        "f3e3",
+                        "h8g8",
+                        "d5f6",
+                        "e8d8",
+                        "d6e7",
+                        "c6e7",
+                        "e3e7",
+                        "d8c7",
+                        "f6g8",
+                        "b2c3"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 232,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3d1",
+                        "g8h6",
+                        "a1b1",
+                        "h6f5",
+                        "b1b2",
+                        "f5d6",
+                        "f1g1",
+                        "e8g8",
+                        "d5c7",
+                        "c8b7",
+                        "c2c4",
+                        "b8c6",
+                        "c7a8",
+                        "b7a8",
+                        "c4b5"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 195,
+                    "depth": 12,
+                    "pvUci": [
+                        "e4e5",
+                        "b2a1",
+                        "f1e2",
+                        "c8a6",
+                        "d5c7",
+                        "e8d8",
+                        "c7a6",
+                        "a1c3",
+                        "d6c7",
+                        "c3c7",
+                        "a6c7",
+                        "b8c6",
+                        "c7a8",
+                        "g7g6",
+                        "f3g2",
+                        "g6f5",
+                        "g4f5",
+                        "g8e7",
+                        "f5f6",
+                        "g1c5",
+                        "f6e7",
+                        "d8c8",
+                        "c2c3",
+                        "c5e7",
+                        "d3d4",
+                        "c8b7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 37,
+            "fen": "rnb1k1nr/p2p1ppp/3B4/1p1NPN1P/6P1/3P1Q2/PqP5/R4Kb1 b kq - 0 19",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -221,
+                    "depth": 12,
+                    "pvUci": [
+                        "b2a1",
+                        "f1e2",
+                        "c8a6",
+                        "d5c7",
+                        "e8d8",
+                        "c7a6",
+                        "a1c3",
+                        "d6c7",
+                        "c3c7",
+                        "a6c7",
+                        "b8c6",
+                        "c7a8",
+                        "g7g6",
+                        "f3g2",
+                        "g6f5",
+                        "g2g1",
+                        "g8e7",
+                        "g1c5",
+                        "h8g8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -274,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8a6",
+                        "a1e1",
+                        "b8c6",
+                        "f1g1",
+                        "g7g6",
+                        "f5g7",
+                        "e8d8",
+                        "d6c7",
+                        "d8c8",
+                        "g7e8",
+                        "b2d4",
+                        "g1g2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -853,
+                    "depth": 12,
+                    "pvUci": [
+                        "f7f6",
+                        "a1e1",
+                        "g1h2",
+                        "e5f6",
+                        "g8e7",
+                        "f6e7",
+                        "a7a5",
+                        "d6h2"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 38,
+            "fen": "rnb1k1nr/p2p1ppp/3B4/1p1NPN1P/6P1/3P1Q2/P1P5/q4Kb1 w kq - 0 20",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": 222,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1e2",
+                        "c8a6",
+                        "d5c7",
+                        "e8d8",
+                        "c7a6",
+                        "a1c3",
+                        "d6c7",
+                        "c3c7",
+                        "a6c7",
+                        "b8c6",
+                        "c7a8",
+                        "g7g6",
+                        "f3g2",
+                        "g6f5",
+                        "g2g1",
+                        "g8e7",
+                        "g1c5",
+                        "f5g4",
+                        "d3d4",
+                        "h8e8",
+                        "e2f1",
+                        "e7f5",
+                        "c2c3",
+                        "b5b4",
+                        "c3b4",
+                        "f5d4",
+                        "b4b5",
+                        "e8e5",
+                        "c5f8",
+                        "e5e8",
+                        "f8h6",
+                        "d4b5",
+                        "h6g5",
+                        "d8c8",
+                        "g5b5",
+                        "e8e5"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -100,
+                    "depth": 12,
+                    "pvUci": [
+                        "f1g2",
+                        "c8b7",
+                        "d5c7",
+                        "e8d8",
+                        "f3b7",
+                        "g1b6",
+                        "c7a8",
+                        "a1g1",
+                        "g2h3",
+                        "g1f1",
+                        "h3h4",
+                        "b6f2",
+                        "f5g3",
+                        "b8a6",
+                        "a8c7",
+                        "g7g5",
+                        "h4g5",
+                        "f1c1",
+                        "g5h4",
+                        "g8e7",
+                        "h4h3",
+                        "f2g3",
+                        "c7d5",
+                        "c1f1",
+                        "h3g3",
+                        "e7f5",
+                        "g4f5",
+                        "h8g8",
+                        "g3h2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -1622,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3d1",
+                        "a1d1",
+                        "f1g2",
+                        "d1g4",
+                        "g2f1",
+                        "g4f5",
+                        "f1g1",
+                        "f5g4",
+                        "g1f2",
+                        "g4d4",
+                        "d5e3",
+                        "c8b7",
+                        "f2e2",
+                        "d4f4",
+                        "d3d4",
+                        "b7f3",
+                        "e2d3",
+                        "f4e4",
+                        "d3c3",
+                        "b5b4",
+                        "c3b2",
+                        "e4d4",
+                        "b2c1",
+                        "d4e3",
+                        "c1b1"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 39,
+            "fen": "rnb1k1nr/p2p1ppp/3B4/1p1NPN1P/6P1/3P1Q2/P1P1K3/q5b1 b kq - 1 20",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "scoreCp": -224,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8a6",
+                        "d5c7",
+                        "e8d8",
+                        "c7a6",
+                        "a1c3",
+                        "d6c7",
+                        "c3c7",
+                        "a6c7",
+                        "b8c6",
+                        "c7a8",
+                        "g7g6",
+                        "f3h1",
+                        "g6f5",
+                        "h1g1",
+                        "g8e7",
+                        "g1c5",
+                        "f5g4",
+                        "d3d4",
+                        "h8e8"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -760,
+                    "depth": 12,
+                    "pvUci": [
+                        "a1e5",
+                        "d6e5",
+                        "g8h6",
+                        "e5g7",
+                        "d7d6",
+                        "g7h8",
+                        "h6f5",
+                        "g4f5",
+                        "e8f8"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -908,
+                    "depth": 12,
+                    "pvUci": [
+                        "c8b7",
+                        "f5g7",
+                        "e8d8",
+                        "f3f7",
+                        "a1e1",
+                        "e2e1",
+                        "g8e7",
+                        "d5e7",
+                        "b8c6",
+                        "e7c6",
+                        "b7c6"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 40,
+            "fen": "r1b1k1nr/p2p1ppp/n2B4/1p1NPN1P/6P1/3P1Q2/P1P1K3/q5b1 w kq - 2 21",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": 5,
+                    "depth": 12,
+                    "pvUci": [
+                        "f5g7",
+                        "e8d8",
+                        "f3f7",
+                        "a1e1",
+                        "e2e1",
+                        "g1f2",
+                        "f7f2",
+                        "g8e7",
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": 507,
+                    "depth": 12,
+                    "pvUci": [
+                        "h5h6",
+                        "a1b1",
+                        "h6g7",
+                        "b1c2",
+                        "e2f1",
+                        "c8b7",
+                        "g7h8r",
+                        "c2b1",
+                        "f1g2"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 487,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3f4",
+                        "f7f6",
+                        "f5g7",
+                        "e8f7",
+                        "d5f6",
+                        "a1c1",
+                        "f4c1",
+                        "g1c5",
+                        "f6e8",
+                        "c5d6",
+                        "e8d6",
+                        "f7g7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 41,
+            "fen": "r1b1k1nr/p2p1pNp/n2B4/1p1NP2P/6P1/3P1Q2/P1P1K3/q5b1 b kq - 0 21",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": -2,
+                    "depth": 12,
+                    "pvUci": [
+                        "e8d8",
+                        "f3f6",
+                        "g8f6",
+                        "d6e7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 42,
+            "fen": "r1bk2nr/p2p1pNp/n2B4/1p1NP2P/6P1/3P1Q2/P1P1K3/q5b1 w - - 1 22",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": 2,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3f6",
+                        "g8f6",
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "mateIn": 4,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3f7",
+                        "a1e1",
+                        "e2e1",
+                        "g1f2",
+                        "f7f2",
+                        "g8e7",
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": 715,
+                    "depth": 12,
+                    "pvUci": [
+                        "f3f4",
+                        "g1c5",
+                        "f4f7",
+                        "a1e5",
+                        "d6e5",
+                        "g8e7",
+                        "e5f6",
+                        "c8b7",
+                        "f6e7",
+                        "d8c8",
+                        "g7f5",
+                        "a6b8"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 43,
+            "fen": "r1bk2nr/p2p1pNp/n2B1Q2/1p1NP2P/6P1/3P4/P1P1K3/q5b1 b - - 2 22",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": -1,
+                    "depth": 12,
+                    "pvUci": [
+                        "g8f6",
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "mateIn": -1,
+                    "depth": 12,
+                    "pvUci": [
+                        "g8e7",
+                        "f6e7"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 44,
+            "fen": "r1bk3r/p2p1pNp/n2B1n2/1p1NP2P/6P1/3P4/P1P1K3/q5b1 w - - 0 23",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": 1,
+                    "depth": 12,
+                    "pvUci": [
+                        "d6e7"
+                    ]
+                },
+                {
+                    "multiPv": 2,
+                    "scoreCp": -1095,
+                    "depth": 12,
+                    "pvUci": [
+                        "e5f6",
+                        "c8b7",
+                        "d5e3",
+                        "d8c8",
+                        "g7f5",
+                        "g1e3",
+                        "f5e3",
+                        "b7f3",
+                        "e2f3"
+                    ]
+                },
+                {
+                    "multiPv": 3,
+                    "scoreCp": -1190,
+                    "depth": 12,
+                    "pvUci": [
+                        "d5f6",
+                        "a1c1",
+                        "g7f5",
+                        "c1c2",
+                        "e2e1",
+                        "c2c3",
+                        "e1e2",
+                        "c3b2",
+                        "e2d1",
+                        "a6b4",
+                        "d6b4",
+                        "b2b1",
+                        "d1e2",
+                        "b1a2",
+                        "e2d1",
+                        "a2b1",
+                        "d1e2",
+                        "b1c2",
+                        "e2e1"
+                    ]
+                }
+            ]
+        },
+        {
+            "ply": 45,
+            "fen": "r1bk3r/p2pBpNp/n4n2/1p1NP2P/6P1/3P4/P1P1K3/q5b1 b - - 1 23",
+            "depth": 12,
+            "capped": false,
+            "lines": [
+                {
+                    "multiPv": 1,
+                    "mateIn": 0,
+                    "depth": 12,
+                    "pvUci": []
+                }
+            ]
+        }
+    ],
+    "checkpoint": {
+        "completedPlies": 46,
+        "complete": true
+    }
+}

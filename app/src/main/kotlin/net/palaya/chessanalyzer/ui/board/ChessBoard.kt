@@ -9,9 +9,12 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -21,6 +24,27 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import net.palaya.chessanalyzer.R
+import net.palaya.chessanalyzer.ui.model.PieceType
+import net.palaya.chessanalyzer.ui.model.algebraic
+import net.palaya.chessanalyzer.ui.model.piecesInSpokenOrder
+import net.palaya.chessanalyzer.ui.theme.BoardLabelOnDark
+import net.palaya.chessanalyzer.ui.theme.BoardLabelOnLight
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import net.palaya.chessanalyzer.ui.model.BoardState
@@ -31,6 +55,8 @@ import net.palaya.chessanalyzer.ui.model.file
 import net.palaya.chessanalyzer.ui.model.rankFromTop
 import net.palaya.chessanalyzer.ui.model.squareOf
 import net.palaya.chessanalyzer.ui.theme.BoardDark
+import net.palaya.chessanalyzer.ui.theme.ClassificationBadge
+import net.palaya.chessanalyzer.ui.theme.MoveClassification
 import net.palaya.chessanalyzer.ui.theme.BoardLight
 import net.palaya.chessanalyzer.ui.theme.CheckRed
 import net.palaya.chessanalyzer.ui.theme.GreenPrimary
@@ -51,6 +77,20 @@ data class BoardArrow(
     val to: Square,
     val color: Color = GreenPrimary,
 )
+
+/**
+ * The classification badge of the move on the board (B1), drawn in the top-right corner of its
+ * destination [square]. [contentDescription] is what TalkBack says for it ("Blunder on f3"); the
+ * board itself has no other per-square semantics.
+ */
+data class BoardBadge(
+    val square: Square,
+    val classification: MoveClassification,
+    val contentDescription: String,
+)
+
+/** The badge's side as a fraction of a square (B1: about 28%). */
+const val BOARD_BADGE_FRACTION = 0.28f
 
 /**
  * Renders an 8x8 chess board from a [BoardState] placeholder.
@@ -76,6 +116,7 @@ fun ChessBoard(
     legalMoveTargets: Set<Square> = emptySet(),
     arrows: List<BoardArrow> = emptyList(),
     showCoordinates: Boolean = true,
+    badge: BoardBadge? = null,
     onSquareClick: ((Square) -> Unit)? = null,
 ) {
     // A chessboard is not a text layout: a1 stays bottom-left for a Hebrew reader exactly as for
@@ -83,21 +124,33 @@ fun ChessBoard(
     // drawn on it — coordinates, arrows, tap mapping — are pinned to LTR regardless of the app's
     // layout direction. The Canvas below draws in absolute coordinates and would not mirror by
     // itself; pinning it makes the intent explicit and protects any Row/Column added here later.
+    // The tap handler below is installed once per (orientation, size) key, so it must read the
+    // *current* callback through this state, not the one captured when it was installed. Without it a
+    // caller whose lambda closes over per-puzzle values (the Practise screen) kept calling the first
+    // lambda forever, which showed up the first time a screen used the tap path (R3).
+    val currentOnSquareClick by rememberUpdatedState(onSquareClick)
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
     BoxWithConstraints(modifier = modifier) {
         val sizeDp = dpMin(maxWidth, maxHeight)
+        val context = LocalContext.current
+        val configuration = LocalConfiguration.current
+        // Read once per position, not per frame: the summary names all (up to 32) pieces.
+        val summary = remember(board, configuration) { boardSummary(context, board) }
+        val interactive = onSquareClick != null
         Box(
             modifier = Modifier
                 .size(sizeDp)
+                // Read-only board: one TalkBack stop that lists the position. Interactive board
+                // (Practise): the squares below are the stops, so this node only names the board.
+                .semantics {
+                    contentDescription = if (interactive) context.getString(R.string.cd_board_name) else summary
+                }
                 .then(
                     if (onSquareClick != null) {
                         Modifier.pointerInput(orientation, sizeDp) {
                             detectTapGestures { offset ->
-                                val squareSizePx = size.width / 8f
-                                val col = (offset.x / squareSizePx).toInt().coerceIn(0, 7)
-                                val row = (offset.y / squareSizePx).toInt().coerceIn(0, 7)
-                                val square = displayCellToSquare(col, row, orientation)
-                                onSquareClick(square)
+                                val square = squareAtOffset(offset.x, offset.y, size.width.toFloat(), orientation)
+                                currentOnSquareClick?.invoke(square)
                             }
                         }
                     } else Modifier,
@@ -113,16 +166,137 @@ fun ChessBoard(
                 arrows = arrows,
                 showCoordinates = showCoordinates,
             )
+            if (interactive) {
+                BoardSquareNodes(
+                    board = board,
+                    orientation = orientation,
+                    selectedSquare = selectedSquare,
+                    legalMoveTargets = legalMoveTargets,
+                    onSquareClick = { square -> currentOnSquareClick?.invoke(square) },
+                )
+            }
+            if (badge != null) {
+                BoardBadgeOverlay(badge = badge, orientation = orientation, squareSize = sizeDp / 8)
+            }
         }
     }
     }
+}
+
+/**
+ * "Chess board. White: king e1, queen d1, ... Black: king e8, ..." for TalkBack. The board is a
+ * Canvas, so without this it is an unlabelled blank to a screen reader.
+ */
+private fun boardSummary(context: android.content.Context, board: BoardState): String {
+    fun listFor(color: PieceColor): String = piecesInSpokenOrder(board, color).joinToString(", ") { (square, piece) ->
+        context.getString(R.string.cd_piece_short, context.getString(pieceNameRes(piece.type)), square.algebraic())
+    }.ifEmpty { context.getString(R.string.cd_board_none) }
+    return context.getString(R.string.cd_board_summary, listFor(PieceColor.WHITE), listFor(PieceColor.BLACK))
+}
+
+private fun pieceNameRes(type: PieceType): Int = when (type) {
+    PieceType.PAWN -> R.string.piece_pawn
+    PieceType.KNIGHT -> R.string.piece_knight
+    PieceType.BISHOP -> R.string.piece_bishop
+    PieceType.ROOK -> R.string.piece_rook
+    PieceType.QUEEN -> R.string.piece_queen
+    PieceType.KING -> R.string.piece_king
+}
+
+/**
+ * The 64 squares of an interactive board as transparent, individually focusable nodes ("White knight
+ * on f3", "Square e4", "selected", "possible move"), laid out in display order and activated by
+ * TalkBack's double tap. They draw nothing and take no pointer input, so touch play is unchanged.
+ */
+@Composable
+private fun BoardSquareNodes(
+    board: BoardState,
+    orientation: BoardOrientation,
+    selectedSquare: Square?,
+    legalMoveTargets: Set<Square>,
+    onSquareClick: (Square) -> Unit,
+) {
+    val context = LocalContext.current
+    val selectedText = context.getString(R.string.cd_square_selected)
+    val targetText = context.getString(R.string.cd_square_target)
+    Column(modifier = Modifier.fillMaxSize()) {
+        for (row in 0..7) {
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                for (col in 0..7) {
+                    val square = displayCellToSquare(col, row, orientation)
+                    val piece = board.pieces[square]
+                    val label = if (piece == null) {
+                        context.getString(R.string.cd_board_square, square.algebraic())
+                    } else {
+                        context.getString(
+                            R.string.cd_piece,
+                            context.getString(if (piece.color == PieceColor.WHITE) R.string.side_white else R.string.side_black),
+                            context.getString(pieceNameRes(piece.type)),
+                            square.algebraic(),
+                        )
+                    }
+                    val state = when {
+                        square == selectedSquare -> selectedText
+                        square in legalMoveTargets -> targetText
+                        else -> null
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .semantics {
+                                contentDescription = label
+                                role = Role.Button
+                                if (state != null) stateDescription = state
+                                onClick { onSquareClick(square); true }
+                            },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The badge in the top-right corner of its square. It is placed by the same display-cell mapping the
+ * pieces use, so flipping the board moves it with the square, and it lives inside the board's
+ * LTR-pinned subtree, so RTL never moves it. Its glyph is sized in sp, so a large system font would
+ * overflow an 11 dp circle: the overlay pins the font scale to 1 (the board is not text, and the
+ * colour plus the content description carry the meaning).
+ */
+@Composable
+private fun BoardBadgeOverlay(badge: BoardBadge, orientation: BoardOrientation, squareSize: Dp) {
+    val (col, row) = squareToDisplayCell(badge.square, orientation)
+    val size = squareSize * BOARD_BADGE_FRACTION
+    val inset = squareSize * 0.03f
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = 1f)) {
+        Box(
+            modifier = Modifier
+                .offset(x = squareSize * (col + 1) - size - inset, y = squareSize * row + inset)
+                .clearAndSetSemantics { contentDescription = badge.contentDescription },
+        ) {
+            ClassificationBadge(classification = badge.classification, size = size)
+        }
+    }
+}
+
+/**
+ * The UI square under a tap at ([x], [y]) pixels on a board [boardSizePx] wide, for [orientation].
+ * Pure, so the flipped-board mapping has a host test. A tap on the edge is clamped onto the board.
+ */
+internal fun squareAtOffset(x: Float, y: Float, boardSizePx: Float, orientation: BoardOrientation): Square {
+    val squareSizePx = boardSizePx / 8f
+    val col = (x / squareSizePx).toInt().coerceIn(0, 7)
+    val row = (y / squareSizePx).toInt().coerceIn(0, 7)
+    return displayCellToSquare(col, row, orientation)
 }
 
 private fun displayCellToSquare(col: Int, row: Int, orientation: BoardOrientation): Square =
     if (orientation == BoardOrientation.WHITE_DOWN) squareOf(col, row)
     else squareOf(7 - col, 7 - row)
 
-private fun squareToDisplayCell(square: Square, orientation: BoardOrientation): Pair<Int, Int> {
+internal fun squareToDisplayCell(square: Square, orientation: BoardOrientation): Pair<Int, Int> {
     val file = square.file()
     val rankFromTop = square.rankFromTop()
     return if (orientation == BoardOrientation.WHITE_DOWN) file to rankFromTop
@@ -140,8 +314,10 @@ private fun BoardCanvas(
     arrows: List<BoardArrow>,
     showCoordinates: Boolean,
 ) {
-    val coordPaintLight = remember { labelPaint(BoardDark) }
-    val coordPaintDark = remember { labelPaint(BoardLight) }
+    // Ink on each square colour (AA: 6.4:1 on light squares, 5.1:1 on dark; the old green-on-cream
+    // and cream-on-green pair gave 2.8:1).
+    val coordPaintLight = remember { labelPaint(BoardLabelOnLight) }
+    val coordPaintDark = remember { labelPaint(BoardLabelOnDark) }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         val squareSize = size.width / 8f

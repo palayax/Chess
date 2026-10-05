@@ -1,33 +1,67 @@
-On-device neural narration ("Natural voice") — engine and voice model licenses.
+Narration voice ("Natural voice") — engine, voice model and pronunciation-data licenses.
 
-===============================================================================
+Everything in this file runs on your device. The voice model and the pronunciation data are included in
+the app's installer and are unpacked once, on the first analysis, into the app's private storage. Nothing
+is downloaded and no text or audio is ever sent to a server for this voice.
+
+==============================
 sherpa-onnx (inference engine)
-===============================================================================
+==============================
 Project: sherpa-onnx (k2-fsa)
 Source: https://github.com/k2-fsa/sherpa-onnx
 License: Apache License 2.0 — see APACHE_2.0_LICENSE.txt for the full text.
 
 This app links sherpa-onnx's prebuilt Android AAR (native code + Kotlin API) to run text-to-speech
-models entirely on-device. No text or audio is ever sent to a server for this voice.
+models entirely on-device.
 
-===============================================================================
-Voice model — "Piper" tier (default)
-===============================================================================
-Model: vits-piper-en_US-ljspeech-medium (int8-quantized), distributed via sherpa-onnx's
+==============================
+Voice model — Kokoro-82M
+==============================
+Model: Kokoro-82M, int8-quantized (kokoro-int8-en-v0_19), as published by sherpa-onnx in its
   "tts-models" GitHub release.
+Source: https://huggingface.co/hexgrad/Kokoro-82M
+License: Apache License 2.0 — confirmed via the LICENSE file inside this exact model archive
+  (full text also in APACHE_2.0_LICENSE.txt).
+
+==============================
+Pronunciation data — espeak-ng
+==============================
+The Kokoro archive also contains an "espeak-ng-data" folder: the phoneme and dictionary data of the
+espeak-ng speech synthesizer, which sherpa-onnx uses to turn English text into phonemes for Kokoro.
+Source: https://github.com/espeak-ng/espeak-ng
+License: the espeak-ng project's README states that it "is released under the GPL version 3 or later
+  license" (GNU General Public License). The project's repository also holds separate notices for
+  small parts (a 2-clause BSD licence for a Windows compatibility file, Apache 2.0 and Unicode notices).
+  The Kokoro archive itself ships no licence file for this folder, and sherpa-onnx's documentation does
+  not state its licence, so the exact terms of every file in that folder were not independently
+  checked file by file. This app is itself distributed under GPLv3.
+
+==============================
+Included in the app
+==============================
+The Kokoro model and the espeak-ng data are packaged inside this app's installer (not downloaded). On
+the first analysis the app unpacks them once into its private, per-app storage on your device, after
+checking them against checksums fixed in the app's build. Nothing about this voice needs a network.
+
+==============================
+Voices NOT used, and why (history)
+==============================
+An earlier version of this app offered a smaller "Piper" voice tier. It was removed and is no longer
+part of the app. The reasoning for which Piper voice was and was not considered is kept here, in case
+anyone is tempted to add one later.
+
+Piper voice considered: vits-piper-en_US-ljspeech-medium (int8-quantized).
 Architecture/training code: Piper (rhasspy), MIT License.
 Training data: the LJ Speech Dataset — https://keithito.com/LJ-Speech-Dataset/
   Quoted directly from that page: "This dataset is in the public domain in the US (and most
   likely other countries as well)." / "The audio was recorded in 2016-17 by the LibriVox project
   and is also in the public domain." / "The texts were published between 1884 and 1964, and are
   in the public domain." / "There are no restrictions on its use."
-  The archive's own MODEL_CARD (bundled inside vits-piper-en_US-ljspeech-medium-int8.tar.bz2,
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ljspeech-medium-int8.tar.bz2)
-  independently states "License: public domain" for this exact voice.
+  The archive's own MODEL_CARD independently stated "License: public domain" for this exact voice.
 
 Most other Piper English voices are NOT usable in a commercially-redistributed, GPLv3 app: per
 Piper's own model cards, most voices were trained on or fine-tuned from recordings licensed for
-non-commercial/research use only. This voice was deliberately chosen instead of, specifically:
+non-commercial/research use only. Specifically:
   - "lessac"/"lessac-medium": trained on the 2013 Blizzard Challenge "lessac_blizzard2013"
     corpus, whose license
     (https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) restricts
@@ -38,22 +72,6 @@ non-commercial/research use only. This voice was deliberately chosen instead of,
   - "amy"/"amy-low": fine-tuned from the U.S. English Lessac voice (per Piper's own model card
     and https://github.com/MycroftAI/mimic3-voices), so it inherits the same Blizzard 2013
     restriction as "lessac" above.
-Other English voices in this release (e.g. "ryan") were not individually re-audited for this
-app — ljspeech was chosen because it is the one Piper English voice whose entire training-data
-chain was independently confirmed, from a primary source, to be unrestricted public domain.
-
-===============================================================================
-Voice model — "Kokoro" tier (best quality, optional download)
-===============================================================================
-Model: Kokoro-82M, int8-quantized (kokoro-int8-en-v0_19), distributed via sherpa-onnx's
-  "tts-models" GitHub release.
-Source: https://huggingface.co/hexgrad/Kokoro-82M
-License: Apache License 2.0 — confirmed via the LICENSE file bundled inside this exact model
-  archive (full text also in APACHE_2.0_LICENSE.txt).
-
-===============================================================================
-Downloading
-===============================================================================
-Neither voice model ships inside this app's installer. Each is downloaded on request, verified by
-SHA-256 against a value pinned in this app's source code, and stored in this app's private,
-per-app storage on your device — see Settings > Narration voice.
+Other English voices in that release (e.g. "ryan") were not individually re-audited — ljspeech was
+the one Piper English voice whose entire training-data chain was independently confirmed, from a
+primary source, to be unrestricted public domain.

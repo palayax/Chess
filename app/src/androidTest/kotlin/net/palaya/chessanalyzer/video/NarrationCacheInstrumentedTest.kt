@@ -185,12 +185,12 @@ class NarrationCacheInstrumentedTest {
 }
 
 /**
- * Deterministic, instant stand-in for a paid cloud voice: no network, no real TTS engine, just a
+ * Deterministic, instant stand-in for a real voice: no network, no real TTS engine, just a
  * silent WAV whose length depends on the text so results stay non-trivial — and a call counter, so
  * "the provider was never called" is a direct assertion rather than something inferred from timing.
  */
 internal class FakeInstantVoiceProvider(
-    override val displayName: String = "FakeCloudVoice",
+    override val displayName: String = "FakeInstantVoice",
 ) : NarrationVoiceProvider {
     val synthesizeCallCount = AtomicInteger(0)
 

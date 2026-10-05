@@ -7,5 +7,24 @@ keystore.properties
 .idea/
 *.iml
 vendor/Stockfish/
+# Bundled model files (~257 MB): fetched by scripts/fetch_models.sh, pinned by vendor/models/MODELS.lock.
+# MODELS.lock itself IS committed (see the negation below).
+vendor/models/*
+!vendor/models/MODELS.lock
 .cxx/
 **/.cxx/
+
+# PC video producer (:desktop) — large local binaries, models, venvs and work dirs
+pc/work/
+pc/bin/
+pc/models/
+pc/tts/.venv/
+pc/tts/hf_cache/
+pc/tts/.venv-kokoro/
+**/__pycache__/
+
+# Final signed release APKs (R7)
+dist/
+
+# PC producer TTS model downloads (hundreds of MB, re-fetchable)
+pc/tts/models/

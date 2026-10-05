@@ -105,7 +105,11 @@ class VideoPlayerControllerInstrumentedTest {
         try {
             // Nothing is cached here, so narrationAvailable only becomes true once the device TTS
             // engine finishes its async init — wait for it rather than racing play() against it.
-            withTimeout(8_000) {
+            // 30 s, not 8: the Google TTS service is a separate process that the system may have
+            // reclaimed (the bundled-model tests before this one hold ~260 MB of freshly written
+            // files), and its cold start on the emulator was measured at 5-6 s, which with the
+            // test's own setup overran 8 s once in the full suite (and never in isolation).
+            withTimeout(30_000) {
                 while (!controller.uiState.value.narrationAvailable) delay(50)
             }
             controller.play()

@@ -1,10 +1,10 @@
 package net.palaya.chessanalyzer.data
 
+import android.content.res.AssetManager
 import java.io.File
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import net.palaya.chessanalyzer.engine.EngineUpdateInfo
-import net.palaya.chessanalyzer.engine.NetworkProvider
+import net.palaya.chessanalyzer.engine.BundledNetProvider
 import net.palaya.chessanalyzer.engine.StockfishEngine
 
 /**
@@ -17,16 +17,16 @@ import net.palaya.chessanalyzer.engine.StockfishEngine
  * it survives configuration changes) and every caller goes through [ensureReady] rather than
  * constructing a [StockfishEngine] itself.
  *
- * [ensureReady] is also the net-download gate: per the integration brief, the app must not
- * start the engine — let alone call `analyze()` — before a verified NNUE net exists on disk.
- * [NetworkProvider.ensureNet] downloads it only if it isn't already there (and it may already
- * be there: see the DONE-CONDITION note about pre-seeding the emulator's files dir), so on a
- * device that already has a valid net this resolves immediately with no network traffic.
+ * [ensureReady] is also the net gate: the app must not start the engine — let alone call
+ * `analyze()` — before a verified NNUE net exists on disk. [BundledNetProvider.ensureNet] copies
+ * it out of the APK's assets on first use and verifies it; on a device that already has a valid
+ * net it returns without touching the file (see [FirstRunSetup], which normally does the copy up
+ * front so the user sees a progress bar for it).
  */
-class EngineController(private val filesDir: File) {
+class EngineController(filesDir: File, assets: AssetManager) {
 
     private val engine = StockfishEngine()
-    private val networkProvider = NetworkProvider(filesDir)
+    private val netProvider = BundledNetProvider(filesDir, assets)
     private val prepMutex = Mutex()
 
     @Volatile private var isReady = false
@@ -34,19 +34,28 @@ class EngineController(private val filesDir: File) {
     /** True once [ensureReady] has completed successfully at least once. */
     val ready: Boolean get() = isReady
 
+    /** Cheap, no hashing: true when a net of exactly the pinned size is already in `filesDir`. */
+    fun isNetPresent(): Boolean = netProvider.isNetPresent()
+
     /**
-     * Downloads/verifies the net (if needed), starts the native engine, configures it, and
-     * loads the net — all guarded by [prepMutex] so concurrent callers (e.g. a rotated Activity
-     * re-collecting the same in-flight analysis) don't double-start the process. Idempotent:
-     * a second call after success returns the same engine instantly.
+     * Copies the net out of the APK if it is missing or damaged and returns the verified file.
+     * Idempotent and cheap once done. Used by [FirstRunSetup] and, inside [ensureReady], as the
+     * structural gate in front of the engine.
+     */
+    suspend fun ensureNet(onProgress: (Float) -> Unit = {}): File = netProvider.ensureNet(onProgress)
+
+    /**
+     * Makes sure the net is installed, starts the native engine, configures it, and loads the net
+     * — all guarded by [prepMutex] so concurrent callers (e.g. a rotated Activity re-collecting
+     * the same in-flight analysis) don't double-start the process. Idempotent: a second call after
+     * success returns the same engine instantly.
      */
     suspend fun ensureReady(
         threads: Int = defaultThreads(),
         hashMb: Int = defaultHashMb(),
-        onNetProgress: (Float) -> Unit = {},
     ): StockfishEngine = prepMutex.withLock {
         if (!isReady) {
-            val net = networkProvider.ensureNet(onNetProgress)
+            val net = netProvider.ensureNet()
             engine.start()
             engine.uci()
             engine.setOption("Threads", threads.toString())
@@ -60,8 +69,6 @@ class EngineController(private val filesDir: File) {
 
     /** The engine instance, if [ensureReady] has already succeeded — null otherwise. */
     fun engineOrNull(): StockfishEngine? = if (isReady) engine else null
-
-    suspend fun checkForEngineUpdate(): EngineUpdateInfo? = networkProvider.checkForEngineUpdate()
 
     /** Tears down the native process. Called from Application.onTerminate in practice (best-effort). */
     fun shutdown() {

@@ -246,11 +246,13 @@ class MotifDetectorTest {
             reject = listOf(TacticType.TRAPPED_PIECE)
         ),
         Case(
+            // Qxd8+ Rxd8 is a queen trade. It used to be expected to report a FORK of king and rook
+            // (the queen does attack both), which is exactly the false positive Task 65 removed:
+            // the forker is simply taken, so nothing is forked. See the next guard.
             "GUARD: no PV means no PV-only motifs, and an even trade is no desperado",
             "r2q3k/6pp/8/6N1/8/8/6PP/3Q2K1 w - - 0 1", "d1d8",
-            expect = listOf(TacticType.FORK),
             reject = listOf(
-                TacticType.DECOY, TacticType.DEFLECTION, TacticType.OVERLOADED_PIECE,
+                TacticType.FORK, TacticType.DOUBLE_ATTACK, TacticType.DECOY, TacticType.DEFLECTION, TacticType.OVERLOADED_PIECE,
                 TacticType.INTERFERENCE, TacticType.CLEARANCE, TacticType.ZWISCHENZUG,
                 TacticType.WINDMILL, TacticType.GREEK_GIFT, TacticType.REMOVING_THE_DEFENDER,
                 TacticType.DESPERADO
@@ -332,7 +334,7 @@ class MotifDetectorTest {
         for (case in allCases) {
             val pos = Position.fromFen(case.fen)
             val move = pos.parseUci(case.uci)
-            val found = detector.detect(pos, move, case.pv)
+            val found = detector.detectRaw(pos, move, case.pv)
             val types = found.map { it.type }.toSet()
 
             for (want in case.expect) {
@@ -374,7 +376,7 @@ class MotifDetectorTest {
     fun resultsObeyTheContract() {
         for (case in allCases) {
             val pos = Position.fromFen(case.fen)
-            val found = detector.detect(pos, pos.parseUci(case.uci), case.pv)
+            val found = detector.detectRaw(pos, pos.parseUci(case.uci), case.pv)
             val mover = pos.sideToMove
             for (t in found) {
                 assertTrue("${case.name}: confidence ${t.confidence} below the 0.6 floor",
@@ -412,7 +414,7 @@ class MotifDetectorTest {
         fun swingOf(caseName: String, type: TacticType): Int {
             val case = allCases.first { it.name == caseName }
             val pos = Position.fromFen(case.fen)
-            return detector.detect(pos, pos.parseUci(case.uci), case.pv)
+            return detector.detectRaw(pos, pos.parseUci(case.uci), case.pv)
                 .first { it.type == type }.materialSwing
         }
         // Ne7+ forks the king and an undefended rook: the rook is the payoff.

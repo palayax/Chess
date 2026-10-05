@@ -31,6 +31,13 @@ rewrite and a much weaker analysis. **Recommendation: publish GPLv3 and open the
 ### Attribution required in the listing
 - "Analysis powered by Stockfish (GPLv3)" plus a link to https://stockfishchess.org
 - Opening data from lichess-org/chess-openings, CC0.
+- Voice: sherpa-onnx (Apache 2.0), Kokoro-82M (Apache 2.0) and espeak-ng pronunciation data (the espeak-ng
+  project's README says "GPL version 3 or later"). The Kokoro archive ships no separate licence file for the
+  espeak-ng data, so its per-file terms are **unverified**; the app's About screen credits it factually.
+- The Stockfish NNUE net was trained on data from the Leela Chess Zero project, made available under the
+  Open Database License (per the Stockfish README, which is where About takes the wording). Whether any
+  ODbL notice wording is required for the net has **not** been assessed; the licence questions are
+  informational for this proof of concept.
 
 ---
 
@@ -68,50 +75,45 @@ Note for the actual upload step: **Google Play requires an Android App Bundle (.
 new apps, not an APK. The APK is the right deliverable for testing, sideloading, and for
 stores that accept APKs (Amazon Appstore, F-Droid, Samsung Galaxy Store, direct download).
 When you are ready for Play specifically, run `./gradlew :app:bundleRelease` — the signing
-config is already wired, so it will produce a signed `.aab` from the same source with no
-further work.
+config is already wired and it produces a signed `.aab` from the same source. **But see the size note
+below: at ~365 MB the bundle will not fit Play's base-module size limit as built**, so a Play release needs
+Play Asset Delivery (the two models moved into asset packs). That is not done.
 
 F-Droid is worth considering given the GPL requirement — it is the natural home for a
 GPLv3 app and handles the source-offer obligation for you.
 
-### APK size: 108 MB, and what to do about it
+### APK size: ~365 MB, by design
 
-Measured on the Round 5 signed build — `app-release.apk` is **108,627,896 bytes**, up from
-17,023,316 before on-device neural narration was added. The Stockfish NNUE net is **not** in the
-APK and never has been; it is still downloaded at runtime. The growth is entirely sherpa-onnx's
-native libraries, which ship for all three ABIs and are stored uncompressed:
+The net and the narration voice are bundled so the app works fully offline from the first launch
+(owner decision, Round 13: "a big APK is fine"). Measured on the R4a debug build:
+`app-debug.apk` is **371,058,258 bytes**; the signed release APK (R7, built) is **364,733,235 bytes** (about 348 MiB, 365 MB). The biggest parts:
 
-| Library | x86_64 | arm64-v8a | armeabi-v7a |
-|---|---|---|---|
-| `libonnxruntime.so` | 24.40 MB | 21.22 MB | 14.65 MB |
-| `libsherpa-onnx-jni.so` | 4.96 MB | 4.55 MB | 3.27 MB |
-| `libsherpa-onnx-c-api.so` | 4.70 MB | 4.26 MB | 3.05 MB |
-| `libstockfish.so` | 1.55 MB | 1.51 MB | 1.22 MB |
-| **Per-ABI total** | **35.6 MB** | **31.5 MB** | **22.2 MB** |
+| Part | Size | How it is stored |
+|---|---|---|
+| Stockfish NNUE net (`nn-1a298aa575a0.nnue`, `:engine` asset) | 98,511,183 B | uncompressed |
+| Kokoro voice, plain `.tar` (`:app` asset) | 158,269,440 B | uncompressed |
+| sherpa-onnx native libraries, three ABIs | ~89 MB | uncompressed `.so` |
+| Everything else (dex, resources, Stockfish `.so`, assets) | ~20 MB | mostly deflated |
 
-~89 MB of the 108 MB is native code for three ABIs, of which any given device uses exactly one.
-Everything else — dex, resources, assets — is about 19 MB.
+On first run the app copies the net and unpacks the voice into private storage, about 257 MB more, so an
+install needs roughly 620 MB steady and more at peak.
 
-**This is a delivery-format problem, not a code problem.** Three options, in order of preference:
+What this means for distribution:
 
-1. **Publish an `.aab`** (`./gradlew :app:bundleRelease`, already wired). Play's split delivery
-   sends one ABI per device, so an arm64 phone downloads roughly **51 MB**. This is free — no code
-   change — and is required for Play anyway (see above).
-2. **Per-ABI APK splits** for sideloading and APK-accepting stores. Same ~51 MB result for arm64,
-   at the cost of producing and tracking several APKs instead of one.
-3. **Drop `x86_64`** if emulator support stops mattering. Saves 35.6 MB from the universal APK on
-   its own — but it is what makes this project verifiable on this machine without physical
-   hardware, so do not drop it while the emulator is the only test device.
-
-Deliberately **not** applied for the POC: the agreed deliverable is one universal signed APK that
-installs anywhere, and 108 MB is under Play's 150 MB APK ceiling. Revisit before any real
-distribution — option 1 costs nothing and is needed for Play regardless.
-
+- **Sideloading, F-Droid, direct download:** fine. **State the ~365 MB size on the download page.**
+- **Google Play:** a base module that size is far over Play's limit, so a Play release would need **Play
+  Asset Delivery** (the net and the voice as asset packs, install-time or fast-follow). That needs code
+  changes (reading from an asset pack instead of `assets/`) and has not been done or tested.
+- **Per-ABI splits** would shave 35-50 MB per device and do not change the picture; the models dominate.
 
 ---
 
 ## 4. Signing
 
+- Release build: `./gradlew :app:assembleRelease` (needs `scripts/fetch_models.sh` first on a fresh clone) writes
+  `app/build/outputs/apk/release/app-release.apk`; R7 copies it to `dist/PalayaChess-<versionName>-release.apk` (gitignored).
+  Verify with `apksigner verify --verbose --print-certs` (build-tools 36.1.0): v2 and v3 are true; v1 is false
+  by design (minSdk 26+ does not need it). The certificate fingerprint below matched on the R7 build.
 - Keystore: `keystore/chessanalyzer-release.jks`, alias `chessanalyzer`, RSA 4096,
   valid until 2054-02-02.
 - Credentials: `keystore.properties` (gitignored — **never commit it**).
@@ -130,73 +132,86 @@ Play requires a Data Safety form. This app's honest answers:
 
 - **Does it collect user data?** No.
 - **Does it share user data?** No.
-- **Network use:** outbound only, to `tests.stockfishchess.org` (downloading the NNUE
-  evaluation file), `api.github.com` (checking for a newer Stockfish release), and the voice-model
-  host (for the on-device natural voice). All three are user-initiated downloads or explicit
-  opt-ins; none is background telemetry. No analytics, no accounts, no ads.
-- **Data stored on device:** imported PGNs and cached analysis, in app-private storage.
-- **Permissions requested:** `INTERNET` only.
+- **Network use:** none. The app makes no network connection of its own: it opens no sockets, and
+  nothing is downloaded, uploaded or checked online. The one outbound action is the About screen's links
+  (stockfishchess.org and palaya.net), which hand a URL to the user's browser and need no permission.
+  No analytics, no accounts, no ads.
+- **Data stored on device:** imported PGNs and cached analysis, in app-private storage, plus the engine
+  net and the narration voice unpacked from the APK on first run and any saved narration audio.
+- **Permissions requested:** no network permissions (no `INTERNET`, no `ACCESS_NETWORK_STATE`). The manifest
+  declares only `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` and `POST_NOTIFICATIONS`, for the
+  video export. This is checked by the host `ManifestPermissionsTest` and the instrumented
+  `NoNetworkPermissionTest`.
 
-The engine-data download must be disclosed in the listing description — **79 MB over the
-wire, 98.5 MB once stored on device** (the endpoint serves it compressed). Users on metered
-connections will care, and Play reviewers dislike undisclosed large downloads. The app asks
-before downloading and reports progress.
+The listing should state the **~365 MB** size, because users on limited storage will care.
 
 ---
 
 ## 6. Pre-launch checklist
 
 - [ ] Publish source repo (GPLv3 obligation) and link it in About + listing
-- [ ] Confirm About screen shows the Stockfish GPL notice and the CC0 opening-book credit
+- [ ] Confirm About screen shows the Stockfish GPL notice (with the Leela data note), the CC0 opening-book credit and the voice credits (sherpa-onnx, Kokoro, espeak-ng)
 - [ ] Back up `keystore/` and `keystore.properties` offline
 - [ ] Screenshots: phone portrait, minimum 2, no chess.com branding visible
 - [ ] Listing text avoids implying chess.com affiliation
-- [ ] Disclose the one-time engine-data download (~79 MB transferred, 98.5 MB stored on device)
+- [ ] State the ~365 MB size on the download page
 - [ ] Set a content rating (Everyone)
-- [ ] For Play: build `.aab` rather than the APK
-- [ ] Confirm the **voice model's own licence** (not just sherpa-onnx's Apache 2.0) and that it
-      appears in About — see §7. This is currently a proof of concept, so a voice with a
-      non-commercial/unclear licence is not a hard blocker (the model can be swapped later), but its
-      status must be recorded truthfully next to it. Re-tighten this to "must verify before
-      shipping" the moment commercial distribution is on the table — both models actually shipped
-      today happen to already be unambiguously permissive (see §7's table), so nothing needs to
-      change for that to become a hard requirement again.
-- [ ] Disclose the voice-model download in the listing. **No longer conditional** — as of Round 5
-      the natural voice IS the default and auto-downloads (~20 MB transferred, ~36 MB stored) the
-      first time a user opens a narrated review, so this is a disclosed data cost, not an opt-in one
+- [ ] For Play: build `.aab` rather than the APK, **and** move the two models into Play Asset Delivery
+      packs first (not done; the base size limit is far below ~365 MB)
+- [ ] Re-confirm the voice licences before any commercial distribution. The Kokoro model's licence is
+      verified from the `LICENSE` inside the bundled archive (Apache 2.0). The espeak-ng pronunciation data
+      is credited from the espeak-ng project's README ("GPL version 3 or later"); the archive carries no
+      licence file for it, so per-file terms are unverified. This is a proof of concept, so none of this is
+      a hard blocker, but its status must stay recorded truthfully next to the credit.
+- [ ] Confirm the **Network use: none / no network permissions** answers still hold (run
+      `ManifestPermissionsTest`; look at the merged manifest) if any dependency is added
 
 ---
 
-## 7. Narration voices — three providers, three licence situations
+## 7. Narration voices — two providers, both on-device
 
-The app can narrate a game review with one of three voice providers. They differ in whether they
-need a download or an account, and — the part that matters for publication — how they are
-licensed. The two on-device ones are free and are the defaults; the Cloud one is an opt-in upgrade
-on the **user's own** Google Cloud key, and no key of any kind ships in the APK.
+The app narrates a game review with one of two voice providers, both fully local. Neither needs
+an account, an API key, a billing relationship or a network connection, and no key of any kind ships in
+the APK. The neural voice is the default; Settings > Advanced has one switch to use the phone's built-in
+voice instead.
 
-| Provider | Licence | Ships in APK? | Cost to user | Publishable? |
+> **Removed in Round 13: the Google Cloud voice.** An opt-in Google Cloud Text-to-Speech provider
+> (bring-your-own API key, with a setup wizard and encrypted key storage) existed through
+> Round 12. It was deleted because Google requires a billing account with a payment method even
+> for the free tier, which violates the owner's rule that everything must be free, need no credit
+> card and run locally. All of it is gone: the provider, the wizard, the key storage (including the
+> plaintext fallback), the settings and the strings. A one-time startup purge
+> (`LegacyKeyStoragePurge`) deletes any key an older build left on a phone, and a stored `CLOUD`
+> provider choice now reads as the neural voice. Do not re-add a cloud provider without revisiting
+> that rule and the Data safety answers.
+
+> **Also removed in Round 13: downloads and the Piper tier.** The voice model used to be downloaded on
+> first use with a tier picker (Piper and Kokoro). It is now bundled in the APK and Piper is gone.
+
+| Provider | Licence | In the APK? | Cost to user | Publishable? |
 |---|---|---|---|---|
 | **Device TTS** (Android built-in) | platform | n/a | free | yes, always |
-| **On-device neural** (sherpa-onnx) | **Apache 2.0** | library yes, **model downloaded** | free | **yes** |
-| **Cloud voice** (Google Cloud Text-to-Speech, BYO key) | Google Cloud ToS, per user | code only, **no key** | free tier on the user's own billing project, then billed to them | yes — nothing of Google's is redistributed by the app |
+| **On-device neural** (sherpa-onnx + Kokoro) | sherpa-onnx **Apache 2.0**; Kokoro-82M **Apache 2.0**; espeak-ng data see below | library **yes**, model **yes** | free | yes (see the espeak-ng note) |
 
-### On-device neural voice — the default worth shipping
-`sherpa-onnx` is Apache 2.0, which is **compatible with this app's GPLv3**. The voice *model* is
-downloaded on first use (never bundled) and SHA-256-verified, the same pattern already used for the
-98 MB Stockfish network — see `app/src/main/kotlin/net/palaya/chessanalyzer/video/VoiceModelProvisioner.kt`
-for the pinned URL/SHA-256/size of each tier, and `app/src/main/assets/NEURAL_VOICE_LICENSE.txt`
-(surfaced in About) for the full attribution text this table summarizes.
+### On-device neural voice — the default
+`sherpa-onnx` is Apache 2.0, which is **compatible with this app's GPLv3**. The Kokoro voice *model* ships
+inside the APK as one stored `.tar` asset, is unpacked once on the first analysis, and is SHA-256-verified
+against a hash pinned in the build (`vendor/models/MODELS.lock`, fetched by `scripts/fetch_models.sh`). See
+`app/src/main/kotlin/net/palaya/chessanalyzer/video/BundledVoiceInstaller.kt` and
+`app/src/main/assets/NEURAL_VOICE_LICENSE.txt` (surfaced in About) for the full attribution text this
+section summarises.
 
-| Tier | Model | Licence | Verified from |
-|---|---|---|---|
-| Piper (default, fast) | `vits-piper-en_US-ljspeech-medium-int8` | Piper (rhasspy): **MIT**. Training data (LJ Speech): **public domain**. | The archive's own `MODEL_CARD` ("License: public domain") AND independently, verbatim, from https://keithito.com/LJ-Speech-Dataset/ ("This dataset is in the public domain... There are no restrictions on its use."). |
-| Kokoro (best quality, opt-in download) | `kokoro-int8-en-v0_19` (Kokoro-82M) | **Apache License 2.0** | The full `LICENSE` file bundled inside that exact archive, matching https://huggingface.co/hexgrad/Kokoro-82M's stated licence. |
+| Component | Licence | Verified from |
+|---|---|---|
+| sherpa-onnx (inference) | Apache 2.0 | its repository's licence |
+| Kokoro-82M (`kokoro-int8-en-v0_19`) | **Apache License 2.0** | The full `LICENSE` file inside that exact bundled archive, matching https://huggingface.co/hexgrad/Kokoro-82M's stated licence. |
+| `espeak-ng-data/` (phoneme and dictionary data, 392 files inside the same archive) | espeak-ng project: **"GPL version 3 or later"** | The espeak-ng README ("License Information") and its `COPYING` (GPLv3 text) at https://github.com/espeak-ng/espeak-ng. The archive itself contains **no** licence file for this folder, the sherpa-onnx documentation does not state one, and the repository also holds separate notices for small parts (BSD-2-Clause, Apache-2.0, Unicode). The terms of each data file were **not** checked individually: unverified. |
 
-Both shipped tiers have an unambiguous, independently-verified permissive licence — no gate was
-needed here, but the verification was still done and is recorded above because a future model swap
-(a different Piper voice, a newer Kokoro release, a third tier) needs the same rigor.
+The espeak-ng data is credited in About as "from the espeak-ng project, GPL version 3 or later". This app is
+itself GPLv3, and nothing here is a legal conclusion about compatibility or obligations.
 
-**Piper voices NOT used, and why**, since this matters if anyone is tempted to add one later:
+**Piper voices NOT used, and why** (history; the Piper tier no longer ships), since this matters if anyone is
+tempted to add one later:
 Piper's other well-known English voices carry non-commercial/research-only training-data licences —
 "lessac"/"lessac-medium" (2013 Blizzard Challenge `lessac_blizzard2013` corpus: non-commercial
 research only, redistribution of derived models forbidden — confirmed by reading
@@ -204,21 +219,5 @@ https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.htm
 "amy"/"amy-low" (fine-tuned from that same Lessac voice data, so it inherits the restriction). An
 unrelated "License: mit" tag shown on some HuggingFace mirror pages for these voices describes the
 exported file format/tooling, not the training recordings' own terms, and is not a substitute for
-checking the model card.
-
-### Cloud voice — every user brings their own Google account and key
-`GoogleCloudTtsProvider` calls Google Cloud Text-to-Speech with an API key the **user** creates in
-their **own** Google Cloud project (the in-app wizard walks them through it, and states up front
-that Google requires billing to be enabled on that project even for the free tier). The key is
-entered at runtime, validated with a real two-word request before it is kept, stored only in the
-Keystore-backed `EncryptedSharedPreferences` in `NarrationSettingsRepository`, and never logged or
-embedded — an APK is trivially unpacked, and a bundled key would let strangers drain the owner's
-quota. There is therefore no shared quota, no owner-side cost, and no audio of Google's shipped in
-the app: the synthesized narration is produced for, and by, the end user under their own agreement
-with Google. Free-tier figures quoted in the wizard (4M Standard / 1M WaveNet, Neural2, Chirp 3: HD
-characters per month per billing project; ~7k characters per review) are Google's published ones
-at the time of writing.
-
-**Unverified against the live API**: no Google key was available when this was built. Everything
-up to the HTTP exchange is tested with stubbed responses; the socket itself is not. See RUN_LOG.md
-Round 9.
+checking the model card. The one Piper voice that had been used, `ljspeech-medium`, was public domain
+(its model card and https://keithito.com/LJ-Speech-Dataset/).

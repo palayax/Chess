@@ -39,12 +39,31 @@ def balance(board, color):
     return material(board, color) - material(board, not color)
 
 
+def capture_net(board, square):
+    """Net material (PIECE_VALUE units) the side to move gets by its best capture on `square`, with
+    both sides free to recapture there or stop. None when it has no legal capture there at all.
+    Legal moves only, so a pinned piece or an illegal king capture is never counted."""
+    victim = board.piece_at(square)
+    if victim is None:
+        return None
+    best = None
+    for m in board.legal_moves:
+        if m.to_square != square or not board.is_capture(m):
+            continue
+        board.push(m)
+        reply = capture_net(board, square)  # the other side's best recapture; it may also decline
+        board.pop()
+        net = PIECE_VALUE[victim.piece_type] - (max(reply, 0) if reply is not None else 0)
+        best = net if best is None else max(best, net)
+    return best
+
+
 # (tactic, fen, solution line in SAN, teaching point)
 REFS = [
     ("FORK", "2r3k1/5ppp/8/3N4/8/8/5PPP/6K1 w - - 0 1", ["Ne7+"],
      "The knight checks the king and hits the rook at the same time; the king must move and the rook drops."),
-    ("PAWN_FORK", "4k3/8/8/3n1b2/8/4P3/8/4K3 w - - 0 1", ["e4"],
-     "One pawn push attacks two pieces at once - the cheapest attacker always wins the exchange."),
+    ("PAWN_FORK", "4k3/8/8/3n1n2/8/4P3/8/4K3 w - - 0 1", ["e4"],
+     "One pawn push attacks two pieces at once, and neither can take it - the cheapest attacker always wins the exchange."),
     ("PIN_ABSOLUTE", "4k3/3n4/8/8/8/8/8/4KB2 w - - 0 1", ["Bb5"],
      "A piece pinned against its own king is frozen - it cannot legally move, so it defends nothing."),
     ("PIN_RELATIVE", "3qk3/8/5n2/8/8/8/8/2B1K3 w - - 0 1", ["Bg5"],
@@ -340,7 +359,16 @@ def structural_ok(kind, board, moves):
     if kind in ("FORK", "PAWN_FORK"):
         hits = [t for t in after1.attacks(first.to_square)
                 if (q := after1.piece_at(t)) and q.color != solver and PIECE_VALUE[q.piece_type] >= 3]
-        return len(hits) >= 2, f"attacks {len(hits)} valuable pieces at once"
+        if len(hits) < 2:
+            return False, f"attacks {len(hits)} valuable pieces at once"
+        # A fork only works if the forking piece survives to cash it in. If the opponent can simply
+        # take the forker without losing material (an even trade counts), the "fork" is a capture or
+        # an exchange. The first PAWN_FORK reference, 1.e4 against a knight and a bishop, failed
+        # exactly this: the forked bishop on f5 just took the pawn. Mirrors ANALYSIS_SPEC 5.3.
+        taken = capture_net(after1.copy(), first.to_square)
+        if taken is not None and taken >= 0:
+            return False, f"the forking piece can be taken without loss (exchange result {taken:+d} for the defender)"
+        return True, f"attacks {len(hits)} valuable pieces at once, and the forker cannot be taken without loss"
 
     if kind == "DOUBLE_ATTACK":
         # Two NEW threats against valuable pieces, from at least two DIFFERENT attacking pieces -

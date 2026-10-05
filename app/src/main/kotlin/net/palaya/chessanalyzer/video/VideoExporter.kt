@@ -162,7 +162,17 @@ class VideoExporter(private val context: Context) {
             checkCancelled()
 
             // ---- 2. Real timeline, now that speech durations are known. ----
-            val timeline = TimelineBuilder.build(script, synthResults)
+            // R6b: the silent recap end card follows the last segment. It is not a segment (the
+            // "N of M" and time-left figures above are unchanged) and it is outside the pacing
+            // budget (ANALYSIS_SPEC 9.7): the narrated length is whatever the budget allowed, and
+            // the card adds its own 4-6 s on top.
+            val recapCard = script.recap?.let { RecapCardContent.from(it, panelLabels.recap) }
+            val narratedTimeline = TimelineBuilder.build(script, synthResults)
+            val timeline = if (recapCard != null) {
+                narratedTimeline.withRecap(recapDurationMs(recapCard.readingWords))
+            } else {
+                narratedTimeline
+            }
 
             // ---- 3. PCM timeline -> AAC, fully encoded up front so its MediaFormat (and csd-0)
             // is ready before the muxer needs it. A multi-minute review's AAC track is only a
@@ -256,12 +266,19 @@ class VideoExporter(private val context: Context) {
             // (also since-fixed) per-pixel JNI put calls.
             val yuvScratch = YuvScratchBuffers(VIDEO_WIDTH, VIDEO_HEIGHT)
             var frameIndex = 0L
+            // Every recap frame is the same picture: draw it once and let the codec re-encode the bitmap.
+            var recapDrawn = false
 
             while (frameIndex < totalFrames) {
                 checkCancelled()
                 val targetMs = (frameIndex * 1000L) / FPS
                 val timed = timeline.segmentAt(targetMs)
-                if (timed == null) {
+                if (recapCard != null && timeline.inRecap(targetMs)) {
+                    if (!recapDrawn) {
+                        BoardFrameRenderer.renderRecapFrame(frameCanvas, VIDEO_WIDTH, VIDEO_HEIGHT, recapCard)
+                        recapDrawn = true
+                    }
+                } else if (timed == null) {
                     BoardFrameRenderer.renderCardFrame(frameCanvas, VIDEO_WIDTH, VIDEO_HEIGHT, script.title, listOf(script.subtitle))
                 } else {
                     val elapsedInSegment = targetMs - timed.startMs
@@ -275,9 +292,7 @@ class VideoExporter(private val context: Context) {
                             BoardFrameRenderer.renderBoardFrame(frameCanvas, VIDEO_WIDTH, VIDEO_HEIGHT, instruction.spec)
                         is RenderInstruction.Card ->
                             BoardFrameRenderer.renderCardFrame(
-                                frameCanvas, VIDEO_WIDTH, VIDEO_HEIGHT,
-                                instruction.heading, instruction.lines, instruction.caption, chapterLabel,
-                                instruction.subLines,
+                                frameCanvas, VIDEO_WIDTH, VIDEO_HEIGHT, instruction.content, instruction.caption, chapterLabel,
                             )
                     }
                 }
@@ -510,6 +525,8 @@ class VideoExporter(private val context: Context) {
                 val totalSamples = ((timed.totalDurationMs * sampleRate) / 1000L).toInt().coerceAtLeast(0)
                 writeSilence(out, (totalSamples - speechTargetSamples).coerceAtLeast(0))
             }
+            // The recap card is silent: the audio track stays as long as the picture.
+            writeSilence(out, ((timeline.recapDurationMs * sampleRate) / 1000L).toInt())
         }
     }
 

@@ -6,14 +6,15 @@ import java.io.File
 import kotlin.math.sqrt
 import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.ManualEvidenceTool
+import net.palaya.chessanalyzer.TestApp
 import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Renders the same chess-narration paragraph through **all eleven** Kokoro v0.19 speakers plus the
- * current Piper voice, and sweeps `length_scale` for the chosen speaker. The WAVs are pulled off
+ * Renders the same chess-narration paragraph through **all eleven** Kokoro v0.19 speakers (the
+ * bundled voice; Piper no longer ships), and sweeps `length_scale` for the chosen speaker. The WAVs are pulled off
  * the device into `docs/voice_samples/` so the owner can pick the narration voice **by ear** —
  * which is the only way this particular decision can honestly be made. Everything a machine can
  * measure (duration, RMS, effective words-per-minute) is logged alongside, and the same numbers
@@ -26,7 +27,8 @@ import org.junit.runner.RunWith
  *   net.palaya.chessanalyzer.test/androidx.test.runner.AndroidJUnitRunner
  * adb pull /sdcard/Android/data/net.palaya.chessanalyzer/files/voice_samples docs/
  * ```
- * Both model archives must be staged on the device first (see [NeuralTtsProviderInstrumentedTest]).
+ * The Kokoro model is bundled in the APK; the sweep installs it through the app's own first-run
+ * setup, so nothing has to be staged on the device.
  */
 @RunWith(AndroidJUnit4::class)
 class VoiceSampleSweep {
@@ -44,7 +46,7 @@ class VoiceSampleSweep {
 
     @ManualEvidenceTool
     @Test
-    fun renderEveryKokoroSpeakerPlusPiperBaseline(): Unit = runBlocking {
+    fun renderEveryKokoroSpeaker(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val outDir = File(context.getExternalFilesDir(null), "voice_samples").apply {
             deleteRecursively()
@@ -56,19 +58,8 @@ class VoiceSampleSweep {
             report.appendLine(s)
         }
 
-        val provisioner = VoiceModelProvisioner(File(context.filesDir, "voice_sweep_models").apply { mkdirs() })
-
-        // ---- Piper baseline -------------------------------------------------------------
-        val piperArchive = File(NeuralTtsProviderInstrumentedTest.PIPER_ARCHIVE_ON_DEVICE)
-        assertTrue("stage the Piper archive at ${piperArchive.path} first", piperArchive.isFile)
-        check(provisioner.provisionFromLocalArchiveForTesting(NeuralVoiceTier.PIPER, piperArchive) is ProvisioningResult.Success)
-        line(renderWith(NeuralTtsProvider(NeuralVoiceTier.PIPER, provisioner.modelDir(NeuralVoiceTier.PIPER)), "piper_baseline_ljspeech", outDir))
-
         // ---- Kokoro, every speaker ------------------------------------------------------
-        val kokoroArchive = File(NeuralTtsProviderInstrumentedTest.KOKORO_ARCHIVE_ON_DEVICE)
-        assertTrue("stage the Kokoro archive at ${kokoroArchive.path} first", kokoroArchive.isFile)
-        check(provisioner.provisionFromLocalArchiveForTesting(NeuralVoiceTier.KOKORO, kokoroArchive) is ProvisioningResult.Success)
-        val kokoroDir = provisioner.modelDir(NeuralVoiceTier.KOKORO)
+        val kokoroDir = TestApp.installedVoiceDir()
 
         for (sid in 0 until KokoroVoices.EXPECTED_SPEAKER_COUNT) {
             val provider = NeuralTtsProvider(

@@ -5,6 +5,7 @@ import net.palaya.chessanalyzer.core.chess.Move
 import net.palaya.chessanalyzer.core.chess.PieceType
 import net.palaya.chessanalyzer.core.chess.Position
 import net.palaya.chessanalyzer.core.chess.Square
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -83,12 +84,35 @@ internal object ExchangeEvaluator {
     fun netGain(from: Position, to: Position, color: Color): Int =
         balance(to, color) - balance(from, color)
 
-    /** "a queen" / "a rook" / "a piece" / "a pawn" for a positive centipawn gain, else null. */
+    /**
+     * [netGain] after the side that is *not* [winner] has taken back whatever it can: when it is
+     * their move in [finalPosition], the best capture available to them (by [see]) is charged to the
+     * winner, so a claim made about the line survives the next ply. A line that stops right after a
+     * capture is not credited with a piece the opponent takes straight back.
+     */
+    fun settledGain(from: Position, finalPosition: Position, winner: Color): Int {
+        val net = netGain(from, finalPosition, winner)
+        if (finalPosition.sideToMove == winner) return net
+        val bestTakeBack = finalPosition.legalMoves()
+            .filter { it.isCapture }
+            .maxOfOrNull { see(finalPosition, it) } ?: 0
+        return net - max(0, bestTakeBack)
+    }
+
+    /**
+     * "a queen" / "a rook" / "a piece" / "a pawn" when [centipawns] is within [GAIN_TOLERANCE_CP] of
+     * exactly that much material, else null. A gain between two piece values is not named after
+     * either: a rook taken for a bishop (+170) is not "a pawn", and a queen taken by a pawn that is
+     * then recaptured (+800) is not "a rook". The caller says "material" for those.
+     */
     fun describeGain(centipawns: Int): String? = when {
-        centipawns >= 900 -> "a queen"
-        centipawns >= 500 -> "a rook"
-        centipawns >= 300 -> "a piece"
-        centipawns >= 100 -> "a pawn"
+        abs(centipawns - 900) <= GAIN_TOLERANCE_CP -> "a queen"
+        abs(centipawns - 500) <= GAIN_TOLERANCE_CP -> "a rook"
+        abs(centipawns - 325) <= GAIN_TOLERANCE_CP -> "a piece"
+        abs(centipawns - 100) <= GAIN_TOLERANCE_CP -> "a pawn"
         else -> null
     }
+
+    /** How far a net gain may be from a whole piece's value and still be named after it. */
+    const val GAIN_TOLERANCE_CP = 40
 }

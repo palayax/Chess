@@ -76,7 +76,7 @@ class NarrationStore private constructor(val dir: File) {
     }
 
     companion object {
-        private const val DIR_NAME = "narration"
+        internal const val DIR_NAME = "narration"
 
         /** The one store the whole app should share — always `filesDir/narration`. */
         fun forApp(context: Context): NarrationStore =
@@ -97,6 +97,5 @@ class NarrationStore private constructor(val dir: File) {
  */
 fun NarrationVoiceProvider.narrationCacheFingerprint(): String = when (this) {
     is NeuralTtsProvider -> cacheFingerprint
-    is GoogleCloudTtsProvider -> cacheFingerprint
     else -> "default"
 }

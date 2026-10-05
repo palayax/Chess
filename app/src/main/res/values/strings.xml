@@ -5,156 +5,225 @@
     <string name="open_pgn_label">Open with Palaya Chess</string>
 
     <!-- Navigation / top level -->
-    <string name="nav_import">Import</string>
-    <string name="nav_review">Review</string>
-    <string name="nav_report">Report</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Import screen -->
-    <string name="import_title">Analyze a game</string>
-    <string name="import_empty_headline">Bring a game in to get started</string>
-    <string name="import_empty_body">Import a PGN file from your device, paste PGN text below, or share a game directly from Chess.com, Lichess, or any other chess app using the Share menu.</string>
-    <string name="import_choose_file">Choose PGN file</string>
-    <string name="import_paste_label">Paste PGN</string>
-    <string name="import_paste_placeholder">[Event \"Casual Game\"]\n1. e4 e5 2. Nf3 Nc6 …</string>
-    <string name="import_paste_action">Analyze pasted PGN</string>
+    <string name="home_title">Palaya Chess</string>
+    <string name="import_empty_headline">Review a game you played</string>
+    <string name="import_empty_body">Share a game here from Chess.com or Lichess, or open a game file.</string>
+    <string name="import_choose_file">Open a game file</string>
+    <string name="import_paste_label">Paste moves</string>
+    <string name="import_paste_placeholder">1. e4 e5 2. Nf3 Nc6 … (or the whole game text)</string>
+    <string name="import_paste_action">Analyze</string>
     <string name="import_recent_header">Recent games</string>
-    <string name="import_recent_empty">Games you analyze will show up here.</string>
-    <string name="import_invalid_pgn">That doesn\'t look like a valid PGN. Check the text and try again.</string>
+    <string name="home_review_another">Review another game</string>
+    <string name="import_open_file_short">Open file</string>
+    <string name="import_paste_short">Paste</string>
+    <string name="import_paste_from_clipboard">Paste from clipboard</string>
+    <string name="import_clipboard_empty">Nothing to paste yet. Copy a game first.</string>
+    <string name="import_invalid_pgn">That doesn\'t look like a chess game. Paste the moves or the game text and try again.</string>
+    <!-- "%1$s vs %2$s" for a game's two players (recent list, summary header). -->
+    <string name="game_vs_format">%1$s vs %2$s</string>
+    <!-- Recent-game subtitle: %1$s = date, %2$s = "17 moves". -->
+    <string name="recent_game_subtitle">%1$s · %2$s</string>
+    <plurals name="recent_moves_count">
+        <item quantity="one">%1$d move</item>
+        <item quantity="other">%1$d moves</item>
+    </plurals>
 
     <!-- Analysis progress -->
     <string name="progress_title">Analyzing game</string>
-    <string name="progress_downloading_engine">Preparing engine…</string>
-    <string name="progress_downloading_net">Downloading neural network (%1$s of %2$s)</string>
-    <string name="progress_analyzing_moves">Analyzing move %1$d of %2$d</string>
+    <string name="progress_downloading_engine">Starting…</string>
+    <string name="progress_analyzing_moves">Move %1$d of %2$d</string>
     <string name="progress_cancel">Cancel</string>
+    <string name="progress_first_run_setup">Setting up the engine (one time)…</string>
+
+    <!-- Analysis failed (shown inside the progress screen, never as a modal) -->
+    <string name="analysis_failed_hint">Check the moves and try again.</string>
+    <string name="analysis_failed_engine">The engine couldn\'t start. Restart the app and try again.</string>
+    <string name="analysis_failed_lost">The game text was lost. Open the game again.</string>
+    <string name="analysis_failed_setup_storage">Palaya Chess needs about 260 MB of free space to finish setting up. Free up some space and try again.</string>
+    <string name="analysis_failed_setup_damaged">The app\'s built-in engine files are damaged. Reinstall Palaya Chess.</string>
+    <string name="analysis_failed_generic">Something went wrong while analyzing. Try again.</string>
+    <string name="analysis_try_again">Try again</string>
 
     <!-- Review screen -->
-    <string name="review_title">Review</string>
-    <string name="review_best_line">Best line</string>
+    <string name="review_title">Board</string>
+    <string name="review_better_was">Better was %1$s</string>
     <string name="review_show_me">Show me</string>
-    <string name="review_flip_board">Flip board</string>
-    <string name="review_autoplay">Autoplay</string>
+    <!-- Jumps the Board to the next key moment (B2). The arrow is a mirrored quote mark, so it points the reading direction. -->
+    <string name="review_next_key_moment">Next key moment ›</string>
+    <string name="review_show_me_missed">Show me what I missed</string>
     <string name="review_first_move">First move</string>
     <string name="review_previous_move">Previous move</string>
     <string name="review_next_move">Next move</string>
     <string name="review_last_move">Last move</string>
-    <string name="review_view_report">View game report</string>
-    <string name="review_start_position">Start position</string>
+    <string name="review_start_position_hint">Starting position. Tap a move, or press next.</string>
+    <!-- A run of plies drawn as one band in the move list; the band has no text, so this says what it is. -->
+    <string name="review_sequence_part_of">Part of a sequence: %1$s (moves %2$d–%3$d)</string>
+    <string name="review_sequence_part_of_single">Part of a sequence: %1$s (move %2$d)</string>
+    <!-- "This cost about N pawns": whole pawns use the plural; half pawns and fractions use the strings. -->
+    <plurals name="review_cost_pawns">
+        <item quantity="one">This cost about %1$d pawn</item>
+        <item quantity="other">This cost about %1$d pawns</item>
+    </plurals>
+    <string name="review_cost_half_pawn">This cost about half a pawn</string>
+    <string name="review_cost_pawns_decimal">This cost about %1$s pawns</string>
+    <!-- Move chip accessibility descriptions (variants avoid gluing translated fragments). -->
+    <string name="cd_move_chip">Move %1$d, %2$s, evaluation %3$s</string>
+    <string name="cd_move_chip_classified">Move %1$d, %2$s, %3$s, evaluation %4$s</string>
 
     <!-- Tactic simulation / textbook reference -->
-    <string name="simulation_missed_title">Missed tactic: %1$s</string>
-    <string name="simulation_close">Close</string>
+    <string name="simulation_missed_title">What you missed: %1$s</string>
     <string name="simulation_previous_step">Previous step</string>
     <string name="simulation_next_step">Next step</string>
     <string name="simulation_starting_position">Starting position</string>
-    <string name="simulation_watch_intro">Watch what happens: %1$s starts a line that %2$s.</string>
-    <string name="simulation_payoff">Payoff: %1$s</string>
-    <string name="simulation_back_to_game">Back to the game</string>
-    <string name="simulation_reference_offer">Want to see a %1$s done cleanly? There is a textbook example with nothing else on the board.</string>
+    <!-- First step of a missed-tactic walkthrough (U8). -->
+    <string name="simulation_before">Before the mistake</string>
+    <!-- "2 / 5": step counter. Starts with LRM (&#8206;) so digits and slash never reorder in RTL. -->
+    <string name="simulation_step_counter">&#8206;%1$d / %2$d</string>
+    <!-- "8. Bxa6" / "8… Bxa6": the move the step plays. LRM-prefixed for the same reason. -->
+    <string name="simulation_move_white">&#8206;%1$d. %2$s</string>
+    <string name="simulation_move_black">&#8206;%1$d… %2$s</string>
+    <string name="simulation_payoff">Result: %1$s</string>
+    <string name="simulation_reference_offer">Want to see the %1$s pattern done cleanly? There is a textbook example with nothing else on the board.</string>
     <string name="simulation_reference_button">See the textbook example</string>
-    <string name="review_learn_pattern">Textbook: %1$s</string>
-    <string name="report_learn_pattern">Textbook example</string>
-    <!-- %1$d = how many, %2$s = the threshold in pawns, e.g. "0.5" -->
-    <string name="report_minor_tactics_hidden">%1$d minor (below ±%2$s pawns)</string>
+    <string name="review_learn_pattern">See how it works: %1$s</string>
+    <string name="reference_title">How it works: %1$s</string>
+    <string name="report_learn_pattern">See how it works</string>
+    <plurals name="report_minor_tactics_hidden">
+        <item quantity="one">%1$d smaller one</item>
+        <item quantity="other">%1$d smaller ones</item>
+    </plurals>
     <string name="report_minor_tactics_show">Show</string>
     <string name="report_minor_tactics_hide">Hide</string>
 
     <!-- Game report -->
-    <string name="report_title">Game report</string>
+    <string name="report_title">Game summary</string>
+    <string name="summary_open_board">Open the board</string>
+    <string name="summary_watch_video">Watch the video review</string>
+    <string name="summary_which_side">Which side were you?</string>
+    <string name="summary_side_neither">Not me</string>
     <string name="report_accuracy">Accuracy</string>
-    <string name="report_est_rating">Est. performance rating</string>
-    <string name="report_classification_breakdown">Move breakdown</string>
+    <!-- %1$d = estimated rating, shown inside a sentence. -->
+    <string name="report_est_rating_sentence">Played like a ~%1$d</string>
+    <string name="report_classification_breakdown">All moves</string>
     <string name="report_key_moments">Key moments</string>
-    <string name="report_eval_graph">Evaluation</string>
-    <string name="report_share">Share report</string>
+    <string name="report_key_moments_you">Your key moments</string>
+    <string name="report_tactics_you_found">Tactics you found</string>
+    <string name="report_tactics_you_missed">Tactics you missed</string>
+    <string name="report_tactics_opponent_found">Tactics your opponent found</string>
+    <string name="report_tactics_opponent_missed">Tactics your opponent missed</string>
+    <string name="report_tactics_white_found">White found</string>
+    <string name="report_tactics_white_missed">White missed</string>
+    <string name="report_tactics_black_found">Black found</string>
+    <string name="report_tactics_black_missed">Black missed</string>
+    <string name="report_tactics_empty">Nothing here.</string>
+    <string name="report_tactics_empty_nice">No missed tactics — nice game.</string>
+    <string name="report_eval_graph">Who was winning</string>
+    <!-- Summary hub (UX step U5) -->
+    <string name="summary_you">You</string>
+    <string name="summary_opponent">Opponent</string>
+    <!-- A player's name with the "this is you" marker, in the header card. -->
+    <string name="summary_name_you">%1$s (you)</string>
+    <!-- Side unknown: one rating sentence per side. %1$s = "White", %2$s = "Played like a ~1650". -->
+    <string name="summary_side_rating">%1$s: %2$s</string>
+    <string name="summary_side_help">Then the summary can say \'you\' instead of a colour.</string>
+    <string name="summary_key_moments_opponent">Your opponent\'s</string>
+    <string name="summary_no_key_moments">No mistakes big enough to mention — nice game.</string>
+    <!-- A move as written in a move list: %1$d = move number, %2$s = SAN. Black\'s moves carry the ellipsis. -->
+    <string name="summary_moment_white">%1$d. %2$s</string>
+    <string name="summary_moment_black">%1$d… %2$s</string>
+    <!-- Practise your own mistakes (docs/PRACTICE_DESIGN.md §6; R3 adds the two-step hint, the result badge and the "Try it" entries). -->
+    <string name="practice_title">Practise</string>
+    <!-- "2 / 3": LRM-prefixed so digits and slash never reorder in RTL. -->
+    <string name="practice_counter">&#8206;%1$d / %2$d</string>
+    <string name="practice_section_title">Practise these positions</string>
+    <plurals name="practice_entry_count">
+        <item quantity="one">%1$d position</item>
+        <item quantity="other">%1$d positions</item>
+    </plurals>
+    <!-- %1$s = "3 positions", %2$d = how many are solved. -->
+    <string name="practice_entry_solved">%1$s · %2$d solved</string>
+    <string name="practice_entry_no_side">Choose which side you were to practise your mistakes.</string>
+    <string name="practice_entry_empty">Nothing to fix in this game — nice.</string>
+    <string name="practice_side_to_play_white">White to play</string>
+    <string name="practice_side_to_play_black">Black to play</string>
+    <plurals name="practice_goal_mate">
+        <item quantity="one">Find the checkmate in %1$d move.</item>
+        <item quantity="other">Find the checkmate in %1$d moves.</item>
+    </plurals>
+    <string name="practice_goal_rook_or_better">Find the move that wins a rook or more.</string>
+    <string name="practice_goal_piece">Find the move that wins a piece.</string>
+    <string name="practice_goal_material">Find the move that wins material.</string>
+    <string name="practice_goal_better_move">Find the better move.</string>
+    <string name="practice_from_move">From move %1$d of your game</string>
+    <string name="practice_hint">Hint</string>
+    <!-- The second tap of the hint button: it shows the target square (still without playing it). -->
+    <string name="practice_hint_second">Show the square</string>
+    <string name="practice_show_answer">Show answer</string>
+    <string name="practice_wrong">Not quite. Try again.</string>
+    <string name="practice_played_in_game">That\'s the move you played in the game.</string>
+    <!-- %1$s = piece name ("knight"), %2$s = square ("f3"). -->
+    <string name="practice_hint_piece">Look at the %1$s on %2$s.</string>
+    <!-- %1$s = a pattern with its article ("a fork", "an x-ray"), built in code by EnglishGrammar. -->
+    <string name="practice_hint_idea">Look for %1$s.</string>
+    <!-- Said in words as well as drawn, so the second hint is not a dot only. %1$s = square. -->
+    <string name="practice_hint_target">It goes to %1$s.</string>
+    <string name="practice_correct">Correct.</string>
+    <string name="practice_correct_best">%1$s was the best move.</string>
+    <string name="practice_revealed">The best move was %1$s.</string>
+    <string name="practice_revealed_line">Then: %1$s</string>
+    <string name="practice_next">Next</string>
+    <string name="practice_done_all">That\'s all the positions from this game.</string>
+    <string name="practice_done_solved">Solved %1$d of %2$d.</string>
+    <!-- Beside the card title, so colour is not the only signal. -->
+    <string name="practice_badge_correct">Correct</string>
+    <string name="practice_badge_wrong">Not correct</string>
+    <!-- Outlined button on a Summary key-moment card whose move is a practice position. -->
+    <string name="practice_try_it">Try it</string>
+    <!-- Text button on the last step of the walkthrough, only when the move is a practice position. -->
+    <string name="simulation_try_it_yourself">Try it yourself</string>
+    <string name="piece_pawn">pawn</string>
+    <string name="piece_knight">knight</string>
+    <string name="piece_bishop">bishop</string>
+    <string name="piece_rook">rook</string>
+    <string name="piece_queen">queen</string>
+    <string name="piece_king">king</string>
+    <string name="summary_details">Details</string>
+    <string name="summary_details_expand">Show details</string>
+    <string name="summary_details_collapse">Hide details</string>
+    <string name="report_group_good_moves">Good moves (Best, Excellent, Good)</string>
+    <string name="report_group_book_forced">Book / Forced</string>
+    <string name="report_table_show_all">Show all %1$d</string>
+    <string name="report_table_show_fewer">Show fewer</string>
 
-    <!-- Settings -->
+    <!-- Settings (UX step U9): Your name, Language, Advanced (collapsed), About Palaya Chess. -->
     <string name="settings_title">Settings</string>
-    <string name="settings_engine_header">Engine</string>
-    <string name="settings_depth">Search depth</string>
-    <string name="settings_time_per_move">Time per move</string>
-    <string name="settings_multipv">Analysis lines (MultiPV)</string>
-    <string name="settings_username_header">Your account</string>
-    <string name="settings_username">Your username</string>
-    <string name="settings_username_help">Used to auto-detect which side is you when a PGN has player names.</string>
-    <string name="settings_version_header">Engine version</string>
-    <string name="settings_engine_version">Engine: %1$s</string>
-    <string name="settings_net_version">Network: %1$s</string>
-    <string name="settings_check_updates">Check for updates</string>
-    <string name="settings_narration_content_header">Narration content</string>
-    <string name="settings_narration_threshold">Only narrate moves worth</string>
-    <!-- %1$s = the threshold in pawns, one decimal, e.g. "0.5". -->
-    <string name="settings_narration_threshold_value">±%1$s pawns</string>
-    <string name="settings_narration_threshold_off">Every move</string>
-    <string name="settings_narration_threshold_help">A move is narrated when it changes the evaluation by at least this much. Sequences are judged on their combined swing. Set to zero to narrate every move.</string>
-    <string name="settings_narration_header">Narration voice</string>
-    <string name="settings_narration_device">Device voice</string>
-    <string name="settings_narration_device_help">Free, works offline, no account needed.</string>
-    <string name="settings_narration_neural">Natural voice (on-device)</string>
-    <string name="settings_narration_neural_help">Free, works offline, no account needed — more natural than the device voice.</string>
-    <string name="settings_narration_neural_disabled_help">Download a voice model below to enable this option.</string>
-    <string name="settings_narration_neural_not_downloaded">Not downloaded yet</string>
-    <!-- %1$s = download size, %2$s = size once extracted. Both are stated because the
-         archives are compressed and the two differ by a lot (Kokoro: 98.5 MB down, 150.6 MB
-         on disk) — quoting only one of them misleads whichever one you pick. -->
-    <string name="settings_narration_neural_size">%1$s download · %2$s on disk</string>
-    <string name="settings_narration_neural_installed_size">%1$s on this device</string>
-    <string name="settings_narration_neural_wifi_only">Auto-downloads on Wi-Fi only</string>
-    <string name="settings_narration_neural_download">Download</string>
-    <string name="settings_narration_neural_cancel">Cancel</string>
-    <string name="settings_narration_neural_delete">Delete</string>
-    <string name="settings_narration_storage_label">Narration audio: %1$s</string>
+    <string name="settings_username">Your name on Chess.com / Lichess</string>
+    <string name="settings_username_help">So the summary can say \'you\' instead of \'White\'.</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_advanced_expand">Show advanced settings</string>
+    <string name="settings_advanced_collapse">Hide advanced settings</string>
+    <!-- Analysis strength = search depth 12 / 14 / 18. -->
+    <string name="settings_depth">Analysis strength</string>
+    <string name="settings_depth_quick">Quick</string>
+    <string name="settings_depth_standard">Standard</string>
+    <string name="settings_depth_deep">Deep</string>
+    <string name="settings_depth_help">Deeper is more accurate and slower.</string>
+    <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
+    <string name="settings_custom_value">Custom (%1$s)</string>
+    <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->
+    <string name="settings_narration_threshold">What the review talks about</string>
+    <string name="settings_threshold_big">Only big moments</string>
+    <string name="settings_threshold_balanced">Balanced</string>
+    <string name="settings_threshold_all">Every move</string>
+    <string name="settings_narration_threshold_help">Decides which moves the narrated review mentions. It also decides which tactics the summary lists.</string>
+    <string name="settings_voice_use_device">Use the phone\'s built-in voice instead</string>
+    <!-- %1$s = size, e.g. "12.4 MB" (LRM-wrapped). -->
+    <string name="settings_narration_storage_label">Saved narration audio: %1$s</string>
     <string name="settings_narration_storage_clear">Clear</string>
-    <string name="settings_narration_storage_empty">No pre-generated narration audio stored yet.</string>
-
-    <!-- Cloud voice (Google Cloud Text-to-Speech, user's own key) -->
-    <string name="settings_narration_cloud">Cloud voice (Google)</string>
-    <string name="settings_narration_cloud_help_ready">Uses your own Google Cloud account. The free tier covers about %1$d reviews a month; beyond that Google bills you.</string>
-    <string name="settings_narration_cloud_help_no_key">Optional upgrade. Needs your own Google Cloud API key, and Google requires billing to be enabled even for the free tier. Set it up below.</string>
-    <string name="settings_narration_cloud_voice_english">English voices</string>
-    <string name="settings_narration_cloud_voice_hebrew">Hebrew voices</string>
-    <string name="settings_narration_cloud_voice_hint">%1$s · free tier ≈ %2$d reviews/month</string>
-    <string name="settings_narration_cloud_key_saved_encrypted">API key saved — encrypted on this device</string>
-    <string name="settings_narration_cloud_key_saved_plain">API key saved — this device could not use encrypted storage</string>
-    <string name="settings_narration_cloud_key_missing">No API key yet</string>
-    <string name="settings_narration_cloud_set_up">Set up key</string>
-    <string name="settings_narration_cloud_change">Change key</string>
-    <string name="settings_narration_cloud_remove">Remove</string>
-
-    <!-- Cloud voice setup wizard -->
-    <string name="cloud_setup_title">Google Cloud voice</string>
-    <string name="cloud_setup_intro">Higher-quality narration from Google Cloud Text-to-Speech, using your own Google account. This is optional: the on-device natural voice stays available and stays free.</string>
-    <string name="cloud_setup_billing_header">Before you start: billing is required</string>
-    <string name="cloud_setup_billing_body">Google only serves Text-to-Speech to a project that has a billing account with a payment method attached — even for free-tier use. If you would rather not add a card to your Google account, stop here; the on-device voice needs no account and no card.</string>
-    <string name="cloud_setup_billing_cost">The free tier is %1$s characters a month for %2$s voices — about %3$d full game reviews. Anything beyond that, Google bills to you at $%4$d per million characters. New Google Cloud customers also get a $%5$d trial credit, which is a trial, not a free tier.</string>
-    <string name="cloud_setup_pricing_link">Google\'s pricing page</string>
-    <string name="cloud_setup_privacy">Your key is kept only on this device, encrypted with the Android Keystore, and is sent nowhere except Google\'s Text-to-Speech endpoint.</string>
-    <string name="cloud_setup_step">Step %1$d</string>
-    <string name="cloud_setup_step1_title">Create a Google Cloud project</string>
-    <string name="cloud_setup_step1_body">Sign in with your Google account and create a project — any name will do. Using the Cloud Console itself is free.</string>
-    <string name="cloud_setup_step2_title">Enable the Text-to-Speech API</string>
-    <string name="cloud_setup_step2_body">Open the API\'s page with your new project selected and press Enable.</string>
-    <string name="cloud_setup_step3_title">Enable billing on the project</string>
-    <string name="cloud_setup_step3_body">Link a billing account with a payment method to the project. Required even to use the free tier (see above). The free allowance is applied automatically; nothing is charged until you exceed it.</string>
-    <string name="cloud_setup_step4_title">Create an API key</string>
-    <string name="cloud_setup_step4_body">Credentials → Create credentials → API key. Copy the key that appears.</string>
-    <string name="cloud_setup_step5_title">Restrict the key (recommended)</string>
-    <string name="cloud_setup_step5_body">On the same page, edit the key: under API restrictions choose "Restrict key" and tick Cloud Text-to-Speech API. Leave application restrictions at "None" — a website (HTTP referrer) restriction blocks requests from apps.</string>
-    <string name="cloud_setup_step6_title">Paste the key and test it</string>
-    <string name="cloud_setup_step6_body">Testing synthesizes two words ("%1$s") through the selected voice, %2$s. It is a real request, so a wrong key, a project without billing or a disabled API shows up here with an explanation — not halfway through an export.</string>
-    <string name="cloud_setup_open_console">Open in Cloud Console</string>
-    <string name="cloud_setup_key_label">API key</string>
-    <string name="cloud_setup_key_show">Show</string>
-    <string name="cloud_setup_key_hide">Hide</string>
-    <string name="cloud_setup_test_and_save">Test and save</string>
-    <string name="cloud_setup_testing">Checking the key with Google…</string>
-    <string name="cloud_setup_saved">Key works: %1$s synthesized %2$d ms of audio. Cloud voice is now selected for narration — switch back in Settings any time.</string>
-    <string name="cloud_setup_done">Done</string>
-    <string name="cloud_setup_no_browser">No browser found on this device. Open this address on any device:\n%1$s</string>
-    <string name="settings_about_header">About</string>
-    <string name="settings_about_body">Palaya Chess uses the Stockfish chess engine, licensed under the GNU General Public License v3. This app is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess.</string>
-    <string name="settings_gpl_notice">View GPLv3 license notice</string>
+    <string name="settings_narration_storage_empty">Nothing saved yet</string>
     <string name="settings_about_open">About Palaya Chess</string>
 
     <!-- About screen -->
@@ -163,6 +232,7 @@
     <string name="about_app_name">Palaya Chess</string>
     <string name="about_app_version">Version %1$s</string>
     <string name="about_engine_version">Engine: %1$s</string>
+    <string name="about_net_version">Network: %1$s</string>
     <string name="about_owner_header">Made by</string>
     <string name="about_owner_name">Dor Amit</string>
     <string name="about_owner_contact_label">Contact</string>
@@ -171,7 +241,7 @@
 
     <string name="about_licenses_header">Licenses &amp; attribution</string>
     <string name="about_license_stockfish_title">Chess engine</string>
-    <string name="about_license_stockfish_body">Palaya Chess uses the Stockfish chess engine (%1$s). Because Stockfish is licensed under the GNU General Public License v3 (GPLv3), Palaya Chess is also distributed under GPLv3, and the corresponding source code is available on request.</string>
+    <string name="about_license_stockfish_body">Palaya Chess uses the chess engine %1$s. Because Stockfish is licensed under the GNU General Public License v3 (GPLv3), Palaya Chess is also distributed under GPLv3, and the corresponding source code is available on request. The evaluation network it uses was trained on data provided by the Leela Chess Zero project, which is made available under the Open Database License (ODbL).</string>
     <string name="about_license_stockfish_link">stockfishchess.org</string>
     <string name="about_license_stockfish_view">View full GPLv3 license text</string>
     <!-- PLACEHOLDER: owner has not provided the public source repository URL yet.
@@ -194,7 +264,7 @@
     <string name="about_license_pieces_body_fallback">Board and piece artwork are original to this app.</string>
 
     <string name="about_license_neural_title">On-device neural narration</string>
-    <string name="about_license_neural_body">The optional "Natural voice" narration runs entirely on your device via sherpa-onnx (Apache 2.0). Its voice models — Piper trained on the public-domain LJ Speech dataset, and Kokoro-82M (Apache 2.0) — are downloaded on request, verified, and never sent anywhere.</string>
+    <string name="about_license_neural_body">The narration voice runs entirely on your device via sherpa-onnx (Apache 2.0). Its Kokoro-82M voice model (Apache 2.0) and espeak-ng pronunciation data (from the espeak-ng project, GPL version 3 or later) are included in the app, and nothing is ever sent anywhere.</string>
     <string name="about_license_neural_view">View full attribution</string>
 
     <string name="about_disclaimer">Palaya Chess is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess. It only reads PGN game files exported from those services.</string>
@@ -203,8 +273,8 @@
 
     <!-- Move classification display names -->
     <string name="classification_brilliant">Brilliant</string>
-    <string name="classification_great">Great move</string>
-    <string name="classification_best">Best move</string>
+    <string name="classification_great">Great</string>
+    <string name="classification_best">Best</string>
     <string name="classification_excellent">Excellent</string>
     <string name="classification_good">Good</string>
     <string name="classification_book">Book</string>
@@ -213,19 +283,57 @@
     <string name="classification_miss">Miss</string>
     <string name="classification_blunder">Blunder</string>
     <string name="classification_forced">Forced</string>
+    <!-- One-line legends for the summary's move table. -->
+    <string name="classification_book_help">Book — a standard opening move</string>
+    <string name="classification_forced_help">Forced — the only sensible move</string>
+    <string name="classification_miss_help">Miss — a winning chance went by</string>
 
     <!-- Board content descriptions -->
     <string name="cd_board_square">Square %1$s</string>
+    <!-- The classification badge drawn on the destination square: "Blunder on f3". -->
+    <string name="cd_board_badge">%1$s on %2$s</string>
     <string name="cd_flip_board">Flip board orientation</string>
     <string name="cd_piece">%1$s %2$s on %3$s</string>
+    <!-- TalkBack (U10). The board is a drawing, so it is described: the read-only board as one list of pieces, the
+         playable board (Practise) as 64 squares. -->
+    <string name="cd_board_name">Chess board</string>
+    <!-- A side with no pieces left in the board summary (kept for completeness; a real game never gets here). -->
+    <string name="cd_board_none">none</string>
+    <!-- %1$s / %2$s = comma-separated lists such as "king e1, queen d1, pawn e4". -->
+    <string name="cd_board_summary">Chess board. White: %1$s. Black: %2$s.</string>
+    <!-- %1$s = piece ("knight"), %2$s = square ("f3"). -->
+    <string name="cd_piece_short">%1$s %2$s</string>
+    <string name="cd_square_selected">selected</string>
+    <string name="cd_square_target">possible move</string>
+    <!-- %1$s = the score as drawn ("+0.9", "M3"). -->
+    <string name="cd_eval_bar">Evaluation %1$s</string>
+    <!-- %1$d = number of moves, %2$s = final score. -->
+    <string name="cd_eval_graph">Graph of who was winning over %1$d positions, ending at %2$s</string>
+    <!-- One summary-table row read as a sentence: "Mistake, White 2, Black 1". -->
+    <string name="cd_class_row">%1$s, White %2$d, Black %3$d</string>
+    <!-- "Position 2 of 3" for the Practise counter. -->
+    <string name="cd_practice_position">Position %1$d of %2$d</string>
+    <string name="cd_settings_storage_clear">Clear saved narration audio</string>
 
     <!-- Narrated video -->
-    <string name="watch_game_review">Watch game review</string>
-    <string name="video_export_action">Export video</string>
+    <string name="video_export_action">Save video</string>
+    <string name="video_title">Video review</string>
+    <!-- Export completion body: %1$s = duration ("9 min 33 s"), %2$s = file size ("99 MB"). -->
+    <string name="video_export_completed_body">%1$s · %2$s</string>
+    <string name="video_duration_min_sec">%1$d min %2$d s</string>
+    <string name="video_duration_sec">%1$d s</string>
     <string name="video_export_synthesizing">Preparing narration… (%1$d/%2$d)</string>
+    <!-- Measured time left for the narration step (UX R6a). Starts with LRM so the number never reorders in RTL.
+         Only shown from two minutes up; below that the next string says it. -->
+    <plurals name="video_export_minutes_left">
+        <item quantity="one">&#8206;About %1$d min left</item>
+        <item quantity="other">&#8206;About %1$d min left</item>
+    </plurals>
+    <string name="video_export_less_than_minute">Less than a minute left</string>
+    <string name="video_share_failed">Couldn\'t open sharing. Your video is saved in Movies/ChessAnalyzer.</string>
     <string name="video_export_rendering">Rendering video…</string>
     <string name="video_export_finalizing">Finalizing…</string>
-    <string name="video_export_completed_title">Video ready</string>
+    <string name="video_export_completed_title">Video saved</string>
     <string name="video_export_failed_title">Export failed</string>
     <string name="video_export_cancelled_title">Export cancelled</string>
     <string name="video_export_cancel">Cancel</string>
@@ -233,42 +341,46 @@
     <string name="video_export_open">Open</string>
     <string name="video_export_close">Close</string>
     <!-- Foreground-service export notifications (VideoExportService) -->
-    <string name="video_export_notification_title">Exporting game review</string>
-    <string name="video_export_notification_done_text">Tap to watch your game review</string>
+    <string name="video_export_notification_title">Exporting video review</string>
+    <string name="video_export_notification_done_text">Tap to watch your video review</string>
     <string name="video_export_notification_cancelled_text">The export was cancelled; no video was saved.</string>
     <string name="video_export_channel_progress">Video export progress</string>
-    <string name="video_export_channel_progress_desc">Keeps a game-review export running while you use other apps, and lets you cancel it.</string>
+    <string name="video_export_channel_progress_desc">Keeps a video review export running while you use other apps, and lets you cancel it.</string>
     <string name="video_export_channel_done">Video export finished</string>
-    <string name="video_export_channel_done_desc">Tells you when a game-review export is ready, failed, or was cancelled.</string>
-    <string name="video_chapters">Chapters</string>
-    <string name="video_speed">Speed</string>
-    <string name="video_narration_unavailable">No voice installed on this device — showing captions only</string>
+    <string name="video_export_channel_done_desc">Tells you when a video review export is ready, failed, or was cancelled.</string>
+    <!-- Speed cycle button: content description "Playback speed, 1.25×" and the visible label "1.25×" (LRM-prefixed). -->
+    <string name="video_speed">Playback speed, %1$s</string>
+    <string name="video_speed_value">&#8206;%1$s×</string>
+    <!-- TalkBack: what the video frame is, and the scrub bar's name and position ("0:12 of 6:20"). -->
+    <string name="cd_video_frame">Video: %1$s</string>
+    <string name="video_scrub">Video position</string>
+    <string name="video_scrub_state">&#8206;%1$s of %2$s</string>
+    <string name="video_mute">Mute narration</string>
+    <string name="video_unmute">Unmute narration</string>
+    <!-- Spoken by TalkBack right after the speaker button is pressed. -->
+    <string name="video_muted_announce">Narration muted</string>
+    <string name="video_unmuted_announce">Narration on</string>
+    <string name="video_narration_unavailable">Narration isn\'t available on this phone — showing captions only</string>
     <string name="video_previous_segment">Previous</string>
     <string name="video_next_segment">Next</string>
     <string name="video_play">Play</string>
     <string name="video_pause">Pause</string>
     <string name="video_enter_fullscreen">Enter full screen</string>
     <string name="video_exit_fullscreen">Exit full screen</string>
-    <string name="video_prepare_narration_action">Prepare narration</string>
-    <string name="video_prepare_narration_ready">Narration ready</string>
-    <string name="video_prepare_narration_done_title">Narration ready</string>
-    <string name="video_prepare_narration_done_body">Every segment\'s narration is generated and saved on this device — playback and export reuse it instead of synthesizing it again.</string>
     <!-- Language (Round 10, i18n groundwork). English only for now; see AppLanguage.kt for how a
          language is added. Hebrew resources must live in values-iw, not values-he. -->
     <string name="settings_language_header">Language</string>
     <string name="settings_language_system">System default</string>
     <string name="settings_language_english">English</string>
     <string name="settings_language_help">The app and the narrated review use this language. Only English is available so far.</string>
+    <string name="settings_language_close">Close</string>
     <string name="settings_language_requires_android_13">Choosing a language needs Android 13 or newer. On this device the app follows the system language.</string>
 
     <!-- Dialogs and messages that used to be hardcoded -->
-    <string name="dialog_ok">OK</string>
     <string name="dialog_analysis_failed_title">Couldn\'t analyze this game</string>
-    <string name="dialog_engine_title">Engine</string>
-    <string name="engine_update_available">Newer Stockfish available: %1$s</string>
-    <string name="engine_update_latest">You\'re on the latest vendored Stockfish (or the check failed offline).</string>
-    <string name="gpl_notice">Palaya Chess links the Stockfish chess engine, which is licensed under the GNU General Public License v3. Corresponding source for the engine is available at https://github.com/official-stockfish/Stockfish (tag sf_19, as vendored in this build). This app is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess.</string>
     <string name="common_back">Back</string>
+    <string name="common_done">Done</string>
+    <string name="common_next">Next</string>
     <string name="report_rating_low_confidence">Not enough moves to estimate a rating</string>
 
     <!-- Video side panel (burned into exported frames, so these go through PanelLabels) -->
@@ -282,6 +394,14 @@
     <string name="panel_excursion_default">What you could aim for</string>
     <string name="side_white">White</string>
     <string name="side_black">Black</string>
+    <!-- Recap end card of the exported video (R6b); burned into frames, so these go through RecapLabels. -->
+    <string name="recap_heading">Game recap</string>
+    <!-- %1$d = full-move number, %2$s = the move (SAN), %3$s = "Blunder by Black" (recap_quality_by). -->
+    <string name="recap_biggest_moment">Biggest moment: move %1$d, %2$s (%3$s)</string>
+    <!-- %1$s = move quality ("Blunder"), %2$s = White/Black. -->
+    <string name="recap_quality_by">%1$s by %2$s</string>
+    <!-- Count chip: %1$s = move quality ("Mistake"), %2$d = how many of that side's moves. -->
+    <string name="recap_count_chip">%1$s ×%2$d</string>
 
     <!-- Tactic pattern names (TacticType). Keep in step with TacticTypeNames.kt. -->
     <string name="tactic_fork">Fork</string>

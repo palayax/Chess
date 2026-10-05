@@ -1,9 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-   Pre-API-31 backup rules. We exclude the downloaded NNUE net and any cached
-   engine binaries from backup — they're large, redownloadable, and device-specific.
+   Pre-API-31 Auto Backup rules (android:fullBackupContent). Mirrors data_extraction_rules.xml —
+   keep the two in step.
+
+   Auto Backup has a 25 MB per-app quota and exceeding it can stop backups altogether, so
+   everything large or regenerable is excluded. What stays backed up: games/ (the user's analysed
+   games) and the general settings DataStore. Paths are literal (no wildcards).
 -->
 <full-backup-content>
+    <!-- The Kokoro voice (~158 MB extracted) and its kokoro.extracting/ scratch directory: both live
+         under tts_models/ and are regenerated from the APK on the first analysis. -->
+    <exclude domain="file" path="tts_models/" />
+    <!-- Persistent narration audio cache (NarrationStore.DIR_NAME = "narration"): regenerable. -->
+    <exclude domain="file" path="narration/" />
+    <!-- Per-position engine evaluation cache: large, regenerable by re-analysing. -->
+    <exclude domain="file" path="eval_cache/" />
+    <!-- Stockfish NNUE net (~98 MB, copied out of the APK) and its in-flight .part copy. It sits in filesDir root, NOT
+         under engine/. The name is a literal; ExcludedFromBackupRulesTest fails if it drifts
+         from BundledNetProvider.NET_FILENAME. -->
+    <exclude domain="file" path="nn-1a298aa575a0.nnue" />
+    <exclude domain="file" path="nn-1a298aa575a0.nnue.part" />
+    <!-- Narration-voice settings (provider/tier). Device-specific: tied to which models are on disk. -->
+    <exclude domain="file" path="datastore/chess_analyzer_narration_settings.preferences_pb" />
+    <!-- Legacy key prefs from the removed Google Cloud voice; never let a stale key be restored. -->
+    <exclude domain="sharedpref" path="narration_key_fallback_unencrypted.xml" />
+    <exclude domain="sharedpref" path="narration_secrets.xml" />
+    <!-- Older engine layout. -->
     <exclude domain="file" path="engine/" />
     <exclude domain="sharedpref" path="engine_prefs.xml" />
 </full-backup-content>

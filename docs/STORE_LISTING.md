@@ -45,14 +45,16 @@ Do **not** use: anything containing "Chess.com", or a name that reads as an offi
 > files, custom starting positions and clock times are all handled.
 >
 > **Runs on your device**
-> Analysis uses Stockfish 19 running locally. Your games are never uploaded. No sign-up, no ads,
-> no tracking.
+> Analysis uses Stockfish 19 running locally, and the narration voice runs on your phone too. Your games
+> are never uploaded, and the app has no network permission at all. No sign-up, no ads, no tracking.
 >
-> Note: on first run the app downloads the Stockfish neural network (about 79 MB, stored as
-> ~98 MB). Best done on Wi-Fi.
+> The app is large (about 365 MB) because the engine's neural network and the narration voice are built
+> in, so it works fully offline from the first launch. The first analysis takes a few extra seconds to set
+> itself up.
 >
 > Analysis powered by Stockfish (GPLv3) — stockfishchess.org
 > Opening data from the lichess-org/chess-openings project (CC0).
+> Narration voice: sherpa-onnx and Kokoro-82M (Apache 2.0), with espeak-ng pronunciation data (GPL v3 or later).
 > Source code: <ADD YOUR REPO URL>
 >
 > Not affiliated with, endorsed by, or connected to Chess.com or Lichess. PGN files exported from
@@ -77,9 +79,10 @@ Do not include any Chess.com UI, logo, or branded screenshot in these.
 
 ## What reviewers will look at
 
-- **The large download.** Disclosed in the description above; the app also asks before downloading
-  and shows progress. Do not skip this — undisclosed multi-megabyte downloads get flagged.
-- **INTERNET permission.** Justified solely by the network download and the update check.
-- **Data safety form.** Answers are in `PUBLISHING.md` §5 — no collection, no sharing.
+- **Size.** About 365 MB, stated in the description above. It is a single APK; on Play it would need Play
+  Asset Delivery (see `PUBLISHING.md` §3).
+- **No network permission.** The manifest declares no `INTERNET` and no `ACCESS_NETWORK_STATE`; nothing is
+  downloaded (the Google Cloud voice option was removed in Round 13, and the net and voice are bundled).
+- **Data safety form.** Answers are in `PUBLISHING.md` §5 — no collection, no sharing, network use none.
 - **GPL compliance.** Have the source URL live before submitting, and put it in both the listing
   and the in-app About screen.

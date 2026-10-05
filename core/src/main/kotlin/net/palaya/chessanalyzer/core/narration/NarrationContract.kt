@@ -196,7 +196,73 @@ data class VideoScript(
     val whiteAccuracy: Double? = null,
     val blackAccuracy: Double? = null,
     val whiteEstimatedRating: Int? = null,
-    val blackEstimatedRating: Int? = null
+    val blackEstimatedRating: Int? = null,
+    /**
+     * The end card of an *exported* video: both players, accuracy, the one-sentence game summary,
+     * the biggest moment and a compact move-quality count. Not a [ScriptSegment]: it is silent,
+     * so it has no narration to time, it does not count as a segment (the export's "N of M" and
+     * time-left figures are unchanged), and it is outside the pacing budget of ANALYSIS_SPEC 9.7
+     * ([totalEstimatedMs] does not include it). Null when the report has no moves.
+     */
+    val recap: VideoRecap? = null
+)
+
+/**
+ * The facts on the recap end card (see [VideoScript.recap]). Pure data: every word on the card is
+ * either one of these strings or a UI label the renderer resolves from resources, and every number
+ * is taken from the report, never computed from anything else (ANALYSIS_SPEC 9.7, "Recap card").
+ *
+ * @param summary [GameSummarySentence]'s sentence for this report and viewer, or null when it has
+ *   nothing to say (no moves).
+ * @param biggestMoment the move the summary sentence calls the turning move, only when it lost
+ *   [GameSummarySentence.BIG_SWING] win-percent or more; null otherwise, so a clean game claims no
+ *   "biggest moment" at all.
+ */
+data class VideoRecap(
+    val white: RecapSide,
+    val black: RecapSide,
+    val summary: String? = null,
+    val biggestMoment: RecapMoment? = null
+)
+
+/**
+ * One side of the recap card.
+ *
+ * @param name the player's name as the title card shows it (PGN tag, or the colour word).
+ * @param isUser true when the viewer said they played this side.
+ * @param accuracy 0..100, the same figure the Summary screen shows (rounded there with `%.0f`).
+ * @param counts the non-zero counts of the six classes worth a chip, in [RECAP_COUNT_CLASSES]
+ *   order; each equals the number of this side's moves with that classification.
+ */
+data class RecapSide(
+    val color: Color,
+    val name: String,
+    val isUser: Boolean,
+    val accuracy: Double,
+    val counts: List<RecapCount>
+)
+
+data class RecapCount(val classification: MoveClassification, val count: Int)
+
+/** The move the recap names: full-move number, who played it, its SAN and the spec's verdict. */
+data class RecapMoment(
+    val moveNumber: Int,
+    val color: Color,
+    val san: String,
+    val classification: MoveClassification
+)
+
+/**
+ * The classes the recap counts, in display order: the two praised ones, then the four errors.
+ * Best / Excellent / Good / Book / Forced are the quiet majority and would only add noise.
+ */
+val RECAP_COUNT_CLASSES: List<MoveClassification> = listOf(
+    MoveClassification.BRILLIANT,
+    MoveClassification.GREAT,
+    MoveClassification.INACCURACY,
+    MoveClassification.MISTAKE,
+    MoveClassification.MISS,
+    MoveClassification.BLUNDER
 )
 
 /**
@@ -207,7 +273,11 @@ data class VideoScript(
  * explicit escape hatch (see its own doc).
  */
 enum class NarrationDepth {
-    /** Intro, every key moment and tactic, outro. Typically 2-5 minutes. */
+    /**
+     * The story of the game: intro, the turning point and the few biggest moments told in full, the
+     * brilliant and great moves, outro. Paced by tiers and held to a length budget (ANALYSIS_SPEC
+     * 9.7), so roughly 3-6 minutes for a 17-move game and at most about 12 for any game.
+     */
     HIGHLIGHTS,
 
     /**

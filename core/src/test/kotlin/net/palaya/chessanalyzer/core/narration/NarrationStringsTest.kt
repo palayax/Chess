@@ -118,6 +118,7 @@ class NarrationStringsTest {
     }
 
     private fun Sentence.isSpoken(): Boolean = when (this) {
+        is Sentence.WalkthroughIntro,
         is Sentence.VideoTitle, is Sentence.VideoSubtitle, is Sentence.ChapterMove,
         is Sentence.CaptionMove, is Sentence.CaptionMissed, is Sentence.CaptionMissedLine,
         is Sentence.CaptionBackToGame, is Sentence.CaptionTurningPoint -> false

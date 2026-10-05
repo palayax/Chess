@@ -164,7 +164,7 @@ class NarrationSynthesizer(context: Context) {
      * Enumerates [TextToSpeech.getVoices], filters to English (preferring the device locale, then
      * US/UK English, then any English voice), and picks the highest-[Voice.getQuality] one.
      * Among equal-quality candidates an offline voice is preferred, but a network voice is still
-     * chosen over a lower-quality offline one — cloud/network TTS voices are usually far more
+     * chosen over a lower-quality offline one — network TTS voices are usually far more
      * natural, so quality wins over the offline preference rather than the other way around.
      */
     private fun chooseBestVoice(engine: TextToSpeech): Voice? {

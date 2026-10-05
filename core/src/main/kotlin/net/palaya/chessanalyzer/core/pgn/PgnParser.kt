@@ -17,6 +17,7 @@ object PgnParser {
 
     private val RESULT_TOKENS = setOf("1-0", "0-1", "1/2-1/2", "*")
     private val MOVE_NUMBER_REGEX = Regex("^\\d+\\.+$")
+    private val GLUED_MOVE_NUMBER_REGEX = Regex("^\\d+\\.+([^.\\s]\\S*)$")
     private val CLOCK_REGEX = Regex("\\[%clk\\s+([^]]+)]")
     private val TOKEN_DELIMITERS = charArrayOf('{', '(', ')', ';', '$', '[')
 
@@ -30,14 +31,9 @@ object PgnParser {
         while (true) {
             skipWhitespace(cursor)
             if (cursor.peek() == null) break
-            if (cursor.peek() != '[') {
-                throw PgnParseException(
-                    "Expected a tag section (starting with '[') at offset ${cursor.i}, " +
-                        "found '${cursor.peek()}' (game ${gameIndex + 1})"
-                )
-            }
-
-            val tags = parseTags(cursor, gameIndex)
+            // Bare movetext with no tag section ("1. e4 e5 2. Nf3 ...", as pasted from many
+            // sites) is a game with no tags; garbage still fails, at the first unparsable move.
+            val tags = if (cursor.peek() == '[') parseTags(cursor, gameIndex) else emptyMap()
             val fenTag = tags["FEN"]
             val startFen = if (tags["SetUp"] == "1" && fenTag != null) fenTag else null
             val startPos = try {
@@ -181,7 +177,9 @@ object PgnParser {
                         cursor.advance()
                         continue@loop
                     }
-                    val token = cursor.text.substring(tokenStart, cursor.i)
+                    val rawToken = cursor.text.substring(tokenStart, cursor.i)
+                    // "1.e4" / "12...Nf6": a move number glued to its move with no space.
+                    val token = GLUED_MOVE_NUMBER_REGEX.matchEntire(rawToken)?.groupValues?.get(1) ?: rawToken
                     when {
                         token in RESULT_TOKENS -> {
                             result = token

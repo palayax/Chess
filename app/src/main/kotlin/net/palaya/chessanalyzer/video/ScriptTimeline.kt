@@ -20,12 +20,29 @@ data class TimedSegment(
     val endMs: Long get() = startMs + totalDurationMs
 }
 
-data class ScriptTimeline(val segments: List<TimedSegment>, val totalDurationMs: Long) {
+data class ScriptTimeline(
+    val segments: List<TimedSegment>,
+    /** The whole length, recap included when [recapDurationMs] is set. */
+    val totalDurationMs: Long,
+    /** Where the silent recap end card starts (R6b); equals the narrated length. Meaningful only with a recap. */
+    val recapStartMs: Long = totalDurationMs,
+    /** How long the recap card is on screen; 0 = none. It is not a segment and carries no audio. */
+    val recapDurationMs: Long = 0L,
+) {
+    /** The same timeline with a silent recap card of [durationMs] appended after the last segment. */
+    fun withRecap(durationMs: Long): ScriptTimeline {
+        val start = recapStartMs.takeIf { recapDurationMs > 0 } ?: totalDurationMs
+        return ScriptTimeline(segments, start + durationMs, start, durationMs)
+    }
+
+    /** True when [timeMs] falls inside the recap card. */
+    fun inRecap(timeMs: Long): Boolean = recapDurationMs > 0 && timeMs >= recapStartMs
+
     /** The segment active at [timeMs], or the last segment if past the end. */
     fun segmentAt(timeMs: Long): TimedSegment? {
         if (segments.isEmpty()) return null
         val hit = segments.firstOrNull { timeMs >= it.startMs && timeMs < it.endMs }
-        return hit ?: if (timeMs >= totalDurationMs) segments.last() else segments.first()
+        return hit ?: if (timeMs >= segments.last().endMs) segments.last() else segments.first()
     }
 }
 

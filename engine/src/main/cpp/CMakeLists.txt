@@ -16,8 +16,9 @@
 #  - NNUE_EMBEDDING_OFF is defined for every ABI. With it defined,
 #    nnue/network.cpp takes the `#else` branch (see network.cpp around the
 #    INCBIN macro) and never embeds nn-1a298aa575a0.nnue (79 MB) in the
-#    binary; the net is downloaded at runtime by NetworkProvider (Kotlin)
-#    and pointed to via the `EvalFile` UCI option instead.
+#    binary; the net ships as an APK asset, is copied once to the app's files
+#    dir by BundledNetProvider (Kotlin), and is pointed to via the `EvalFile`
+#    UCI option instead (Stockfish needs a real file path, not an APK entry).
 #  - Flags below are transcribed from vendor/Stockfish/src/Makefile's own
 #    flag tables for each target (armv8, armv7-neon, x86-64-sse41-popcnt),
 #    not guessed — see the Makefile section headers referenced in comments.

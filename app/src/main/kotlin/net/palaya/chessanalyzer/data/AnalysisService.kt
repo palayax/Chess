@@ -22,13 +22,15 @@ import net.palaya.chessanalyzer.core.pgn.PgnParser
 import net.palaya.chessanalyzer.core.tactics.MotifDetector
 import net.palaya.chessanalyzer.core.tactics.StaticExchangeEvaluator
 import net.palaya.chessanalyzer.engine.AnalysisResult
+import net.palaya.chessanalyzer.engine.BundledNetDamagedException
+import net.palaya.chessanalyzer.engine.InsufficientNetStorageException
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 
 /**
  * The seam between raw PGN text and a finished [CoreGameReport]: parse -> pick game/user color
- * -> ensure engine+net -> analyze every ply (cached) -> [GameAnalyzer]. This is the "Analysis
+ * -> one-time setup -> ensure engine+net -> analyze every ply (cached) -> [GameAnalyzer]. This is the "Analysis
  * service" called for in the integration brief; it is deliberately plain Kotlin (no ViewModel
  * base class) so it can be driven from a ViewModel's `viewModelScope` and cancelled the normal
  * coroutine way — cancelling the caller's `Job` propagates into the suspended
@@ -43,7 +45,33 @@ class AnalysisService(
     private val context: Context,
     private val engineController: EngineController,
     private val gameRepository: GameRepository,
+    private val firstRunSetup: FirstRunSetup,
 ) {
+
+    /**
+     * Why an analysis could not produce a report. Deliberately not a message: the service has no
+     * business owning user-facing English, so the UI maps each reason to a string resource and
+     * the raw exception text (in [Outcome.ParseError.detail] / [Outcome.EngineError.detail]) is
+     * only ever logged.
+     */
+    enum class Failure {
+        /** The text parsed but held no games. */
+        NO_GAMES,
+        /** The text is not PGN this app can read. */
+        PARSE,
+        /** The engine could not be prepared. */
+        ENGINE_PREPARE,
+        /** Not enough free space for the one-time setup (net and voice copied out of the APK). */
+        SETUP_STORAGE,
+        /** The engine or voice files bundled in the APK failed verification: reinstall the app. */
+        SETUP_DAMAGED,
+        /** The engine object was not available after preparation. */
+        ENGINE_START,
+        /** The engine failed part-way through the game. */
+        ANALYSIS,
+        /** The pending game text was no longer registered (e.g. after process death). */
+        GAME_TEXT_LOST,
+    }
 
     sealed class Outcome {
         data class Success(
@@ -53,8 +81,8 @@ class AnalysisService(
             val otherGamesInFile: Int,
         ) : Outcome()
 
-        data class ParseError(val message: String) : Outcome()
-        data class EngineError(val message: String) : Outcome()
+        data class ParseError(val reason: Failure, val detail: String? = null) : Outcome()
+        data class EngineError(val reason: Failure, val detail: String? = null) : Outcome()
         data object Cancelled : Outcome()
     }
 
@@ -73,13 +101,37 @@ class AnalysisService(
         val games = try {
             PgnParser.parse(pgnText)
         } catch (e: PgnParseException) {
-            return Outcome.ParseError(e.message ?: "Could not parse this PGN.")
+            return Outcome.ParseError(Failure.PARSE, e.message)
         } catch (e: Exception) {
-            return Outcome.ParseError("Could not parse this PGN: ${e.message}")
+            return Outcome.ParseError(Failure.PARSE, e.message)
         }
-        if (games.isEmpty()) return Outcome.ParseError("No games found in this PGN text.")
+        if (games.isEmpty()) return Outcome.ParseError(Failure.NO_GAMES)
         val game = games.getOrElse(gameIndex) { games[0] }
         val userColor = detectUserColor(game, username)
+
+        // One-time setup (net + voice copied out of the APK) runs after the parse, so a bad paste
+        // fails fast, and BEFORE the eval-cache lookup, so a game reopened from cache after an
+        // upgrade still gets the voice installed. Returns at once, with no progress, when done.
+        try {
+            val setup = firstRunSetup.ensure { fraction ->
+                onProgress(
+                    AnalysisProgress(
+                        phase = AnalysisPhase.FIRST_RUN_SETUP,
+                        fractionComplete = 0.02f + fraction * 0.28f,
+                    )
+                )
+            }
+            when (setup) {
+                SetupResult.Done -> Unit
+                is SetupResult.InsufficientStorage ->
+                    return Outcome.EngineError(Failure.SETUP_STORAGE, "needs ${setup.neededBytes} bytes")
+                is SetupResult.Damaged -> return Outcome.EngineError(Failure.SETUP_DAMAGED, setup.detail)
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            return Outcome.Cancelled
+        } catch (e: Exception) {
+            return Outcome.EngineError(Failure.ENGINE_PREPARE, e.message)
+        }
 
         val cacheKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv)
         var evals = gameRepository.loadEvalCache(cacheKey)
@@ -90,22 +142,18 @@ class AnalysisService(
                 engineController.ensureReady(
                     threads = EngineController.defaultThreads(),
                     hashMb = EngineController.defaultHashMb(),
-                    onNetProgress = { fraction ->
-                        onProgress(
-                            AnalysisProgress(
-                                phase = AnalysisPhase.DOWNLOADING_NET,
-                                bytesDownloaded = (fraction * APPROX_NET_BYTES).toLong(),
-                                totalBytes = APPROX_NET_BYTES,
-                                fractionComplete = 0.02f + fraction * 0.28f,
-                            )
-                        )
-                    },
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                return Outcome.Cancelled
+            } catch (e: InsufficientNetStorageException) {
+                return Outcome.EngineError(Failure.SETUP_STORAGE, e.message)
+            } catch (e: BundledNetDamagedException) {
+                return Outcome.EngineError(Failure.SETUP_DAMAGED, e.message)
             } catch (e: Exception) {
-                return Outcome.EngineError("Could not prepare the engine: ${e.message}")
+                return Outcome.EngineError(Failure.ENGINE_PREPARE, e.message)
             }
             val engine = engineController.engineOrNull()
-                ?: return Outcome.EngineError("Engine failed to start.")
+                ?: return Outcome.EngineError(Failure.ENGINE_START)
 
             val positions = plyFens(game)
             val total = positions.size
@@ -174,7 +222,7 @@ class AnalysisService(
                 withContext(NonCancellable) {
                     gameRepository.savePartialEvalCache(cacheKey, computed)
                 }
-                return Outcome.EngineError("Analysis failed: ${e.message}")
+                return Outcome.EngineError(Failure.ANALYSIS, e.message)
             }
             evals = computed
             gameRepository.saveEvalCache(cacheKey, computed)
@@ -283,8 +331,6 @@ class AnalysisService(
          */
         private const val CHECKPOINT_EVERY_PLIES = 5
 
-        /** 98,511,183 bytes on disk per CLAUDE.md/docs/PUBLISHING.md — used only for progress display. */
-        private const val APPROX_NET_BYTES = 98_511_183L
 
         private val bookLock = Any()
         @Volatile private var cachedBook: OpeningBook? = null

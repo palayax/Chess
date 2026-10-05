@@ -40,7 +40,10 @@ class OpeningBookTest {
 
         assertEquals(3810, book.linesLoaded)
         assertEquals(0, book.linesSkipped)
-        assertTrue("Loading took ${elapsedMs}ms, expected well under 2000ms", elapsedMs < 2000)
+        // A wall-clock bound only guards against a catastrophic regression (e.g. an accidental O(n^2)).
+        // It must not be tight: it measured 0.9 s alone but 2.8-8.7 s while an emulator suite and a
+        // Gradle build shared the host, which made a 2 s limit fail for the wrong reason.
+        assertTrue("Loading took ${elapsedMs}ms, expected well under 15000ms", elapsedMs < 15_000)
     }
 
     @Test

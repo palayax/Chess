@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -54,7 +55,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import net.palaya.chessanalyzer.BuildConfig
 import net.palaya.chessanalyzer.R
+import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
+import net.palaya.chessanalyzer.ui.a11y.asHeading
+import androidx.compose.ui.semantics.Role
 import net.palaya.chessanalyzer.data.GeneratedEngineVersion
+import net.palaya.chessanalyzer.engine.BundledNetProvider
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import java.io.BufferedReader
 import java.io.IOException
@@ -92,10 +97,10 @@ fun AboutScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.about_title)) },
+                title = { AppBarTitle(stringResource(R.string.about_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -161,6 +166,7 @@ fun AboutScreen(
                         text = stringResource(R.string.about_license_stockfish_title),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -212,6 +218,7 @@ fun AboutScreen(
                         text = stringResource(R.string.about_license_openings_title),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -227,6 +234,7 @@ fun AboutScreen(
                         text = stringResource(R.string.about_license_pieces_title),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     val piecesFullText by producePieceAttributionText()
@@ -255,6 +263,7 @@ fun AboutScreen(
                         text = stringResource(R.string.about_license_neural_title),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -346,17 +355,27 @@ private fun AboutHeader(appVersion: String) {
             text = stringResource(R.string.about_app_name),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
+            modifier = Modifier.asHeading(),
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = stringResource(R.string.about_app_version, appVersion),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Text(
             text = stringResource(R.string.about_engine_version, GeneratedEngineVersion.LABEL),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Text(
+            // The engine's network file, named by its own hash; moved here from Settings (U9).
+            text = stringResource(R.string.about_net_version, BundledNetProvider.NET_FILENAME),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }
@@ -368,7 +387,7 @@ private fun SectionHeader(text: String) {
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(bottom = 8.dp),
+        modifier = Modifier.padding(bottom = 8.dp).asHeading(),
     )
 }
 
@@ -424,7 +443,9 @@ private fun Modifier.clickableEmail(context: android.content.Context, address: S
 
 @Composable
 private fun Modifier.clickableAction(onClick: () -> Unit): Modifier =
-    this.clickable(onClick = onClick)
+    // A link is a button to TalkBack, and its target is at least 48 dp tall (a line of body text
+    // is about 20 dp). The text sits at the start of that target.
+    this.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).wrapContentHeight(Alignment.CenterVertically)
 
 @Preview(showBackground = true, backgroundColor = 0xFF302E2B, heightDp = 1400)
 @Composable

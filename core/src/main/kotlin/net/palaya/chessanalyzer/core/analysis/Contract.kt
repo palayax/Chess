@@ -195,7 +195,42 @@ data class MoveAnnotation(
     /** Motifs this move hands to the opponent on the next ply. */
     val threatsAllowed: List<TacticInstance> = emptyList(),
     val text: String = "",
-    val simulation: TacticSimulation? = null
+    val simulation: TacticSimulation? = null,
+    /**
+     * The engine's MultiPV lines for the position BEFORE this move, best first (ascending
+     * `multiPv`), one entry per line that carried a first move. Mover-relative, exactly like
+     * [EngineLineInput], and **not** flipped to White's perspective like [evalBeforeCp] /
+     * [evalSecondBestCp]. Empty for annotations built without MultiPV data. This is what
+     * `PracticeJudge` decides "equally good" from (ANALYSIS_SPEC §11); it is a defaulted trailing
+     * field so every existing constructor call keeps compiling.
+     */
+    val candidateLines: List<CandidateLine> = emptyList(),
+    /**
+     * Every motif the detector reported for the move **actually played**, whatever its
+     * classification. [tacticsFound] is this list filtered to BEST / GREAT / BRILLIANT moves (the
+     * spec §5.4 "recognised by mover" bucket), so a GOOD or EXCELLENT move that happens to trip a
+     * detector has an empty [tacticsFound] but still did what the detector saw. The commentary
+     * describes what a move did, so it is written from this list; keeping it here is what lets the
+     * text be written again when the user later says which side they were (ANALYSIS_SPEC §7.1)
+     * without an engine or a detector. A defaulted trailing field so every constructor call keeps
+     * compiling; empty on annotations built without it, in which case the commentary falls back to
+     * [tacticsFound].
+     */
+    val tacticsPlayed: List<TacticInstance> = emptyList()
+)
+
+/**
+ * One cached MultiPV line of the position before a move, reduced to its first move.
+ * [scoreCp] / [mateIn] are from the perspective of the side to move in that position (the
+ * mover), exactly as in [EngineLineInput]; [mateIn] is set instead of [scoreCp] for a mate.
+ * [san] is null only when [uci] is not legal in the position.
+ */
+data class CandidateLine(
+    val multiPv: Int,
+    val uci: String,
+    val san: String?,
+    val scoreCp: Int?,
+    val mateIn: Int?
 )
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.core.narration
 
 import net.palaya.chessanalyzer.core.analysis.GameReport
+import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.analysis.TacticSimulation
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.Position
@@ -618,9 +619,15 @@ class VideoScriptGeneratorTest {
 
     @Test
     fun `a long principal variation cannot produce an endless detour`() {
-        val index = report.annotations.indexOfFirst { a ->
-            a.bestMoveUci != null && a.bestMoveUci != a.uci && a.tacticsMissed.any { it.confidence >= 0.6 }
-        }
+        // Round 13 pacing (ANALYSIS_SPEC 9.7): only a FULL moment walks the whole eight plies, and a
+        // book move is never one (it is SKIP), so the first missed tactic in the file is no longer the
+        // right subject. The highest-loss non-book missed tactic always ranks first for a FULL slot.
+        val index = report.annotations
+            .filter { a ->
+                a.bestMoveUci != null && a.bestMoveUci != a.uci && a.tacticsMissed.any { it.confidence >= 0.6 } &&
+                    a.classification != MoveClassification.BOOK
+            }
+            .maxByOrNull { it.loss }?.let { it.ply - 1 } ?: -1
         assertTrue("fixture has no missed tactic to lengthen", index >= 0)
         val a = report.annotations[index]
         val tactic = a.tacticsMissed.maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))!!

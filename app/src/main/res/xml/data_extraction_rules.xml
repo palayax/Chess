@@ -1,11 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- API 31+ backup/transfer rules; mirrors backup_rules.xml. -->
+<!--
+  API 31+ backup/transfer rules; mirrors backup_rules.xml (see it for the reasoning per path).
+  Auto Backup has a 25 MB quota and exceeding it can stop backups entirely, so the model files, the
+  narration cache, eval_cache/, the NNUE net (and its .part) and the narration prefs are excluded from BOTH cloud
+  backup and device-to-device transfer. games/ and the general settings stay backed up.
+-->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" path="tts_models/" />
+        <exclude domain="file" path="narration/" />
+        <exclude domain="file" path="eval_cache/" />
+        <exclude domain="file" path="nn-1a298aa575a0.nnue" />
+        <exclude domain="file" path="nn-1a298aa575a0.nnue.part" />
+        <exclude domain="file" path="datastore/chess_analyzer_narration_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="narration_key_fallback_unencrypted.xml" />
+        <exclude domain="sharedpref" path="narration_secrets.xml" />
         <exclude domain="file" path="engine/" />
         <exclude domain="sharedpref" path="engine_prefs.xml" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="file" path="tts_models/" />
+        <exclude domain="file" path="narration/" />
+        <exclude domain="file" path="eval_cache/" />
+        <exclude domain="file" path="nn-1a298aa575a0.nnue" />
+        <exclude domain="file" path="nn-1a298aa575a0.nnue.part" />
+        <exclude domain="file" path="datastore/chess_analyzer_narration_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="narration_key_fallback_unencrypted.xml" />
+        <exclude domain="sharedpref" path="narration_secrets.xml" />
         <exclude domain="file" path="engine/" />
+        <exclude domain="sharedpref" path="engine_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>

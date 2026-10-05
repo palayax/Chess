@@ -38,6 +38,8 @@ data class PlayerUiState(
     val totalDurationMs: Long = 0L,
     val isPlaying: Boolean = false,
     val speed: Float = 1f,
+    /** The narration is muted (playback and the board carry on). Not persisted; see [VideoPlayerController.setMuted]. */
+    val muted: Boolean = false,
     val caption: String = "",
     val chapterLabel: String? = null,
     val instruction: RenderInstruction? = null,
@@ -109,6 +111,7 @@ class VideoPlayerController(
     private var positionMs = 0L
     private var playing = false
     private var speed = 1f
+    private var muted = false
 
     init {
         tts = TextToSpeech(appContext) { status ->
@@ -219,6 +222,27 @@ class VideoPlayerController(
         }
     }
 
+    /**
+     * Mutes or unmutes the narration while playback **continues**: the board and captions keep their
+     * clock, so unmuting rejoins the voice where the video is, never mid-way through a stale
+     * utterance. File narration (the neural voice) keeps playing at volume 0, so unmuting inside a
+     * segment resumes it exactly in sync. The live device voice cannot change volume mid-utterance,
+     * so muting stops it and it stays silent until the next segment. Not persisted: a new screen
+     * starts unmuted.
+     */
+    fun setMuted(value: Boolean) {
+        if (value == muted) return
+        muted = value
+        activeMediaPlayer?.let { player ->
+            val volume = if (value) 0f else 1f
+            runCatching { player.setVolume(volume, volume) }
+        }
+        if (value) tts?.stop()
+        _uiState.update { it.copy(muted = value) }
+    }
+
+    fun toggleMuted() = setMuted(!muted)
+
     fun release() {
         playing = false
         tickJob?.cancel()
@@ -279,7 +303,11 @@ class VideoPlayerController(
         }
 
         val engine = tts
-        if (engine != null && ttsReady) {
+        if (muted) {
+            // The segment counts as narrated (lastNarratedIndex is set above), so unmuting mid-segment
+            // stays silent until the next one rather than restarting a half-gone sentence.
+            _uiState.update { it.copy(narrationSource = NarrationSource.NONE) }
+        } else if (engine != null && ttsReady) {
             engine.speak(timed.segment.narration, TextToSpeech.QUEUE_FLUSH, null, "live-seg-${timed.segment.index}")
             _uiState.update { it.copy(narrationSource = NarrationSource.TTS) }
         } else {
@@ -293,6 +321,7 @@ class VideoPlayerController(
         player.setDataSource(file.absolutePath)
         player.setOnErrorListener { _, _, _ -> true } // swallow — board keeps going on caption alone
         player.prepare() // local file, a few seconds at most — synchronous prepare is cheap here
+        if (muted) player.setVolume(0f, 0f)
         if (speed != 1f) {
             runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
         }

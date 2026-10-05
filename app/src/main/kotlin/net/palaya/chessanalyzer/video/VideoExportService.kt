@@ -1,5 +1,6 @@
 package net.palaya.chessanalyzer.video
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
@@ -99,6 +101,16 @@ class VideoExportService : Service() {
         /** MediaStore (or FileProvider fallback) URI of the finished MP4; null until it completes. */
         val exportedUri: StateFlow<Uri?> = _exportedUri.asStateFlow()
 
+        private val timeLeftTracker = ExportTimeLeftTracker()
+        private val _timeLeft = MutableStateFlow<ExportTimeLeft>(ExportTimeLeft.Hidden)
+
+        /**
+         * "About N min left" for the narration step, from the measured time per segment so far
+         * (see [ExportTimeLeftTracker]). Hidden until two segments are done. Process-wide like
+         * [state], so re-entering the video screen mid-export keeps the history.
+         */
+        val timeLeft: StateFlow<ExportTimeLeft> = _timeLeft.asStateFlow()
+
         private val _running = MutableStateFlow(false)
 
         /** True from [start] until the export reaches a terminal state. */
@@ -130,6 +142,10 @@ class VideoExportService : Service() {
             cancelPending = false
             pendingRequest = Request(script, provider, baseName)
             _exportedUri.value = null
+            timeLeftTracker.reset()
+            _timeLeft.value = ExportTimeLeft.Hidden
+            // The baseline: nothing done at this moment. Segment times are measured from here.
+            timeLeftTracker.onProgress(0, script.segments.size, SystemClock.elapsedRealtime())
             _state.value = VideoExporter.State.SynthesizingNarration(0, script.segments.size)
             val appContext = context.applicationContext
             val intent = Intent(appContext, VideoExportService::class.java).setAction(ACTION_START)
@@ -240,6 +256,9 @@ class VideoExportService : Service() {
                     VideoExporter.State.Idle,
                     -> Unit
                     else -> {
+                        if (s is VideoExporter.State.SynthesizingNarration) {
+                            _timeLeft.value = timeLeftTracker.onProgress(s.completed, s.total, SystemClock.elapsedRealtime())
+                        }
                         _state.value = s
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastNotifiedAt >= NOTIFICATION_MIN_INTERVAL_MS) {
@@ -285,6 +304,7 @@ class VideoExportService : Service() {
                 // whether Cancel or Close is the right button), so publishing the terminal state
                 // first leaves a window where an observer sees "Completed" and "still running".
                 _running.value = false
+                _timeLeft.value = ExportTimeLeft.Hidden
                 _state.value = terminal
                 postTerminalNotification(terminal, _exportedUri.value)
                 stopForegroundAndSelf()
@@ -318,6 +338,17 @@ class VideoExportService : Service() {
     }
 
     private fun notifySafely(id: Int, notification: Notification) {
+        // Check first, rather than relying on the catch below: from API 33 posting needs the
+        // runtime POST_NOTIFICATIONS permission, and a user who denied it (or blocked the app's
+        // notifications in Settings) simply does not get this notification. That is the whole
+        // consequence — the export itself neither waits on nor depends on it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.i(TAG, "notify($id) skipped: POST_NOTIFICATIONS not granted")
+            return
+        }
         try {
             NotificationManagerCompat.from(this).notify(id, notification)
         } catch (e: Exception) {

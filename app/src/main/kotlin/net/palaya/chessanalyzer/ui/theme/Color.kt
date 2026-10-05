@@ -31,9 +31,22 @@ val SelectedSquare = Color(0x7581B64C)
 
 // Neutral text on dark
 val OnDarkPrimary = Color(0xFFFAF9F6)
-val OnDarkSecondary = Color(0xFFB8B5AE)
+// Raised from B8B5AE (R6a contrast pass): 4.04:1 on a tinted move chip, now 4.9:1 and more everywhere.
+val OnDarkSecondary = Color(0xFFCBC8C1)
 val OnDarkDisabled = Color(0xFF716E68)
 val DividerDark = Color(0xFF474540)
+
+// Semantic roles added by the R6a contrast pass (WCAG AA, dark theme). None of these is a
+// move-quality colour: that palette (the Class* values below) is untouched.
+/** Borders of text fields, outlined/segmented buttons and the switch: 3.2:1 on a card (was 1.2:1). */
+val OutlineStrong = Color(0xFF8A877F)
+/** Error TEXT and icons: 4.3:1 or more on every surface (ClassBlunder gave 3.2:1 on a card). */
+val ErrorText = Color(0xFFFF9A8C)
+/** Container of a selected chip / segmented button: 7.2:1 under [OnDarkPrimary]. */
+val GreenContainer = Color(0xFF3E5C25)
+/** Board coordinate letters: ink on the two square colours, 6.4:1 and 5.1:1. */
+val BoardLabelOnLight = Color(0xFF3F5A2A)
+val BoardLabelOnDark = Color(0xFF1A1917)
 
 // Light scheme surfaces (secondary support — dark is default)
 val ChromeLight = Color(0xFFF5F4F0)

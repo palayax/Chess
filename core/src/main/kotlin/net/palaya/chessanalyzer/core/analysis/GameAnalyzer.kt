@@ -70,6 +70,12 @@ class GameAnalyzer(
                 val cp = WinProbability.cpOfLine(line)
                 if (WinProbability.sideToMoveOf(evalBefore.fen) == Color.WHITE) cp else -cp
             }
+            // Every cached MultiPV line, best first, mover-relative and untouched (spec §11).
+            val candidateLines = evalBefore.lines.sortedBy { it.multiPv }.mapNotNull { line ->
+                line.pvUci.firstOrNull()?.let { uci ->
+                    CandidateLine(line.multiPv, uci, safeSan(pos, uci), line.scoreCp, line.mateIn)
+                }
+            }
             val bestMoveUci = bestLine?.pvUci?.firstOrNull()
             val bestMoveSan = bestMoveUci?.let { safeSan(pos, it) }
             val bestLineSan = buildLineSan(pos, bestLine?.pvUci ?: emptyList())
@@ -99,51 +105,40 @@ class GameAnalyzer(
                 simulationBuilder.build(pos, bestLine?.pvUci ?: emptyList(), tactic)
             }
 
-            val text = commentary.generate(
+            // The annotation is built without its text first, then the text is written from the
+            // stored facts alone (`commentary.generate(annotation, ...)`): the very same path the app
+            // takes when the user later says which side they were, so the two cannot disagree.
+            val annotation = MoveAnnotation(
+                ply = i + 1,
+                moveNumber = pgnMove.moveNumber,
+                color = mover,
+                san = pgnMove.san,
+                uci = pgnMove.uci,
+                fenBefore = pgnMove.positionFenBefore,
+                fenAfter = pgnMove.positionFenAfter,
                 classification = classification,
-                moveSan = pgnMove.san,
-                move = move,
-                positionBefore = pos,
-                positionAfter = posAfter,
                 loss = loss,
+                winPercentBefore = winBefore,
+                winPercentAfter = winAfter,
+                evalBeforeCp = WinProbability.cpWhiteRelative(evalBefore),
+                evalAfterCp = WinProbability.cpWhiteRelative(evalAfter),
+                mateInBefore = WinProbability.mateWhiteRelative(evalBefore),
+                mateInAfter = WinProbability.mateWhiteRelative(evalAfter),
+                evalSecondBestCp = secondBestCp,
                 bestMoveSan = bestMoveSan,
-                mateInBefore = bestLine?.mateIn,
-                tacticsFound = tacticsPlayed,
+                bestMoveUci = bestMoveUci,
+                bestLineSan = bestLineSan,
+                moveAccuracy = moveAccuracy,
+                openingName = book?.lookup(pgnMove.positionFenAfter)?.name,
+                tacticsFound = tacticsFound,
                 tacticsMissed = tacticsMissed,
                 threatsAllowed = threatsAllowed,
-                userColor = userColor
+                text = "",
+                simulation = simulation,
+                candidateLines = candidateLines,
+                tacticsPlayed = tacticsPlayed
             )
-
-            annotations.add(
-                MoveAnnotation(
-                    ply = i + 1,
-                    moveNumber = pgnMove.moveNumber,
-                    color = mover,
-                    san = pgnMove.san,
-                    uci = pgnMove.uci,
-                    fenBefore = pgnMove.positionFenBefore,
-                    fenAfter = pgnMove.positionFenAfter,
-                    classification = classification,
-                    loss = loss,
-                    winPercentBefore = winBefore,
-                    winPercentAfter = winAfter,
-                    evalBeforeCp = WinProbability.cpWhiteRelative(evalBefore),
-                    evalAfterCp = WinProbability.cpWhiteRelative(evalAfter),
-                    mateInBefore = WinProbability.mateWhiteRelative(evalBefore),
-                    mateInAfter = WinProbability.mateWhiteRelative(evalAfter),
-                    evalSecondBestCp = secondBestCp,
-                    bestMoveSan = bestMoveSan,
-                    bestMoveUci = bestMoveUci,
-                    bestLineSan = bestLineSan,
-                    moveAccuracy = moveAccuracy,
-                    openingName = book?.lookup(pgnMove.positionFenAfter)?.name,
-                    tacticsFound = tacticsFound,
-                    tacticsMissed = tacticsMissed,
-                    threatsAllowed = threatsAllowed,
-                    text = text,
-                    simulation = simulation
-                )
-            )
+            annotations.add(annotation.copy(text = commentary.generate(annotation, userColor, annotations.lastOrNull())))
 
             pos = posAfter
         }

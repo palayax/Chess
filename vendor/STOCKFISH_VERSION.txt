@@ -9,6 +9,7 @@ Fetch reproducibly with: scripts/fetch_stockfish.sh
 (re-fetches this exact tag/commit into vendor/Stockfish/, which is gitignored).
 
 NNUE network required by this build (see src/evaluate.h EvalFileDefaultName):
-  nn-1a298aa575a0.nnue  (78,944,870 bytes)
-  Downloaded at runtime by NetworkProvider from
-  https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue
+  nn-1a298aa575a0.nnue  (98,511,183 bytes on disk)
+  Bundled in the APK (an :engine asset) and copied once to the app's files directory. Fetch it with
+  scripts/fetch_models.sh (it downloads from https://tests.stockfishchess.org/api/nn/ into the
+  gitignored vendor/models/ and verifies it against vendor/models/MODELS.lock).

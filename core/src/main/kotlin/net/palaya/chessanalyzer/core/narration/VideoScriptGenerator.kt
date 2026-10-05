@@ -52,8 +52,40 @@ class VideoScriptGenerator(
     private val strings: NarrationStrings = NarrationLocales.default
 ) {
 
-    fun generate(report: GameReport, game: PgnGame, options: NarrationOptions): VideoScript =
-        ScriptBuilder(report, game, options, userColor, strings).build()
+    fun generate(report: GameReport, game: PgnGame, options: NarrationOptions): VideoScript {
+        var demoted: Map<Int, PacingTier> = emptyMap()
+        var trim = 0
+        var builder = ScriptBuilder(report, game, options, userColor, strings, demoted, trim)
+        var script = builder.build()
+
+        // ANALYSIS_SPEC 9.7: a script that overruns the length budget gives up its least
+        // interesting beats - DWELL to BRIEF first, then BRIEF to SKIP, then the FULL moments to
+        // DWELL, then the turning point itself (FULL to DWELL to BRIEF), and only then the structure
+        // around the story (all but one lesson, the ratings, the opening summary, the hook, the last
+        // lesson) - one step at a time, re-measured each round - until it fits, and never grows to
+        // fill the budget. EVERY_MOVE is the explicit request for the whole game and is exempt, exactly as it
+        // is from the significance threshold.
+        if (options.depth != NarrationDepth.EVERY_MOVE) {
+            val budget = builder.budgetMs
+            var rounds = 0
+            while (script.totalEstimatedMs > budget && rounds++ < MAX_BUDGET_ROUNDS) {
+                val excess = script.totalEstimatedMs - budget
+                var step = builder.demotions(script, excess)
+                if (step.isEmpty()) step = builder.turningPointDemotion(PacingTier.DWELL)
+                if (step.isEmpty()) step = builder.turningPointDemotion(PacingTier.BRIEF)
+                if (step.isNotEmpty()) {
+                    demoted = demoted + step
+                } else if (trim < MAX_STRUCTURE_TRIM) {
+                    trim++
+                } else {
+                    break
+                }
+                builder = ScriptBuilder(report, game, options, userColor, strings, demoted, trim)
+                script = builder.build()
+            }
+        }
+        return script
+    }
 
     companion object {
 
@@ -71,6 +103,36 @@ class VideoScriptGenerator(
         }
 
         private const val SENTENCE_PAUSE_MS = 240L
+
+        /**
+         * The length a game of [fullMoves] moves may run to (ANALYSIS_SPEC 9.7), in milliseconds:
+         *
+         *     min(720 s, 120 s + 14 s x moves, 23 s x moves - 32 s)
+         *
+         * The first two terms are the Round 13 budget, which a normal game (17 moves and up) still
+         * gets unchanged. The third is the ramp for a tiny game: a four-move scholar's mate used to be
+         * allowed 176 s because of the 120 s base and came out at 3 min 43 s; it is now allowed 60 s.
+         * A budget is a ceiling and never a target: nothing is padded to reach it.
+         */
+        fun budgetMs(fullMoves: Int): Long =
+            minOf(
+                BUDGET_MAX_MS,
+                BUDGET_BASE_MS + BUDGET_PER_MOVE_MS * fullMoves,
+                BUDGET_RAMP_PER_MOVE_MS * fullMoves - BUDGET_RAMP_OFFSET_MS
+            ).coerceAtLeast(BUDGET_MIN_MS)
+
+        const val BUDGET_BASE_MS = 120_000L
+        const val BUDGET_PER_MOVE_MS = 14_000L
+        const val BUDGET_MAX_MS = 720_000L
+        const val BUDGET_RAMP_PER_MOVE_MS = 23_000L
+        const val BUDGET_RAMP_OFFSET_MS = 32_000L
+        const val BUDGET_MIN_MS = 20_000L
+
+        /** The structure trims (lessons, ratings, opening summary), one level per round; see [ScriptBuilder]. */
+        private const val MAX_STRUCTURE_TRIM = 5
+
+        /** Each round demotes at least one beat, so this only bounds a pathological game. */
+        private const val MAX_BUDGET_ROUNDS = 64
         private val WHITESPACE = Regex("\\s+")
     }
 }
@@ -82,12 +144,35 @@ class VideoScriptGenerator(
 /** Why a ply earned a spoken beat. Maps onto [SegmentKind] once the segment is emitted. */
 private enum class BeatKind { MISSED_TACTIC, ERROR, FOUND_TACTIC, THREAT, KEY, NORMAL }
 
+/**
+ * How much of the video a ply gets (ANALYSIS_SPEC 9.7), declared in order of weight so `min` and
+ * `max` mean "lighter" and "heavier".
+ *
+ *  - [SKIP]: no beat of its own; a run of three or more becomes one "skip ahead" connective.
+ *  - [BRIEF]: a sentence or two, never a walk of the missed line.
+ *  - [DWELL]: a fuller explanation, and a variation of at most [ScriptBuilder.DWELL_EXCURSION_PLIES]
+ *    plies for a missed tactic, with no "can you find it?" pause.
+ *  - [FULL]: the puzzle pause, the reveal and the whole excursion. At most
+ *    [ScriptBuilder.MAX_FULL_MOMENTS] per game.
+ */
+private enum class PacingTier { SKIP, BRIEF, DWELL, FULL }
+
 private class ScriptBuilder(
     rawReport: GameReport,
     private val game: PgnGame,
     private val options: NarrationOptions,
     private val userColor: Color?,
-    private val strings: NarrationStrings
+    private val strings: NarrationStrings,
+    /** Per-ply tier ceilings the length budget has imposed (ANALYSIS_SPEC 9.7). */
+    private val demoted: Map<Int, PacingTier> = emptyMap(),
+    /**
+     * How much of the structure around the story the length budget has taken (ANALYSIS_SPEC 9.7):
+     * 1 keeps only the first lesson, without the textbook offer; 2 also drops the rating and
+     * error-count sentences of the summary (and the caveat about the ratings); 3 also drops the opening
+     * summary; 4 also drops the intro's hook; 5 also drops the lessons. Each level is only reached when
+     * everything lighter has already gone, the turning point included.
+     */
+    private val trim: Int = 0
 ) {
 
     /**
@@ -125,9 +210,20 @@ private class ScriptBuilder(
     private val sequences: List<MoveSequence> = MoveSequenceDetector.detect(annotations)
 
     private val keyMomentPlies = report.keyMoments.map { it.ply }.toSet()
+
+    /**
+     * The one move that changed the game most. Book moves and forced moves are never it: theory is
+     * not a decision, and a forced move is not a choice, so neither can be where the game turned.
+     */
     private val turningPoint: MoveAnnotation? = annotations
-        .filter { it.loss > 0.5 }
+        .filter { it.loss > 0.5 && it.classification != MoveClassification.BOOK && it.classification != MoveClassification.FORCED }
         .maxWithOrNull(compareBy({ it.loss }, { -it.ply }))
+
+    /** Every ply's pacing tier, after the FULL cap and any budget demotions (ANALYSIS_SPEC 9.7). */
+    private val tiers: Map<Int, PacingTier> = planTiers()
+
+    /** The total length this game is allowed (ANALYSIS_SPEC 9.7). */
+    val budgetMs: Long = VideoScriptGenerator.budgetMs((annotations.size + 1) / 2)
 
     // -----------------------------------------------------------------------
     // The one door to the words
@@ -152,6 +248,7 @@ private class ScriptBuilder(
         chapter(Sentence.ChapterWorkOn)
         outroLessons()
 
+        val header = header()
         return VideoScript(
             title = videoTitle(),
             subtitle = videoSubtitle(),
@@ -159,11 +256,15 @@ private class ScriptBuilder(
             chapters = chapters,
             totalEstimatedMs = segments.sumOf { it.estimatedSpeechMs + it.holdAfterMs },
             userColor = userColor,
-            header = header(),
+            header = header,
             whiteAccuracy = report.white.accuracy,
             blackAccuracy = report.black.accuracy,
             whiteEstimatedRating = report.white.estimatedRating,
-            blackEstimatedRating = report.black.estimatedRating
+            blackEstimatedRating = report.black.estimatedRating,
+            recap = GameRecap.build(
+                report, header.whiteName, header.blackName,
+                userColor.takeIf { options.addressUserAsYou }, strings, options.viewerGender
+            )
         )
     }
 
@@ -215,19 +316,25 @@ private class ScriptBuilder(
         if (userColor != null && options.addressUserAsYou && coach) {
             sb.append(say(Sentence.IntroYouWere(subj(userColor)))).append(' ')
         }
-        sb.append(hookSentence())
+        if (trim < 4) sb.append(hookSentence())
 
         add(
             kind = SegmentKind.INTRO,
             ply = null,
             narration = sb.toString(),
             caption = videoTitle(),
+            // The title card's contract (R6c): the heading is the title, and the lines are exactly
+            // [subtitle, accuracy], each fact once. The subtitle is the result with the move count, then
+            // the opening, on ONE line; the accuracy line is whole percent, as the Summary writes it.
+            // The names are in the heading only and are not repeated by the renderer.
             board = BoardDirective.Card(
                 heading = videoTitle(),
-                lines = listOfNotNull(
-                    report.openingName?.let { say(Sentence.CardOpeningLine(it, report.openingEco)) },
-                    say(Sentence.CardResultLine(report.result, annotations.size)),
-                    say(Sentence.CardAccuracyLine(fmt1(report.white.accuracy), fmt1(report.black.accuracy)))
+                lines = listOf(
+                    listOfNotNull(
+                        say(Sentence.CardResultLine(report.result, (annotations.size + 1) / 2)),
+                        report.openingName?.let { say(Sentence.CardOpeningLine(it, report.openingEco)) },
+                    ).joinToString(CARD_SEPARATOR),
+                    say(Sentence.CardAccuracyLine(accuracyWhole(report.white.accuracy), accuracyWhole(report.black.accuracy)))
                 )
             )
         )
@@ -257,6 +364,7 @@ private class ScriptBuilder(
     }
 
     private fun openingSummary() {
+        if (trim >= 3) return
         val name = report.openingName
         val eco = report.openingEco
         val family = NarrationVocabulary.openingFamily(name)
@@ -329,7 +437,8 @@ private class ScriptBuilder(
                 chapter(Sentence.ChapterMove(a.moveNumber, a.san))
             }
             emitBeat(ply, leadIn)
-            if (turningPoint != null && turningPoint.ply == ply) {
+            // A turning point the budget has taken down to BRIEF is told by its own beat alone.
+            if (turningPoint != null && turningPoint.ply == ply && tiers[ply] != PacingTier.BRIEF) {
                 chapter(Sentence.ChapterTurningPoint)
                 turningPointSegment(turningPoint)
             }
@@ -338,90 +447,260 @@ private class ScriptBuilder(
     }
 
     /**
-     * Which plies get their own spoken beat.
-     *
-     * Mistakes, missed tactics, key moments, the turning point and the final move are mandatory at
-     * every depth. HIGHLIGHTS tops those up with the most interesting quiet moments, but never
-     * takes more than two thirds of the game — the rest becomes "let's jump ahead" narration, which
-     * is what keeps a highlights script shorter than an every-move one.
-     *
-     * Whatever [NarrationDepth] proposes is then pruned by [applyThreshold]. The two filters
-     * compose rather than override: depth decides *which kinds* of move are candidates, the
-     * significance threshold decides *whether anything actually happened* on them.
+     * Which plies get their own spoken beat: every ply the pacing plan ([planTiers]) did not SKIP.
      *
      * [NarrationDepth.EVERY_MOVE] is the one exception, and it is deliberate: that depth means
-     * "every move, I want the complete walkthrough", which is an explicit request that the
-     * threshold has no business overruling. It is the escape hatch, and it is documented as one
-     * on the enum. Every other depth composes with the threshold.
+     * "every move, I want the complete walkthrough", which is an explicit request that neither the
+     * threshold nor the length budget has any business overruling. It is the escape hatch, and it is
+     * documented as one on the enum.
      */
     private fun selectPlies(): Set<Int> {
         if (annotations.isEmpty()) return emptySet()
         if (options.depth == NarrationDepth.EVERY_MOVE) return annotations.map { it.ply }.toSet()
-
-        val mandatory = LinkedHashSet<Int>()
-        for (a in annotations) {
-            when (beatKind(a)) {
-                BeatKind.MISSED_TACTIC, BeatKind.ERROR -> mandatory.add(a.ply)
-                else -> Unit
-            }
-        }
-        mandatory.addAll(keyMomentPlies)
-        turningPoint?.let { mandatory.add(it.ply) }
-        annotations.lastOrNull()?.let { if (it.san.endsWith("#")) mandatory.add(it.ply) }
-
-        if (options.depth == NarrationDepth.MISTAKES_ONLY) {
-            return applyThreshold(
-                if (mandatory.isEmpty()) setOfNotNull(annotations.lastOrNull()?.ply) else mandatory
-            )
-        }
-
-        val cap = max(4, annotations.size * 2 / 3)
-        val optional = annotations
-            .filter { it.ply !in mandatory }
-            .sortedWith(compareByDescending<MoveAnnotation> { interest(it) }.thenBy { it.ply })
-            .take(max(0, cap - mandatory.size))
-            .map { it.ply }
-
-        val selected = LinkedHashSet(mandatory)
-        selected.addAll(optional)
-        if (selected.isEmpty()) annotations.firstOrNull()?.let { selected.add(it.ply) }
-        return applyThreshold(selected)
+        return tiers.filter { it.value != PacingTier.SKIP }.keys
     }
 
     // -----------------------------------------------------------------------
-    // Significance threshold (ANALYSIS_SPEC §9)
+    // Pacing tiers (ANALYSIS_SPEC 9.7) and the significance threshold (9.2)
     // -----------------------------------------------------------------------
 
     /**
-     * Prunes [candidates] down to the plies that actually moved the evaluation.
+     * Gives every ply a [PacingTier].
      *
-     * A ply survives when its own swing clears [NarrationOptions.significanceThresholdCp], or
-     * when it belongs to a [MoveSequence] whose combined swing does — a three-move combination
-     * whose payoff lands on the last move must not be sliced up by a per-move filter.
+     * Three things compose, in this order, and none overrides another:
+     *  1. **Depth** picks the candidate plies ([NarrationDepth.MISTAKES_ONLY] narrows them to the
+     *     errors; the others consider every ply).
+     *  2. The **significance threshold** (ANALYSIS_SPEC 9.2) prunes: a ply that did not move the
+     *     evaluation, and belongs to no sequence and carries no surviving tactic, is SKIP at any
+     *     tier. Mate always survives. A threshold of 0 prunes nothing.
+     *  3. The **tier rules** ([baseTier]) say how much each survivor gets, and at most
+     *     [MAX_FULL_MOMENTS] of them are FULL, ranked by loss, the turning point first.
      *
-     * Two guarantees, both tested:
-     *  - **The checkmate always survives.** It is the game's result, which is a structural beat,
-     *    and a review that omits how the game ended is broken regardless of any threshold.
-     *  - **The result is never empty.** If the threshold rejects literally everything, this falls
-     *    back to the single largest-swing ply (ties broken towards the earlier one) so the review
-     *    still has a body between the intro and the outro. Emitting a script with no move beats at
-     *    all would be a worse failure than showing one quiet move.
+     * The result is never empty: if everything was pruned, the single largest-swing ply (ties to
+     * the earlier one) is narrated, because a review with no body between the intro and the outro
+     * is a worse failure than one quiet move.
      *
-     * Structural segments — intro, opening summary, outro summary (which speaks the final result)
-     * and the lessons — are emitted outside this path entirely and are never filtered.
+     * Structural segments - intro, opening summary, outro summary (which speaks the result) and the
+     * lessons - are emitted outside this path entirely and are never filtered.
      */
-    private fun applyThreshold(candidates: Set<Int>): Set<Int> {
-        val threshold = options.significanceThresholdCp
-        if (threshold <= 0 || candidates.isEmpty()) return candidates
+    private fun planTiers(): Map<Int, PacingTier> {
+        if (annotations.isEmpty()) return emptyMap()
+        val depth = options.depth
+        val everyMove = depth == NarrationDepth.EVERY_MOVE
+        val pruning = !everyMove && options.significanceThresholdCp > 0
+        val candidates: Set<Int>? = if (depth == NarrationDepth.MISTAKES_ONLY) mistakesOnlyCandidates() else null
 
-        val kept = LinkedHashSet(candidates.filter { isSignificant(it) })
-        annotations.lastOrNull()
-            ?.takeIf { it.san.endsWith("#") && it.ply in candidates }
-            ?.let { kept.add(it.ply) }
-        if (kept.isNotEmpty()) return kept
+        val tier = LinkedHashMap<Int, PacingTier>()
+        for (a in annotations) {
+            var t = baseTier(a)
+            if (candidates != null && a.ply !in candidates) t = PacingTier.SKIP
+            if (pruning && t != PacingTier.SKIP && !isMate(a) && !isSignificant(a.ply)) t = PacingTier.SKIP
+            tier[a.ply] = t
+        }
 
-        val largest = annotations.maxWithOrNull(compareBy({ swingCp(it) }, { -it.ply }))
-        return setOfNotNull(largest?.ply)
+        // The turning point is the story of the game, so it is always FULL (if it survived at all).
+        turningPoint?.let { if (tier[it.ply] != PacingTier.SKIP) tier[it.ply] = PacingTier.FULL }
+
+        // At most MAX_FULL_MOMENTS full treatments; the rest are still told, at DWELL length.
+        annotations
+            .filter { tier[it.ply] == PacingTier.FULL }
+            .sortedWith(
+                compareByDescending<MoveAnnotation> { it.ply == turningPoint?.ply }
+                    .thenByDescending { drama(it) }
+                    .thenBy { it.ply }
+            )
+            .drop(MAX_FULL_MOMENTS)
+            .forEach { tier[it.ply] = PacingTier.DWELL }
+
+        // Length-budget demotions, never below the floor: the checkmate keeps a DWELL beat.
+        for ((ply, ceiling) in demoted) {
+            val current = tier[ply] ?: continue
+            if (current > ceiling) tier[ply] = ceiling
+        }
+        // ...and so do the protected beats, but only against the *budget*: a protected ply that the
+        // threshold pruned (nothing happened on it) stays pruned.
+        for (a in annotations) {
+            val floored = isMate(a) || (isProtected(a) && baseTier(a) != PacingTier.SKIP && tier[a.ply] != PacingTier.SKIP)
+            if (floored && (tier[a.ply] ?: PacingTier.SKIP) < PacingTier.DWELL) tier[a.ply] = PacingTier.DWELL
+        }
+
+        if (!everyMove && tier.values.all { it == PacingTier.SKIP }) {
+            val fallback = if (candidates != null && candidates.isEmpty()) {
+                annotations.last()
+            } else {
+                annotations.maxWithOrNull(compareBy({ swingCp(it) }, { -it.ply }))
+            }
+            fallback?.let { tier[it.ply] = PacingTier.BRIEF }
+        }
+        return tier
+    }
+
+    /** The plies MISTAKES_ONLY considers: the errors, the key moments, the turning point, the mate. */
+    private fun mistakesOnlyCandidates(): Set<Int> {
+        val out = LinkedHashSet<Int>()
+        for (a in annotations) {
+            when (beatKind(a)) {
+                BeatKind.MISSED_TACTIC, BeatKind.ERROR -> out.add(a.ply)
+                else -> Unit
+            }
+        }
+        out.addAll(keyMomentPlies)
+        turningPoint?.let { out.add(it.ply) }
+        annotations.lastOrNull()?.let { if (isMate(it)) out.add(it.ply) }
+        return out
+    }
+
+    private fun isMate(a: MoveAnnotation): Boolean = a.san.endsWith("#")
+
+    /**
+     * How much a FULL candidate deserves one of the [MAX_FULL_MOMENTS] slots (ANALYSIS_SPEC 9.7).
+     * Loss, except that a brilliancy - which by definition loses nothing - scores as a
+     * [BRILLIANT_DRAMA]-point loss, a mid-sized blunder, so in a game with three errors it can still
+     * take a slot instead of always ranking last.
+     */
+    private fun drama(a: MoveAnnotation): Double =
+        if (a.classification == MoveClassification.BRILLIANT) max(a.loss, BRILLIANT_DRAMA) else a.loss
+
+    /**
+     * A beat the length budget may not shorten below DWELL: brilliant and great moves, and a move
+     * that plays a forced mate (the queen sacrifice that mates is the point of the game, however
+     * the engine labels it). The checkmate itself is protected separately.
+     */
+    private fun isProtected(a: MoveAnnotation): Boolean =
+        a.classification == MoveClassification.BRILLIANT || a.classification == MoveClassification.GREAT ||
+            a.tacticsFound.any { it.type in MATING_MOTIFS && it.confidence >= FOUND_TACTIC_CONFIDENCE }
+
+    /**
+     * What a ply earns on its own merits, before the FULL cap and the length budget. ANALYSIS_SPEC
+     * 9.7 is the authoritative statement of these rules; every threshold is named there.
+     */
+    private fun baseTier(a: MoveAnnotation): PacingTier {
+        val c = a.classification
+        if (isMate(a)) return PacingTier.DWELL
+        if (c == MoveClassification.BOOK || c == MoveClassification.FORCED) return PacingTier.SKIP
+        if (c == MoveClassification.BLUNDER || c == MoveClassification.MISS || c == MoveClassification.BRILLIANT) {
+            return PacingTier.FULL
+        }
+        if (c == MoveClassification.MISTAKE) {
+            val missed = significantMissed(a)
+            return if (missed != null && winsMaterialOrMate(a, missed)) PacingTier.FULL else PacingTier.DWELL
+        }
+        // An inaccuracy is told in a sentence or two and never earns a walk of the line it missed,
+        // however much that line would have won: that is what made a 17-move game eleven minutes.
+        if (c == MoveClassification.INACCURACY) return PacingTier.BRIEF
+        if (c == MoveClassification.GREAT) return PacingTier.DWELL
+        // Taking back is the second half of a trade, not a decision.
+        if (isRecapture(a)) return PacingTier.SKIP
+        if (a.tacticsFound.any { it.confidence >= FOUND_TACTIC_CONFIDENCE }) return PacingTier.DWELL
+        // Everything else is routine unless it moved the evaluation (or carried a sequence): a
+        // significant-but-small swing earns a line, a quiet move earns nothing.
+        return if (isSignificant(a.ply)) PacingTier.BRIEF else PacingTier.SKIP
+    }
+
+    /**
+     * A missed tactic big enough to stop the video for: it wins material, or it mates.
+     *
+     * The tactic's own [TacticInstance.materialSwing] is only a lower bound - the highest-confidence
+     * motif on a move is often a clearance or a deflection that is "worth" nothing by itself while
+     * the line it opens wins a rook - so a quiet motif is also judged by what its line actually
+     * does on the board.
+     */
+    private fun winsMaterialOrMate(a: MoveAnnotation, tactic: TacticInstance): Boolean =
+        tactic.materialSwing >= PUZZLE_MIN_SWING_CP || tactic.type in MATING_MOTIFS ||
+            moverHadForcedMate(a) || missedLineWins(a, tactic)
+
+    private fun missedLineWins(a: MoveAnnotation, tactic: TacticInstance): Boolean {
+        val plies = excursionPlies(a, tactic, MAX_EXCURSION_PLIES)
+        if (plies.isEmpty()) return false
+        val start = plies.first().before
+        return plies.any { p ->
+            p.after.isCheckmate() ||
+                (p.after.sideToMove == tactic.byColor &&
+                    ExchangeEvaluator.netGain(start, p.after, tactic.byColor) >= PUZZLE_MIN_SWING_CP)
+        }
+    }
+
+    /** True when the engine saw a forced mate for the side that moved (the score is White-relative). */
+    private fun moverHadForcedMate(a: MoveAnnotation): Boolean {
+        val mate = a.mateInBefore ?: return false
+        return mate != 0 && (mate > 0) == (a.color == Color.WHITE)
+    }
+
+    // -----------------------------------------------------------------------
+    // The length budget (ANALYSIS_SPEC 9.7)
+    // -----------------------------------------------------------------------
+
+    /**
+     * The beats to give up next, to claw back about [excessMs] of speech: the lowest-interest DWELL
+     * beats become BRIEF first; only when none is left do the lowest-interest BRIEF beats become
+     * SKIP. The turning point, the checkmate, and every protected beat ([isProtected]: brilliant and
+     * great moves, forced mates played) are never taken below DWELL, and at least one body beat
+     * always survives. Only when nothing lighter is left does a FULL beat fall to DWELL, the
+     * cheapest first and a brilliancy last. Savings are estimated conservatively (a DWELL beat shrinks by about half, a
+     * BRIEF beat vanishes), so the loop in [VideoScriptGenerator.generate] may take another round
+     * but will not overshoot into an empty review.
+     */
+    fun demotions(script: VideoScript, excessMs: Long): Map<Int, PacingTier> {
+        val msByPly = HashMap<Int, Long>()
+        for (s in script.segments) {
+            val ply = s.ply ?: continue
+            msByPly[ply] = (msByPly[ply] ?: 0L) + s.estimatedSpeechMs + s.holdAfterMs
+        }
+        fun movable(tier: PacingTier) = annotations
+            .filter { tiers[it.ply] == tier && !isMate(it) && !isProtected(it) && it.ply != turningPoint?.ply }
+            .sortedWith(compareBy<MoveAnnotation> { interest(it) }.thenByDescending { it.ply })
+
+        val out = LinkedHashMap<Int, PacingTier>()
+        var saved = 0L
+        val dwell = movable(PacingTier.DWELL)
+        if (dwell.isNotEmpty()) {
+            for (a in dwell) {
+                if (saved >= excessMs) break
+                out[a.ply] = PacingTier.BRIEF
+                saved += (msByPly[a.ply] ?: 0L) / 2
+            }
+            return out
+        }
+        val brief = movable(PacingTier.BRIEF)
+        val bodyBeats = tiers.values.count { it != PacingTier.SKIP }
+        for (a in brief) {
+            if (saved >= excessMs || bodyBeats - out.size <= 1) break
+            out[a.ply] = PacingTier.SKIP
+            saved += msByPly[a.ply] ?: 0L
+        }
+        if (out.isNotEmpty()) return out
+
+        // Last resort, after everything lighter is gone: a game so short that its FULL moments alone
+        // overrun the budget gives up the *least* costly of them to DWELL length. The turning point
+        // stays FULL. (A 17-move game never gets here; a six-move game with three blunders does.)
+        val full = annotations
+            .filter { tiers[it.ply] == PacingTier.FULL && !isMate(it) && it.ply != turningPoint?.ply }
+            .sortedWith(
+                compareBy<MoveAnnotation> { it.classification == MoveClassification.BRILLIANT }
+                    .thenBy { drama(it) }
+                    .thenByDescending { it.ply }
+            )
+        for (a in full) {
+            if (saved >= excessMs) break
+            out[a.ply] = PacingTier.DWELL
+            saved += (msByPly[a.ply] ?: 0L) / 2
+        }
+        return out
+    }
+
+    /**
+     * The turning point gives way, one step at a time, only when everything else is gone (the
+     * budget outranks "the turning point is always FULL" for a game so short that its one story
+     * does not fit): FULL to DWELL, then DWELL to BRIEF, both before any of the structure around the
+     * story (the lessons, the ratings, the opening summary) is trimmed. A protected beat (brilliant, great, a forced mate played) and the checkmate never go below
+     * DWELL. Returns the new ceiling for the turning point's ply, or nothing.
+     */
+    fun turningPointDemotion(toTier: PacingTier): Map<Int, PacingTier> {
+        val tp = turningPoint ?: return emptyMap()
+        val current = tiers[tp.ply] ?: return emptyMap()
+        if (current <= toTier || isMate(tp)) return emptyMap()
+        if (toTier < PacingTier.DWELL && isProtected(tp)) return emptyMap()
+        return mapOf(tp.ply to toTier)
     }
 
     /** `|evalAfter - evalBefore|`, both White-relative, so the number is perspective-free. */
@@ -471,12 +750,11 @@ private class ScriptBuilder(
             .maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
     }
 
-    /** Up to three named chapters for the worst moments, excluding the turning point's own. */
+    /** A named chapter for each FULL moment, except the turning point, which has its own. */
     private fun chapterPlies(selected: Set<Int>): Set<Int> = annotations
-        .filter { it.ply in selected && it.ply != turningPoint?.ply }
-        .filter { beatKind(it) == BeatKind.MISSED_TACTIC || beatKind(it) == BeatKind.ERROR }
+        .filter { it.ply in selected && it.ply != turningPoint?.ply && tiers[it.ply] == PacingTier.FULL }
         .sortedWith(compareByDescending<MoveAnnotation> { it.loss }.thenBy { it.ply })
-        .take(3)
+        .take(MAX_FULL_MOMENTS)
         .map { it.ply }
         .toSet()
 
@@ -507,17 +785,125 @@ private class ScriptBuilder(
     // The per-ply beats
     // -----------------------------------------------------------------------
 
+    /**
+     * One ply's beat, shaped by its [PacingTier] (ANALYSIS_SPEC 9.7). A ply that EVERY_MOVE narrates
+     * although the plan skipped it is told at BRIEF length.
+     */
     private fun emitBeat(ply: Int, leadIn: String) {
         val a = annotations[ply - 1]
-        if (a.san.endsWith("#")) return matingBeat(a, leadIn)
-        when (beatKind(a)) {
-            BeatKind.MISSED_TACTIC -> missedTacticBeat(a, leadIn)
-            BeatKind.ERROR -> errorBeat(a, leadIn)
-            BeatKind.FOUND_TACTIC -> foundTacticBeat(a, leadIn)
-            BeatKind.THREAT -> threatBeat(a, leadIn)
-            BeatKind.KEY -> keyMomentBeat(a, leadIn)
-            BeatKind.NORMAL -> normalBeat(a, leadIn)
+        if (isMate(a)) return matingBeat(a, leadIn)
+        when (tiers[ply] ?: PacingTier.BRIEF) {
+            PacingTier.FULL -> fullBeat(a, leadIn)
+            PacingTier.DWELL -> dwellBeat(a, leadIn)
+            PacingTier.BRIEF, PacingTier.SKIP -> briefBeat(a, leadIn)
         }
+    }
+
+    private fun isErrorClass(a: MoveAnnotation): Boolean =
+        a.classification == MoveClassification.BLUNDER ||
+            a.classification == MoveClassification.MISTAKE ||
+            a.classification == MoveClassification.MISS
+
+    /**
+     * FULL: the whole treatment. A missed tactic gets the puzzle pause (when it is worth one), the
+     * reveal and the walked line; a blunder or a miss gets the error beat; a brilliancy gets its
+     * tactic and its flavour.
+     */
+    private fun fullBeat(a: MoveAnnotation, leadIn: String) {
+        val missed = significantMissed(a)
+        when {
+            // The turning point of a game with nothing worse in it can be a mere inaccuracy. It is
+            // still the story, but an inaccuracy never earns a walk of the line it missed.
+            a.classification == MoveClassification.INACCURACY -> keyMomentBeat(a, leadIn)
+            // The puzzle and the long walk are for a tactic that wins material or mates. A blunder
+            // that merely missed some quieter motif is still FULL (it is the worst of the game) but
+            // is shown the short way.
+            missed != null -> missedTacticBeat(
+                a, leadIn, missed,
+                full = winsMaterialOrMate(a, missed) || a.classification == MoveClassification.MISS
+            )
+            isErrorClass(a) -> errorBeat(a, leadIn)
+            a.tacticsFound.isNotEmpty() && a.classification.isGood -> foundTacticBeat(
+                a, leadIn,
+                extra = if (a.classification == MoveClassification.BRILLIANT) say(Sentence.BrilliantFlavour) else null
+            )
+            else -> normalBeat(a, leadIn)
+        }
+    }
+
+    /**
+     * DWELL: a fuller explanation than a passing mention. A missed tactic still gets its reveal and
+     * a variation, but at most [DWELL_EXCURSION_PLIES] plies of it and no puzzle pause.
+     */
+    private fun dwellBeat(a: MoveAnnotation, leadIn: String) {
+        val missed = significantMissed(a)
+        when {
+            missed != null -> missedTacticBeat(a, leadIn, missed, full = false)
+            isErrorClass(a) -> errorBeat(a, leadIn)
+            a.tacticsFound.isNotEmpty() && a.classification.isGood -> foundTacticBeat(a, leadIn)
+            a.threatsAllowed.isNotEmpty() && !a.classification.isGood -> threatBeat(a, leadIn)
+            else -> normalBeat(a, leadIn)
+        }
+    }
+
+    /** BRIEF: the move and one remark, never a walk of the line it missed. */
+    private fun briefBeat(a: MoveAnnotation, leadIn: String) {
+        // EVERY_MOVE is the complete walkthrough and names every tactic that survived the gate, even
+        // one the plan would have left to a passing mention.
+        if (options.depth == NarrationDepth.EVERY_MOVE && a.tacticsFound.isNotEmpty() && a.classification.isGood) {
+            return foundTacticBeat(a, leadIn)
+        }
+        if (a.classification.isMistake) return briefMistakeBeat(a, leadIn)
+        if (options.depth == NarrationDepth.EVERY_MOVE) return normalBeat(a, leadIn)
+        briefMoveBeat(a, leadIn)
+    }
+
+    /**
+     * "White plays X." and then the one thing that makes it worth a beat: the tactic it carries, or
+     * what it did to the evaluation. Never a pleasantry - "Top of the engine's list" and "No
+     * complaints" say nothing, and a beat that has nothing to say should have been a skip.
+     */
+    private fun briefMoveBeat(a: MoveAnnotation, leadIn: String) {
+        val tactic = a.tacticsFound
+            .filter { it.confidence >= FOUND_TACTIC_CONFIDENCE }
+            .maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
+        val sb = StringBuilder(leadIn)
+        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        val before = NarrationVocabulary.standing(a.winPercentBefore)
+        val after = NarrationVocabulary.standing(a.winPercentAfter)
+        when {
+            tactic != null -> sb.append(say(NarrationVocabulary.tacticPoint(tactic, positionsBefore[a.ply - 1])))
+            before != after -> sb.append(say(Sentence.ConsequenceChanged(subj(a.color), before, after)))
+            else -> sb.append(say(Sentence.EvalShift(subj(a.color), a.winPercentAfter >= a.winPercentBefore)))
+        }
+        add(
+            kind = if (tactic != null) SegmentKind.FOUND_TACTIC else SegmentKind.NORMAL_MOVE,
+            ply = a.ply,
+            narration = cap(sb.toString()),
+            caption = caption(a),
+            board = playMoveDirective(a),
+            tactic = tactic,
+            speakerColor = a.color,
+            eval = evalAfter(a.ply),
+            moveNumber = a.moveNumber
+        )
+    }
+
+    /** "White plays X. Y was the move." - what an inaccuracy deserves, and no more. */
+    private fun briefMistakeBeat(a: MoveAnnotation, leadIn: String) {
+        val sb = StringBuilder(leadIn)
+        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        sb.append(betterMoveSentence(a) ?: say(Sentence.InaccuracyNote))
+        add(
+            kind = SegmentKind.KEY_MOMENT,
+            ply = a.ply,
+            narration = cap(sb.toString()),
+            caption = caption(a, a.classification.glyph),
+            board = annotateDirective(a),
+            speakerColor = a.color,
+            eval = evalBefore(a.ply),
+            moveNumber = a.moveNumber
+        )
     }
 
     /** The finish deserves its own beat rather than being narrated as another quiet move. */
@@ -582,7 +968,7 @@ private class ScriptBuilder(
         else -> if (coach) say(Sentence.Filler).ifBlank { null } else null
     }
 
-    private fun foundTacticBeat(a: MoveAnnotation, leadIn: String) {
+    private fun foundTacticBeat(a: MoveAnnotation, leadIn: String, extra: String? = null) {
         val tactic = a.tacticsFound
             .maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
         val pos = positionsBefore[a.ply - 1]
@@ -606,6 +992,7 @@ private class ScriptBuilder(
         } else {
             sb.append(say(Sentence.GoodSolid))
         }
+        extra?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.FOUND_TACTIC,
             ply = a.ply,
@@ -702,16 +1089,16 @@ private class ScriptBuilder(
      * MISSED_TACTIC therefore means exactly "we are inside the detour", which is what lets the
      * renderer tint the excursion and drop the tint again the moment the pivot-out lands.
      */
-    private fun missedTacticBeat(a: MoveAnnotation, leadIn: String) {
-        val tactic = significantMissed(a) ?: return normalBeat(a, leadIn)
-        val plies = excursionPlies(a, tactic)
-        val worthAPuzzle = tactic.materialSwing >= 150 || tactic.type in MATING_MOTIFS ||
-            (a.mateInBefore != null && a.color == Color.WHITE) || a.classification == MoveClassification.MISS
+    private fun missedTacticBeat(a: MoveAnnotation, leadIn: String, tactic: TacticInstance, full: Boolean) {
+        val plies = excursionPlies(a, tactic, if (full) MAX_EXCURSION_PLIES else DWELL_EXCURSION_PLIES)
+        // Only a FULL moment stops the video to ask. A DWELL one just shows the line.
+        val worthAPuzzle = full && options.includePuzzlePrompts &&
+            (winsMaterialOrMate(a, tactic) || a.classification == MoveClassification.MISS)
 
-        if (options.includePuzzlePrompts && worthAPuzzle) {
+        if (worthAPuzzle) {
             puzzlePrompt(a, tactic, plies)
         }
-        val opening = if (options.includePuzzlePrompts && worthAPuzzle) "" else leadIn
+        val opening = if (worthAPuzzle) "" else leadIn
 
         if (plies.isEmpty()) return missedWithoutALine(a, tactic, opening)
 
@@ -736,8 +1123,9 @@ private class ScriptBuilder(
     /**
      * The plies the detour actually walks.
      *
-     * Capped exactly the way [net.palaya.chessanalyzer.core.analysis.SimulationBuilder] caps a
-     * simulation (ANALYSIS_SPEC section 6): at most [MAX_EXCURSION_PLIES], and stopping early on
+     * Capped the way [net.palaya.chessanalyzer.core.analysis.SimulationBuilder] caps a simulation
+     * (ANALYSIS_SPEC section 6): at most [maxPlies] ([MAX_EXCURSION_PLIES] for a FULL moment,
+     * [DWELL_EXCURSION_PLIES] for a DWELL one, ANALYSIS_SPEC 9.7), and stopping early on
      * mate or once the payoff has genuinely landed — the tactic's side is up the material it was
      * promised and the opponent has had the last word. Without that, a twenty-ply PV turns a
      * thirty-second point into a two-minute detour.
@@ -745,14 +1133,14 @@ private class ScriptBuilder(
      * Stops at the first move that will not parse too, so a stale or truncated PV degrades to the
      * part of the line that is still legal instead of throwing.
      */
-    private fun excursionPlies(a: MoveAnnotation, tactic: TacticInstance): List<ExcursionPly> {
+    private fun excursionPlies(a: MoveAnnotation, tactic: TacticInstance, maxPlies: Int): List<ExcursionPly> {
         val line = missedLine(a) ?: return emptyList()
         val start = positionsBefore[a.ply - 1]
         val payoffTarget = max(tactic.materialSwing, MIN_PAYOFF_CP)
         val out = ArrayList<ExcursionPly>()
         var pos = start
         for (uci in line.uci) {
-            if (out.size >= MAX_EXCURSION_PLIES) break
+            if (out.size >= maxPlies) break
             val move = SpokenChess.moveOrNull(pos, uci) ?: break
             val after = pos.makeMove(move)
             out.add(
@@ -883,9 +1271,13 @@ private class ScriptBuilder(
         val last = plies.last()
         val start = plies.first().before
         val winner = tactic.byColor
-        val gain = ExchangeEvaluator.netGain(start, last.after, winner)
+        // Settled: a line that stops right after a capture is not credited with what is taken back.
+        val gain = ExchangeEvaluator.settledGain(start, last.after, winner)
         val sb = StringBuilder()
-        sb.append(say(Sentence.PayoffLead))
+        // What the line delivers is only said when the board proves it: a mate, material netted, or
+        // one of the outcomes payoffKind can read off the final position. A line that does none of
+        // these used to end "X has invested material in the attack" or "X ends up completely on
+        // top", which nothing in the data supports; it now says only that the line ends (spec 6.1).
         when {
             last.after.isCheckmate() -> sb.append(say(Sentence.PayoffMate((plies.size + 1) / 2)))
             gain >= MIN_PAYOFF_CP -> sb.append(say(Sentence.PayoffMaterial(subj(winner), NarrationVocabulary.materialGain(gain))))
@@ -893,8 +1285,10 @@ private class ScriptBuilder(
         }
         val mate = a.mateInBefore
         if (!last.after.isCheckmate() && mate != null && abs(mate) in 1..8) {
-            sb.append(' ').append(say(Sentence.MateBehindIt(abs(mate))))
+            if (sb.isNotEmpty()) sb.append(' ')
+            sb.append(say(Sentence.MateBehindIt(abs(mate))))
         }
+        sb.insert(0, say(Sentence.PayoffLead))
         add(
             kind = SegmentKind.MISSED_TACTIC,
             ply = a.ply,
@@ -925,9 +1319,11 @@ private class ScriptBuilder(
         tactic.type == TacticType.PASSED_PAWN_BREAKTHROUGH -> PayoffKind.PASSED_PAWN
         gain > 0 -> PayoffKind.SMALL_MATERIAL
         finalPosition.isInCheck(tactic.byColor.opposite()) -> PayoffKind.KING_UNDER_FIRE
-        tactic.type == TacticType.MATE_NET -> PayoffKind.MATING_NET
-        gain <= -MIN_PAYOFF_CP -> PayoffKind.INVESTED_MATERIAL
-        else -> PayoffKind.DECISIVE_ADVANTAGE
+        // The detector gives a mate motif confidence 0.95 only when the engine's line ends in mate.
+        tactic.type == TacticType.MATE_NET && tactic.confidence >= FOUND_TACTIC_CONFIDENCE -> PayoffKind.MATING_NET
+        // Neither "has invested material in the attack" nor "ends up completely on top" can be
+        // proved from the boards, so the line is simply said to end.
+        else -> PayoffKind.LINE_ENDS
     }
 
     /** Back on the real board, still frozen, pointing at the move that is about to be played. */
@@ -1079,11 +1475,14 @@ private class ScriptBuilder(
 
         val sb = StringBuilder()
         sb.append(say(Sentence.OutroLead))
-        sb.append(say(Sentence.OutroAccuracy(whiteLabel, fmt1(w.accuracy), blackLabel, fmt1(b.accuracy)))).append(' ')
-        sb.append(say(Sentence.OutroRatings(w.estimatedRating, b.estimatedRating))).append(' ')
-        sb.append(countsSentence(whiteLabel, w)).append(' ')
-        sb.append(countsSentence(blackLabel, b))
-        if (w.lowConfidence || b.lowConfidence) {
+        sb.append(say(Sentence.OutroAccuracy(whiteLabel, fmt1(w.accuracy), blackLabel, fmt1(b.accuracy))))
+        if (trim < 2) {
+            sb.append(' ').append(say(Sentence.OutroRatings(w.estimatedRating, b.estimatedRating)))
+            sb.append(' ').append(countsSentence(whiteLabel, w))
+            sb.append(' ').append(countsSentence(blackLabel, b))
+        }
+        // The caveat is about the rating estimates: when the budget has taken those out, it goes too.
+        if (trim < 2 && (w.lowConfidence || b.lowConfidence)) {
             sb.append(' ').append(say(Sentence.ShortGameCaveat))
         }
 
@@ -1091,12 +1490,13 @@ private class ScriptBuilder(
             kind = SegmentKind.OUTRO_SUMMARY,
             ply = null,
             narration = sb.toString(),
-            caption = say(Sentence.CaptionOutro(fmt1(w.accuracy), w.estimatedRating, fmt1(b.accuracy), b.estimatedRating)),
+            caption = say(Sentence.CaptionOutro(accuracyWhole(w.accuracy), w.estimatedRating, accuracyWhole(b.accuracy), b.estimatedRating)),
             board = BoardDirective.Card(
                 heading = say(Sentence.CardFinalNumbersHeading),
                 lines = listOf(
-                    say(Sentence.CardFinalPlayerLine(whiteLabel, fmt1(w.accuracy), w.estimatedRating)),
-                    say(Sentence.CardFinalPlayerLine(blackLabel, fmt1(b.accuracy), b.estimatedRating)),
+                    // Names are bidi-isolated so a Hebrew name cannot reorder the numbers around it.
+                    say(Sentence.CardFinalPlayerLine(isolate(whiteLabel), accuracyWhole(w.accuracy), w.estimatedRating)),
+                    say(Sentence.CardFinalPlayerLine(isolate(blackLabel), accuracyWhole(b.accuracy), b.estimatedRating)),
                     say(
                         Sentence.CardFinalCountsLine(
                             count(w, MoveClassification.BLUNDER), count(b, MoveClassification.BLUNDER),
@@ -1119,12 +1519,16 @@ private class ScriptBuilder(
     }
 
     private fun outroLessons() {
-        val lessons = buildLessons()
+        val lessons = when {
+            trim >= 5 -> emptyList()
+            trim >= 1 -> buildLessons().take(1)
+            else -> buildLessons()
+        }
         lessons.forEachIndexed { i, text ->
             add(
                 kind = SegmentKind.OUTRO_LESSONS,
                 ply = null,
-                narration = if (i == 0) "${say(Sentence.LessonLead)}$text" else text,
+                narration = if (i == 0) "${say(Sentence.LessonLead(lessons.size))}$text" else text,
                 caption = say(Sentence.CaptionTakeaway(i + 1, lessons.size)),
                 board = BoardDirective.Card(say(Sentence.CardWorkOnHeading), listOf(text))
             )
@@ -1158,7 +1562,7 @@ private class ScriptBuilder(
             // The video stays in the game: a textbook detour would break the story and the
             // running time, so the reference example is *offered*, by name, and lives in the
             // report where the learner can step through it at their own pace (ANALYSIS_SPEC §10).
-            val offer = if (TacticReferenceLibrary.hasReference(type)) " " + say(Sentence.TextbookOffer(type)) else ""
+            val offer = if (trim < 1 && TacticReferenceLibrary.hasReference(type)) " " + say(Sentence.TextbookOffer(type)) else ""
             val lead = if (instances.size >= 2) {
                 say(Sentence.LessonRepeatedMiss(you, type, instances.size, squares))
             } else {
@@ -1479,6 +1883,16 @@ private class ScriptBuilder(
     private fun cap(s: String): String =
         if (s.isEmpty()) s else s[0].uppercaseChar() + s.substring(1)
 
+    /**
+     * An accuracy as the Summary screen writes it: whole percent (`"%.0f"`). Every accuracy printed ON A
+     * CARD goes through this; the spoken sentences keep one decimal. `roundToInt` and `%.0f` agree on
+     * every value (both round half up; the app's `CardTextTest` sweeps 0..100 to prove it).
+     */
+    private fun accuracyWhole(v: Double): String = v.roundToInt().toString()
+
+    /** First-strong isolate .. pop: the name keeps its own direction inside the line it is printed in. */
+    private fun isolate(text: String): String = "\u2068$text\u2069"
+
     private fun fmt1(v: Double): String {
         val scaled = (v * 10.0).roundToInt()
         return "${scaled / 10}.${abs(scaled % 10)}"
@@ -1498,8 +1912,26 @@ private class ScriptBuilder(
 
     private companion object {
 
-        /** Spec section 6's cap, applied to the spoken detour as well as the on-screen one. */
+        /** Between the parts of a one-line card subtitle ("1-0 · 17 moves · Philidor Defense (C41)"). */
+        const val CARD_SEPARATOR = " · "
+
+        /** Spec section 6's cap, applied to the spoken detour of a FULL moment. */
         const val MAX_EXCURSION_PLIES = 8
+
+        /** ANALYSIS_SPEC 9.7: a DWELL moment may show a variation, but only a short one. */
+        const val DWELL_EXCURSION_PLIES = 4
+
+        /** ANALYSIS_SPEC 9.7: the most FULL (puzzle plus walked line) moments in one game. */
+        const val MAX_FULL_MOMENTS = 3
+
+        /** ANALYSIS_SPEC 9.7: a brilliancy ranks for a FULL slot as if it were a blunder of this loss. */
+        const val BRILLIANT_DRAMA = 25.0
+
+        /** ANALYSIS_SPEC 9.7: a found tactic earns a DWELL beat only when the engine confirmed it. */
+        const val FOUND_TACTIC_CONFIDENCE = 0.95
+
+        /** ANALYSIS_SPEC 9.7: a missed tactic is worth a puzzle once it wins at least this much. */
+        const val PUZZLE_MIN_SWING_CP = 150
 
         /** Below this, a swing is noise rather than a realised material payoff. */
         const val MIN_PAYOFF_CP = 100

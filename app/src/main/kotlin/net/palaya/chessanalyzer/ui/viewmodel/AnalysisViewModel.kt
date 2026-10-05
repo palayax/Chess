@@ -19,13 +19,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.ChessAnalyzerApplication
 import net.palaya.chessanalyzer.data.AnalysisService
+import net.palaya.chessanalyzer.data.FirstRunSetup
 import net.palaya.chessanalyzer.data.GameRepository
+import net.palaya.chessanalyzer.data.mapper.applySideToCommentary
+import net.palaya.chessanalyzer.data.mapper.toCoreColor
 import net.palaya.chessanalyzer.data.mapper.toHeader
 import net.palaya.chessanalyzer.data.mapper.toMoveRecord
 import net.palaya.chessanalyzer.data.mapper.toSequenceViews
 import net.palaya.chessanalyzer.data.mapper.toUiColor
 import net.palaya.chessanalyzer.data.mapper.toUiReport
-import net.palaya.chessanalyzer.engine.EngineUpdateInfo
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
@@ -33,32 +35,30 @@ import net.palaya.chessanalyzer.ui.model.GameReport
 import net.palaya.chessanalyzer.ui.model.ImportedGame
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings
-import net.palaya.chessanalyzer.ui.model.NeuralModelUiState
 import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
+import net.palaya.chessanalyzer.ui.model.PieceColor
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
+import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.resolveSide
+import net.palaya.chessanalyzer.ui.model.usernameToRemember
+import net.palaya.chessanalyzer.core.analysis.CommentaryGenerator
 import net.palaya.chessanalyzer.core.analysis.GameReport as CoreGameReport
+import net.palaya.chessanalyzer.core.analysis.PracticeSelector
+import net.palaya.chessanalyzer.core.analysis.PracticeSet
 import net.palaya.chessanalyzer.core.analysis.TacticSimulation
 import net.palaya.chessanalyzer.core.chess.Color as CoreColor
 import net.palaya.chessanalyzer.core.narration.NarrationOptions
-import net.palaya.chessanalyzer.core.narration.cloud.GoogleCloudTtsProtocol
-import net.palaya.chessanalyzer.core.narration.cloud.GoogleCloudVoice
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.core.narration.VideoScriptGenerator
 import net.palaya.chessanalyzer.ui.model.AppLocales
 import net.palaya.chessanalyzer.core.narration.NarrationLocales
 import net.palaya.chessanalyzer.core.pgn.PgnGame
-import net.palaya.chessanalyzer.video.ConnectivityNetworkCostProbe
-import net.palaya.chessanalyzer.video.NetworkCostProbe
-import net.palaya.chessanalyzer.video.decideAutoVoice
-import net.palaya.chessanalyzer.video.CloudKeyCheck
-import net.palaya.chessanalyzer.video.GoogleCloudTtsProvider
 import net.palaya.chessanalyzer.video.NarrationProviderSelection
 import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.NarrationVoiceProvider
 import net.palaya.chessanalyzer.video.NeuralTtsProvider
 import net.palaya.chessanalyzer.video.selectNarrationProvider
-import net.palaya.chessanalyzer.video.ProvisioningResult
-import net.palaya.chessanalyzer.video.VoiceModelProvisioner
+import net.palaya.chessanalyzer.video.BundledVoiceInstaller
 
 /**
  * Owns the real import -> analyze -> review -> report flow, replacing the placeholder
@@ -66,14 +66,14 @@ import net.palaya.chessanalyzer.video.VoiceModelProvisioner
  * previously stood in for it. Held at the nav-host level via `viewModel()` so it (and its
  * `viewModelScope`) survive configuration changes independently of any one screen.
  *
- * The single [net.palaya.chessanalyzer.data.EngineController] and its net-download gate live
+ * The single [net.palaya.chessanalyzer.data.EngineController] and its net gate live
  * one level up on [ChessAnalyzerApplication] (see that class), not here — this class only
  * orchestrates calls into it via [AnalysisService].
  */
 class AnalysisViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as ChessAnalyzerApplication
-    private val analysisService = AnalysisService(application, app.engineController, app.gameRepository)
+    private val analysisService = AnalysisService(application, app.engineController, app.gameRepository, app.firstRunSetup)
 
     val settings: StateFlow<EngineSettings> = app.settingsRepository.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, EngineSettings())
@@ -101,132 +101,31 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private val voiceModelProvisioner: VoiceModelProvisioner get() = app.voiceModelProvisioner
-
-    private val _neuralModelState = MutableStateFlow(NeuralModelUiState())
-    val neuralModelState: StateFlow<NeuralModelUiState> = _neuralModelState
-
-    /** Cheap disk check — call whenever Settings opens, same pattern as [refreshNarrationStorageBytes]. */
-    fun refreshNeuralModelState() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val installed = NeuralVoiceTier.entries.filter { voiceModelProvisioner.isInstalled(it) }.toSet()
-            val sizes = NeuralVoiceTier.entries.associateWith { voiceModelProvisioner.installedSizeBytes(it) }
-            _neuralModelState.value = _neuralModelState.value.copy(installedTiers = installed, installedSizeBytes = sizes)
-        }
-    }
-
-    /**
-     * Downloads+verifies+extracts [tier]'s model (see [VoiceModelProvisioner.ensureModel]). On
-     * success, if the user has never picked a provider themselves, this promotes them to the
-     * neural voice automatically — it is strictly better than device TTS at no cost, which is the
-     * whole point of shipping it. A user who has ever explicitly picked a provider (including
-     * explicitly picking Device again) is never overridden: that is what
-     * [net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings.providerExplicitlyChosen] records.
-     * Checking `provider == DEVICE` instead would be wrong — DEVICE is also the un-chosen default,
-     * so it cannot tell a deliberate choice apart from no choice at all.
-     */
-    fun downloadNeuralModel(tier: NeuralVoiceTier) {
-        if (_neuralModelState.value.downloadingTier != null) return
-        _neuralModelState.value = _neuralModelState.value.copy(downloadingTier = tier, downloadProgress = 0f, lastError = null)
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = voiceModelProvisioner.ensureModel(tier) { fraction ->
-                _neuralModelState.value = _neuralModelState.value.copy(downloadProgress = fraction)
-            }
-            when (result) {
-                is ProvisioningResult.Success -> {
-                    // Read persisted settings, not the StateFlow: it is seeded with a default
-                    // NarrationVoiceSettings() until DataStore's first emission arrives, and that
-                    // seed says providerExplicitlyChosen=false — which would read as "no choice"
-                    // and override a user who had in fact chosen one.
-                    if (!app.narrationSettingsRepository.current().providerExplicitlyChosen) {
-                        app.narrationSettingsRepository.setNeuralTier(tier)
-                        app.narrationSettingsRepository.setProviderAutomatically(NarrationProviderChoice.NEURAL)
-                    }
-                }
-                is ProvisioningResult.Failure ->
-                    _neuralModelState.value = _neuralModelState.value.copy(lastError = result.reason)
-                ProvisioningResult.Cancelled -> Unit
-            }
-            _neuralModelState.value = _neuralModelState.value.copy(downloadingTier = null, downloadProgress = 0f)
-            refreshNeuralModelState()
-        }
-    }
-
-    /**
-     * Reads what the current connection costs. Swappable so the metered gate in
-     * [ensureDefaultNeuralVoice] can be exercised on both sides of the boundary by an instrumented
-     * test — an emulator cannot be made to report a metered network, and a gate that has only
-     * ever run on the unmetered path is not a verified gate.
-     */
-    @Volatile
-    var networkCostProbe: NetworkCostProbe = ConnectivityNetworkCostProbe(app)
-
-    /**
-     * Makes the neural voice the *effective* default: the first time narration is actually needed,
-     * provision a model in the background and let [downloadNeuralModel]'s promotion select it.
-     * Without this the neural voice is only ever reachable by a user who goes looking for it in
-     * Settings, so the shipped default would in practice remain the robotic device voice.
-     *
-     * **Which model depends on what the connection costs** — see [decideAutoVoice]. Kokoro is the
-     * intended default but it is ~98.5 MB, on top of the ~98 MB Stockfish net the app already
-     * fetches unprompted; auto-pulling that over cellular is not a bill the user agreed to, so the
-     * automatic path only reaches for it on an unmetered network and tops out at Piper's ~20 MB
-     * otherwise. Narration keeps working throughout: whatever tier is already installed is
-     * promoted immediately, and the device voice covers the case where none is.
-     *
-     * Does nothing when the user has already chosen a provider themselves, or when a download is
-     * already running — so it is safe to call on every entry to the video screen.
-     */
-    fun ensureDefaultNeuralVoice() {
-        if (_neuralModelState.value.downloadingTier != null) return
-        viewModelScope.launch(Dispatchers.IO) {
-            // Deliberately reads the persisted value rather than narrationVoiceSettings.value:
-            // that StateFlow is seeded with a default NarrationVoiceSettings() (which reports
-            // providerExplicitlyChosen=false) until DataStore's first emission arrives. This runs
-            // from a LaunchedEffect on entering the video screen, which on a cold start can easily
-            // win that race — and acting on the seed would download a model and switch the voice
-            // for a user who had explicitly chosen the device voice. current() suspends until the
-            // real stored value is available.
-            val stored = app.narrationSettingsRepository.current()
-            if (stored.providerExplicitlyChosen) return@launch
-
-            val installed = NeuralVoiceTier.entries.filter { voiceModelProvisioner.isInstalled(it) }.toSet()
-            val decision = decideAutoVoice(networkCostProbe.current(), installed)
-            Log.i(TAG, "ensureDefaultNeuralVoice: ${decision.reason} (installed=$installed)")
-
-            decision.promoteTo?.let { tier ->
-                // setProviderAutomatically, never setProvider: an automatic switch must not latch
-                // providerExplicitlyChosen, or the app would record its own decision as the user's.
-                if (stored.provider != NarrationProviderChoice.NEURAL || stored.neuralTier != tier) {
-                    app.narrationSettingsRepository.setNeuralTier(tier)
-                    app.narrationSettingsRepository.setProviderAutomatically(NarrationProviderChoice.NEURAL)
-                }
-            }
-            decision.download?.let { tier -> downloadNeuralModel(tier) }
-        }
-    }
-
-    fun cancelNeuralModelDownload() {
-        voiceModelProvisioner.cancel()
-    }
-
-    /** The user's own explicit "delete" action from Settings — reclaims disk space on purpose. */
-    fun deleteNeuralModel(tier: NeuralVoiceTier) {
-        viewModelScope.launch(Dispatchers.IO) {
-            voiceModelProvisioner.delete(tier)
-            refreshNeuralModelState()
-        }
-    }
-
-    fun setNeuralTier(tier: NeuralVoiceTier) {
-        viewModelScope.launch { app.narrationSettingsRepository.setNeuralTier(tier) }
-    }
+    /** The bundled voice, installed once by [FirstRunSetup] before the first analysis. */
+    private val voiceInstaller: BundledVoiceInstaller get() = app.voiceInstaller
 
     private val _progress = MutableStateFlow(AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE))
     val progress: StateFlow<AnalysisProgress> = _progress
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage
+    /**
+     * Why the last analysis failed, or null. A reason rather than a message: the progress screen
+     * maps it to a string resource and shows it inline (see `AnalysisProgressScreen`), so no raw
+     * exception text ever reaches the user.
+     */
+    private val _error = MutableStateFlow<AnalysisService.Failure?>(null)
+    val error: StateFlow<AnalysisService.Failure?> = _error
+
+    /**
+     * Text typed or pasted into Home's paste field. Lives here, not in the screen, so it survives
+     * a failed analysis (the user comes back to it and can fix the moves) and is cleared only
+     * once an analysis of it has actually succeeded.
+     */
+    private val _pasteDraft = MutableStateFlow("")
+    val pasteDraft: StateFlow<String> = _pasteDraft
+
+    fun setPasteDraft(text: String) {
+        _pasteDraft.value = text
+    }
 
     private val _recentGames = MutableStateFlow<List<RecentGameSummary>>(emptyList())
     val recentGames: StateFlow<List<RecentGameSummary>> = _recentGames
@@ -244,12 +143,21 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     private data class CoreArtifacts(
         val game: PgnGame,
+        /** The report with its commentary written for the current side (see [applySideToCommentary]). */
         val report: CoreGameReport,
         val userColor: CoreColor?,
         val header: net.palaya.chessanalyzer.ui.model.GameHeader,
+        /** The user answered "Not me" on the Summary; [userColor] is then null by construction. */
+        val sideNotMe: Boolean = false,
     )
     private val coreArtifacts = HashMap<String, CoreArtifacts>()
     private val videoScripts = HashMap<String, VideoScript>()
+
+    /**
+     * The narration language for text written into a report (`GameReport.summarySentence`): the
+     * same resolution the narrated video uses, so the two never disagree.
+     */
+    private fun narrationStrings() = NarrationLocales.forTag(AppLocales.narrationTag(app, settings.value.language))
 
     /**
      * The UI report for [gameId] gated at [tacticThresholdCp] (ANALYSIS_SPEC §9.6). [reports]
@@ -261,8 +169,52 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val artifacts = coreArtifacts[gameId] ?: return reports[gameId]
         val cached = reports[gameId]
         if (cached != null && cached.tacticThresholdCp == tacticThresholdCp) return cached
-        return artifacts.report.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), tacticThresholdCp)
+        return artifacts.report.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), tacticThresholdCp, artifacts.sideNotMe, narrationStrings())
             .also { reports[gameId] = it }
+    }
+
+    /**
+     * The Summary's "Which side were you?" answer for [gameId]: [color] is the side the user
+     * played. Re-maps the in-memory `:core` artifacts with that colour (no engine work, so the
+     * "you / your opponent" framing and the buckets update at once), remembers the answer in
+     * [GameRepository] so reopening the game keeps it, and, when the Settings username is still
+     * empty, fills it with that side's PGN name so later games from the same account are
+     * recognised without visiting Settings.
+     */
+    fun setUserColorForGame(gameId: String, color: PieceColor) = setUserSideForGame(gameId, SideChoice.of(color))
+
+    /** "Not me": nobody in this game is the user. Neutral White/Black framing, Practise hidden. */
+    fun setNotMeForGame(gameId: String) = setUserSideForGame(gameId, SideChoice.NOT_ME)
+
+    fun setUserSideForGame(gameId: String, choice: SideChoice) {
+        val artifacts = coreArtifacts[gameId] ?: return
+        val sideColor = choice.color?.toCoreColor()
+        // The card texts and the key moments are written for a side ("you" / "your opponent"), so
+        // they are written again for this one, from the stored annotations (no engine work), and the
+        // move cards are rebuilt from them. "Not me" and no side keep the neutral colour wording.
+        val game = games[gameId]
+        val (report, rebuilt) = if (game != null) {
+            applySideToCommentary(game, artifacts.report, sideColor)
+        } else {
+            CommentaryGenerator().regenerate(artifacts.report, sideColor) to null
+        }
+        if (rebuilt != null) games[gameId] = rebuilt
+        val updated = artifacts.copy(report = report, userColor = sideColor, sideNotMe = choice == SideChoice.NOT_ME)
+        coreArtifacts[gameId] = updated
+        // The video script is written "to you" or "to White" depending on the side, and its cache
+        // key does not include it, so a cached script for this game would now be stale.
+        videoScripts.keys.removeAll { it.startsWith("$gameId:") }
+        val threshold = reports[gameId]?.tacticThresholdCp ?: 0
+        reports[gameId] = updated.report.toUiReport(updated.header, updated.userColor?.toUiColor(), threshold, updated.sideNotMe, narrationStrings())
+        viewModelScope.launch {
+            app.gameRepository.load(gameId)?.let { stored ->
+                app.gameRepository.save(stored.copy(userColorName = choice.storedName))
+            }
+            val current = app.settingsRepository.current()
+            usernameToRemember(updated.header, choice, current.username)?.let { name ->
+                app.settingsRepository.save(current.copy(username = name))
+            }
+        }
     }
 
     /**
@@ -292,6 +244,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     /** Registers PGN text to be analyzed once the caller navigates to the AnalysisProgress route. */
     fun registerPendingImport(gameId: String, pgnText: String) {
         pendingPgnByGameId[gameId] = pgnText
+        // A new game must not open on the previous game's error state.
+        _error.value = null
     }
 
     /** Re-opens an already-imported game (its engine evals are cached, so this resolves fast). */
@@ -300,6 +254,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             val stored = app.gameRepository.load(gameId)
             if (stored != null) {
                 pendingPgnByGameId[gameId] = stored.pgnText
+                _error.value = null
                 onReady()
             }
         }
@@ -312,8 +267,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * since only one [net.palaya.chessanalyzer.engine.StockfishEngine] exists for the app.
      */
     fun runAnalysis(gameId: String, onComplete: () -> Unit) {
+        _error.value = null
         val pgnText = pendingPgnByGameId[gameId] ?: run {
-            _errorMessage.value = "Nothing to analyze — the game text was lost. Please import it again."
+            _error.value = AnalysisService.Failure.GAME_TEXT_LOST
             return
         }
         if (games.containsKey(gameId)) {
@@ -321,7 +277,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             return
         }
         analysisJob?.cancel()
-        _errorMessage.value = null
+        // A retry starts from the top; without this the screen would flash the previous run's
+        // last "Move 12 of 34" until the first new progress update arrives.
+        _progress.value = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
         analysisJob = viewModelScope.launch(Dispatchers.Default) {
             val currentSettings = settings.value
             // The tactic significance gate (ANALYSIS_SPEC §9.6) has to be *correct*, so read the
@@ -336,8 +294,18 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             when (outcome) {
                 is AnalysisService.Outcome.Success -> {
                     val header = outcome.game.toHeader()
+                    // The username auto-detection only covers a user who set a name. An answer to the
+                    // Summary's "Which side were you?" from an earlier visit to this game wins over
+                    // it (explicit, per game), so reopening a game keeps "you" / "Not me".
+                    val side = resolveSide(
+                        stored = SideChoice.fromStored(app.gameRepository.load(gameId)?.userColorName),
+                        detected = outcome.userColor?.toUiColor(),
+                    )
+                    val sideColor = side.color?.toCoreColor()
+                    // The analysis wrote the card texts for the side it detected; the side that wins
+                    // may differ ("Not me", or an earlier answer), so the texts are written for it.
                     val moveRecords = outcome.report.annotations.map { it.toMoveRecord() }
-                    val importedGame = ImportedGame(
+                    val unsided = ImportedGame(
                         id = gameId,
                         header = header,
                         moves = moveRecords,
@@ -346,12 +314,15 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                         multiPv = currentSettings.multiPv,
                         sequences = outcome.report.annotations.toSequenceViews(tacticThresholdCp),
                     )
+                    val (sidedReport, importedGame) =
+                        if (sideColor == outcome.userColor) outcome.report to unsided
+                        else applySideToCommentary(unsided, outcome.report, sideColor)
                     games[gameId] = importedGame
-                    // Pass the detected user colour through so the Game Report can frame the four
+                    // Pass the user colour through so the Game Report can frame the four
                     // tactic buckets as "you"/"your opponent" rather than falling back to
                     // "White"/"Black" — the buckets are the feature the user explicitly asked for.
-                    reports[gameId] = outcome.report.toUiReport(header, outcome.userColor?.toUiColor(), tacticThresholdCp)
-                    coreArtifacts[gameId] = CoreArtifacts(outcome.game, outcome.report, outcome.userColor, header)
+                    reports[gameId] = sidedReport.toUiReport(header, side.color, tacticThresholdCp, side == SideChoice.NOT_ME, narrationStrings())
+                    coreArtifacts[gameId] = CoreArtifacts(outcome.game, sidedReport, sideColor, header, side == SideChoice.NOT_ME)
                     app.gameRepository.save(
                         GameRepository.StoredGame(
                             id = gameId,
@@ -363,10 +334,11 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                             plyCount = moveRecords.size,
                             depth = currentSettings.depth,
                             multiPv = currentSettings.multiPv,
-                            userColorName = outcome.userColor?.name,
+                            userColorName = side.storedName,
                         )
                     )
                     refreshRecentGames()
+                    _pasteDraft.value = ""
                     // The analysis loop runs on Dispatchers.Default, but [onComplete] drives
                     // NavController, and NavController touches LifecycleRegistry, which throws
                     // "setCurrentState must be called on the main thread" off the main thread.
@@ -374,8 +346,14 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     // it finished — the one path a user always takes.
                     withContext(Dispatchers.Main) { onComplete() }
                 }
-                is AnalysisService.Outcome.ParseError -> _errorMessage.value = outcome.message
-                is AnalysisService.Outcome.EngineError -> _errorMessage.value = outcome.message
+                is AnalysisService.Outcome.ParseError -> {
+                    Log.w(TAG, "analysis failed: ${outcome.reason} ${outcome.detail.orEmpty()}")
+                    _error.value = outcome.reason
+                }
+                is AnalysisService.Outcome.EngineError -> {
+                    Log.w(TAG, "analysis failed: ${outcome.reason} ${outcome.detail.orEmpty()}")
+                    _error.value = outcome.reason
+                }
                 AnalysisService.Outcome.Cancelled -> Unit
             }
         }
@@ -386,7 +364,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearError() {
-        _errorMessage.value = null
+        _error.value = null
     }
 
     fun updateSettings(newSettings: EngineSettings) {
@@ -409,96 +387,42 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * turns the selection into a live object.
      */
     fun buildNarrationProvider(): NarrationVoiceProvider? =
-        when (val selection = selectNarrationProvider(narrationVoiceSettings.value, voiceModelProvisioner::isInstalled)) {
+        when (val selection = selectNarrationProvider(narrationVoiceSettings.value) { voiceInstaller.isInstalled() }) {
             NarrationProviderSelection.Device -> null
             is NarrationProviderSelection.Neural ->
-                NeuralTtsProvider(tier = selection.tier, modelDir = voiceModelProvisioner.modelDir(selection.tier))
-            is NarrationProviderSelection.Cloud ->
-                GoogleCloudTtsProvider(apiKey = selection.apiKey, voice = selection.voice, transport = app.cloudTtsTransport)
+                NeuralTtsProvider(tier = selection.tier, modelDir = voiceInstaller.modelDir)
         }
 
-    // ---- Google Cloud voice: the user's own key, validated with a real request before it is kept ----
+    // ---- Practise your own mistakes (docs/PRACTICE_DESIGN.md §4, §7.2) ----
 
-    /** State of the setup wizard's "Test and save" — see [testAndSaveCloudKey]. */
-    sealed interface CloudKeyCheckState {
-        data object Idle : CloudKeyCheckState
-        data object Checking : CloudKeyCheckState
-        /** The key synthesized real audio; it has been saved and the Cloud voice selected. */
-        data class Saved(val voice: GoogleCloudVoice, val durationMs: Long) : CloudKeyCheckState
-        data class Rejected(val message: String) : CloudKeyCheckState
-    }
-
-    private val _cloudKeyCheck = MutableStateFlow<CloudKeyCheckState>(CloudKeyCheckState.Idle)
-    val cloudKeyCheck: StateFlow<CloudKeyCheckState> = _cloudKeyCheck
-
-    fun resetCloudKeyCheck() {
-        _cloudKeyCheck.value = CloudKeyCheckState.Idle
-    }
-
-    fun setCloudVoice(voice: GoogleCloudVoice) {
-        viewModelScope.launch { app.narrationSettingsRepository.setCloudVoice(voice) }
-    }
+    /** The selector's answer per (game, side). Pure `:core`, no engine call, so caching is only about speed. */
+    private val practiceSets = HashMap<String, PracticeSet>()
 
     /**
-     * Validates [rawKey] by synthesizing a couple of words through the real path (see
-     * [GoogleCloudTtsProvider.validateKey]); only a key that produced audio is saved, and saving
-     * it also selects the Cloud voice — the user just walked through a six-step wizard to get
-     * here, which is as explicit a choice as Settings' radio button. A rejected key is never
-     * stored, so a typo can't leave the app configured for a voice that fails every sentence.
+     * Plies the user solved in Practise, per game. In memory only: persistence is P5, so a restart
+     * forgets it. Snapshot state, so the Summary's "N solved" updates when Practise marks a ply.
      */
-    fun testAndSaveCloudKey(rawKey: String) {
-        if (_cloudKeyCheck.value is CloudKeyCheckState.Checking) return
-        val key = GoogleCloudTtsProtocol.normalizeApiKey(rawKey)
-        _cloudKeyCheck.value = CloudKeyCheckState.Checking
-        viewModelScope.launch(Dispatchers.IO) {
-            val voice = app.narrationSettingsRepository.current().cloudVoice
-            val scratch = java.io.File(getApplication<Application>().cacheDir, "cloud_key_check")
-            val result = GoogleCloudTtsProvider.validateKey(key, voice, app.cloudTtsTransport, scratch)
-            _cloudKeyCheck.value = when (result) {
-                is CloudKeyCheck.Valid -> {
-                    app.narrationSettingsRepository.setApiKey(key)
-                    app.narrationSettingsRepository.setProvider(NarrationProviderChoice.CLOUD)
-                    CloudKeyCheckState.Saved(voice, result.durationMs)
-                }
-                is CloudKeyCheck.Invalid -> CloudKeyCheckState.Rejected(result.message)
-            }
-        }
-    }
+    val solvedPuzzlePlies = mutableStateMapOf<String, Set<Int>>()
 
     /**
-     * Forgets the key. If the Cloud voice was selected, the choice falls back to the on-device
-     * neural voice (or Device if no model is installed) so Settings never shows a selected option
-     * that cannot work.
+     * The practice positions for [gameId], or null when the game is not in memory. The side comes
+     * from the **UI report** ([reports]), so it follows the Summary's side chooser the moment the
+     * user answers it (the answer swaps the stored report), and the result is cached per game and
+     * side. "Not me" and "unknown" both have no colour and give [PracticeSet.NoSide]; the Summary
+     * tells them apart through `GameReport.sideChoice`.
      */
-    fun removeCloudKey() {
-        viewModelScope.launch(Dispatchers.IO) {
-            app.narrationSettingsRepository.clearApiKey()
-            if (app.narrationSettingsRepository.current().provider == NarrationProviderChoice.CLOUD) {
-                val anyNeural = NeuralVoiceTier.entries.any { voiceModelProvisioner.isInstalled(it) }
-                app.narrationSettingsRepository.setProvider(if (anyNeural) NarrationProviderChoice.NEURAL else NarrationProviderChoice.DEVICE)
-            }
-            _cloudKeyCheck.value = CloudKeyCheckState.Idle
-        }
+    fun practiceSetFor(gameId: String): PracticeSet? {
+        val artifacts = coreArtifacts[gameId] ?: return null
+        val side = reports[gameId]?.userColor?.toCoreColor()
+        return practiceSets.getOrPut("$gameId:${side?.name}") { PracticeSelector.select(artifacts.report, side) }
     }
 
-    /**
-     * [preferred] if its model is on disk, otherwise any other installed tier, otherwise null.
-     * Kept separate from [buildNarrationProvider] so the preference order is one readable rule
-     * rather than a nested expression inside a `when`.
-     */
-    private fun installedTierPreferring(preferred: NeuralVoiceTier): NeuralVoiceTier? =
-        preferred.takeIf { voiceModelProvisioner.isInstalled(it) }
-            ?: NeuralVoiceTier.entries.firstOrNull { voiceModelProvisioner.isInstalled(it) }
+    /** The plies of [gameId] solved so far (empty when none). */
+    fun solvedPliesFor(gameId: String): Set<Int> = solvedPuzzlePlies[gameId].orEmpty()
 
-    fun checkForUpdates(onResult: (EngineUpdateInfo?) -> Unit) {
-        viewModelScope.launch {
-            val result = try {
-                app.engineController.checkForEngineUpdate()
-            } catch (e: Exception) {
-                null
-            }
-            onResult(result)
-        }
+    fun markSolved(gameId: String, ply: Int) {
+        val current = solvedPuzzlePlies[gameId].orEmpty()
+        if (ply !in current) solvedPuzzlePlies[gameId] = current + ply
     }
 
     /** Finds the [TacticSimulation] attached to a given ply of an already-analyzed game, if any. */
@@ -522,12 +446,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * Reads [narrationVoiceSettings]`.value` rather than suspending on the repository, which is
      * safe *here specifically*: this only scales a duration estimate that the real synthesized
      * durations later replace, so losing the StateFlow seed race costs a slightly-off estimate,
-     * not a wrong decision. Anything that has to be *correct* (the automatic-promotion gate) reads
-     * `narrationSettingsRepository.current()` instead — see [ensureDefaultNeuralVoice].
+     * not a wrong decision. Anything that has to be *correct* reads
+     * `narrationSettingsRepository.current()` instead.
      */
     suspend fun narrationOptionsForCurrentVoice(): NarrationOptions {
         val s = narrationVoiceSettings.value
-        val tier = if (s.provider == NarrationProviderChoice.NEURAL) installedTierPreferring(s.neuralTier) else null
+        val tier = s.neuralTier.takeIf { s.provider == NarrationProviderChoice.NEURAL && voiceInstaller.isInstalled() }
         // The significance threshold decides which moves get narrated at all, so unlike the wpm
         // estimate it has to be *correct* — read it from the repository rather than from the
         // eagerly-seeded `settings` StateFlow, which serves EngineSettings() until DataStore's

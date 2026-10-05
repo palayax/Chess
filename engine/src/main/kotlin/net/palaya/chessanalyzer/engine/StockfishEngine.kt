@@ -111,7 +111,7 @@ class StockfishEngine {
     }
 
     /**
-     * Points the engine at a downloaded NNUE net file (see [NetworkProvider]),
+     * Points the engine at a NNUE net file (see [BundledNetProvider]),
      * via the standard "EvalFile" UCI option.
      *
      * **This guard is not optional.** We build Stockfish with `NNUE_EMBEDDING_OFF`, so it has no

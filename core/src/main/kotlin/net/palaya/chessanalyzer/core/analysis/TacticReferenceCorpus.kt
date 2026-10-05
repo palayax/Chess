@@ -17,9 +17,9 @@ internal object TacticReferenceCorpus {
         ),
         TacticReference(
             type = TacticType.PAWN_FORK,
-            fen = "4k3/8/8/3n1b2/8/4P3/8/4K3 w - - 0 1",
+            fen = "4k3/8/8/3n1n2/8/4P3/8/4K3 w - - 0 1",
             solutionSan = listOf("e4"),
-            teachingPoint = "One pawn push attacks two pieces at once - the cheapest attacker always wins the exchange."
+            teachingPoint = "One pawn push attacks two pieces at once, and neither can take it - the cheapest attacker always wins the exchange."
         ),
         TacticReference(
             type = TacticType.PIN_ABSOLUTE,
