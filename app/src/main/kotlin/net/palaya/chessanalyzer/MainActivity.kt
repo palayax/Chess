@@ -1,11 +1,18 @@
 package net.palaya.chessanalyzer
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,7 +36,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // The app is always dark (ChessAnalyzerTheme(darkTheme = true)), so the system bars are told
+        // so: light icons on a transparent status bar, and the dark scrim behind 3-button navigation.
+        // The default (SystemBarStyle.auto) follows the SYSTEM theme and drew dark status icons and a
+        // light navigation-bar scrim over the dark UI whenever the phone was in light mode (seen on
+        // API 36, D1).
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(NAV_BAR_SCRIM),
+        )
         // Only on a genuine launch. A recreation (rotation, font scale, language) re-delivers the same
         // launch intent, and re-reading it would import the shared game a second time and push a
         // fresh analysis over whatever screen the user was on.
@@ -42,9 +57,18 @@ class MainActivity : ComponentActivity() {
 
             ChessAnalyzerTheme(darkTheme = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    // Edge to edge is enforced from targetSdk 35, and the window then also extends into
+                    // the display cutout. Every screen's Scaffold/TopAppBar handles the system bars,
+                    // but not a cutout on the SIDE (a phone in landscape), so the whole UI is kept out
+                    // of it here, once. windowInsetsPadding consumes what it pads, so a navigation bar
+                    // on the same side is not counted twice by the Scaffolds below. The Surface still
+                    // paints the background into the cutout area.
                     ChessAnalyzerNavHost(
                         pendingImportPgn = pendingImportPgn,
                         onPendingImportConsumed = { pendingImportPgn = null },
+                        modifier = Modifier.windowInsetsPadding(
+                            WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
+                        ),
                     )
                 }
             }
@@ -56,5 +80,10 @@ class MainActivity : ComponentActivity() {
         // singleTask launch mode routes re-shares/re-opens here instead of a new instance.
         setIntent(intent)
         pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+    }
+
+    private companion object {
+        /** Same translucent dark scrim androidx.activity uses by default for a dark navigation bar. */
+        val NAV_BAR_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }

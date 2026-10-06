@@ -13,11 +13,12 @@
       Video export runs in VideoExportService, a started foreground service, so it survives the
       user leaving the video screen or backgrounding the app (a full review takes many minutes).
 
-      targetSdk is 34 (see app/build.gradle.kts), so Android 14's typed-FGS rules apply: the
-      service must declare a foregroundServiceType AND hold the matching typed permission, or
-      startForeground() throws. `dataSync` is the applicable type at API 34 — the better-fitting
-      `mediaProcessing` type and its permission were only added in API 35 and cannot be compiled
-      against compileSdk 34.
+      Typed-FGS rules (Android 14+): the service must declare a foregroundServiceType AND hold the
+      matching typed permission, or startForeground() throws. The service declares BOTH types and
+      picks one at runtime (ExportForegroundServiceType): `mediaProcessing` on API 35+ (Android 15
+      added it for exactly this, transcoding/encoding media), `dataSync` on API 29-34 where
+      mediaProcessing does not exist. Both carry Android 15's 6-hour limit; the service implements
+      onTimeout to stop cleanly.
 
       POST_NOTIFICATIONS is a runtime permission from API 33. It is requested opportunistically
       and the export never depends on it: denying it only hides the progress notification, the
@@ -25,6 +26,7 @@
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -38,7 +40,8 @@
         android:supportsRtl="true"
         android:localeConfig="@xml/locales_config"
         android:theme="@style/Theme.ChessAnalyzer"
-        tools:targetApi="34">
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="36">
 
         <activity
             android:name=".MainActivity"
@@ -121,12 +124,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Owns the MP4 export coroutine outside any Activity/composition. See the permission
-             block above for why the type is dataSync rather than mediaProcessing. -->
+        <!-- Owns the MP4 export coroutine outside any Activity/composition. Both types are declared;
+             the one passed to startForeground() is chosen by SDK level (see the permission block). -->
         <service
             android:name=".video.VideoExportService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|mediaProcessing" />
 
         <!-- FileProvider for sharing generated game reports (PDF/PGN/PNG) out to other apps. -->
         <provider

@@ -54,14 +54,56 @@ conflict.
   `ClassNotFoundException` before a single test runs.
 - Release signing reads `keystore.properties` (gitignored) and falls back to unsigned when absent,
   so fresh clones still configure.
+- **Toolchain (D1, Google Play target API 36):** AGP **8.9.3** (the minimum line for compileSdk 36),
+  Gradle **8.11.1**, Kotlin **1.9.24** with Compose compiler 1.5.14 (unchanged; AGP 8.9 accepts it),
+  `compileSdk`/`targetSdk` **36**, minSdk 26, NDK **28.2.13676358** (r28c) in **both** `:engine` and `:app`.
+  `:app` compiles no C++ but needs `ndkVersion` anyway: AGP strips every packaged `.so` with that NDK's
+  `llvm-strip`, and with it unset AGP 8.9 looks for its own default NDK (27.0, not installed), prints
+  "Unable to strip the following libraries" and packages `libstockfish.so` at 17 MB instead of 1.6 MB.
+  AGP 8.9 also auto-installs build-tools 35.0.0 on first use.
+- **16 KB pages.** Every `.so` must have LOAD segments aligned to 16 KB (Play, targetSdk 35+). NDK r28
+  does it by default and `engine/src/main/cpp/CMakeLists.txt` also passes `-Wl,-z,max-page-size=16384`.
+  The sherpa-onnx 1.13.8 prebuilts (`libonnxruntime.so`, `libsherpa-onnx-*.so`) and DataStore's
+  `libdatastore_shared_counter.so` are already 0x4000. Check after any NDK or dependency change:
+  `llvm-readelf -lW <lib>.so` (Align 0x4000 on every LOAD) for each `.so` in the APK, and
+  `zipalign -c -P 16 -v 4 <apk>`.
+- **R8 is on for release** (`isMinifyEnabled` + `isShrinkResources`). Keep rules that matter:
+  `engine/consumer-rules.pro` pins `NativeBridge` and its `native` methods (the JNI symbols are
+  `Java_net_palaya_chessanalyzer_engine_NativeBridge_*`; rename either and every engine call dies with
+  UnsatisfiedLinkError); `app/proguard-rules.pro` keeps `com.k2fsa.sherpa.onnx.**` with all members (the
+  AAR ships an EMPTY `proguard.txt`, and its JNI reads config fields by name). `:app` uses no
+  kotlinx.serialization or reflection (org.json only). A new JNI library, or anything read by name from
+  native code or reflection, needs its own rule, and the release build must be run on a device, not
+  just compiled: a missing rule only fails at runtime.
+- **Foreground-service type.** `VideoExportService` declares `dataSync|mediaProcessing` and picks one at
+  runtime (`ExportForegroundServiceType`: mediaProcessing on API 35+). Call the platform
+  `Service.startForeground(id, n, type)`, **not** `ServiceCompat.startForeground`: androidx.core
+  1.13.1 masks the type to the Android 14 set and turns mediaProcessing into 0, which the platform
+  refuses ("FGS with type none"); the export then runs on silently without a foreground service.
+- **Edge to edge** is enforced at targetSdk 35+. A Scaffold `bottomBar` gets no insets of its own:
+  wrap its content in `navigationBarsPadding()` (Practise, Walkthrough, Video do). `MainActivity` keeps
+  the whole UI out of a side display cutout and forces dark system-bar styles (the app is always dark).
+- **bundletool** is not on the PATH: `java -jar tools/bundletool-all-1.18.3.jar` (gitignored `tools/`,
+  from github.com/google/bundletool releases, SHA-256 `a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29`).
+  Sizes per device: `build-apks --bundle=app/build/outputs/bundle/release/app-release.aab --output=x.apks`
+  then `get-size total --apks=x.apks --device-spec=<spec>.json` (see `docs/PUBLISHING.md`).
+- `assembleRelease` writes per-ABI APKs (`app-arm64-v8a-release.apk`, ...) plus
+  `app-universal-release.apk`; the ABI split is only enabled when an `assembleRelease` task is requested,
+  so debug builds still produce the single `app-debug.apk`.
 
 ## Emulator gotchas
 
 - **Be patient on first boot.** Under swiftshader an AVD can sit `offline` for 10+ minutes. It is
   usually working, not hung — check `qemu-system-*` CPU time, and use `-verbose -show-kernel` to
   watch zygote start before concluding it is stuck.
-- Prefer an API 34 `google_apis` x86_64 image. The API 36 `google_apis_playstore` image never came
-  online here.
+- Two AVDs: `chess34` (API 34 `google_apis` x86_64) and `chess36` (API 36 `google_apis` x86_64, Pixel 6,
+  4 GB RAM, 8 GB data; created in D1, cold boot under 2 min with WHPX). The API 36(.1)
+  `google_apis_playstore` image never came online here; use `google_apis`. Run the instrumented suites on
+  both: API 35+ behaviour (edge to edge, the mediaProcessing FGS type) only shows on `chess36`.
+- Edge-to-edge checks on a device: `cmd overlay enable-exclusive --category
+  com.android.internal.systemui.navbar.threebutton` (3-button bar, the strictest case) and `cmd overlay
+  enable com.android.internal.display.cutout.emulation.tall` (a cutout, on the side in landscape). Restore
+  with `...navbar.gestural` and `cmd overlay disable ...cutout.emulation.tall`.
 - **Git Bash mangles device paths.** `adb push x /data/local/tmp/` becomes
   `C:/Program Files/Git/data/local/tmp/`. Use `MSYS_NO_PATHCONV=1`, or run adb from PowerShell.
 - `connectedDebugAndroidTest` pushes a ~371 MB debug APK (the models are inside it) and the full `:app`

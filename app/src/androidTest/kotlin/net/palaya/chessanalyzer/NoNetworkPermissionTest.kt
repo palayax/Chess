@@ -59,6 +59,7 @@ class NoNetworkPermissionTest {
             setOf(
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                "android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING",
                 "android.permission.POST_NOTIFICATIONS",
             ),
             requested().filter { it.startsWith("android.permission.") }.toSet(),

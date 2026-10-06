@@ -138,6 +138,11 @@ else()
     message(FATAL_ERROR "Unsupported ANDROID_ABI for libstockfish: ${ANDROID_ABI}")
 endif()
 
+# 16 KB page-size support (Android 15+, required by Google Play for targetSdk 35+). NDK r28 already
+# aligns LOAD segments at 16 KB by default; this states it explicitly so an older NDK cannot quietly
+# produce a 4 KB-aligned library again. Verify with: llvm-readelf -lW libstockfish.so (Align 0x4000).
+target_link_options(stockfish PRIVATE "-Wl,-z,max-page-size=16384")
+
 # pthreads + the Android log/dl libs used by the JNI bridge.
 find_library(log-lib log)
 target_link_libraries(stockfish PRIVATE ${log-lib})

@@ -9,7 +9,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
@@ -47,11 +46,15 @@ import net.palaya.chessanalyzer.core.narration.VideoScript
  * (and able to cancel) via an ongoing notification.
  *
  * ## Foreground service type
- * `dataSync` (`FOREGROUND_SERVICE_TYPE_DATA_SYNC`). The app's `compileSdk`/`targetSdk` are both
- * **34**, so the typed permission `FOREGROUND_SERVICE_DATA_SYNC` is mandatory — Android 14 throws
- * from `startForeground()` for an untyped/unpermitted FGS. The arguably better-fitting
- * `mediaProcessing` type (and its permission) only exists from **API 35**, so it is not
- * expressible against this compileSdk; revisit when the project moves to 35+.
+ * Chosen at runtime by [ExportForegroundServiceType]: `mediaProcessing` on Android 15+ (API 35+, the
+ * type made for encoding media), `dataSync` on API 29-34. The manifest declares both types and holds
+ * both typed permissions; Android 14+ throws from `startForeground()` for an undeclared or
+ * unpermitted type.
+ *
+ * ## The 6-hour limit (Android 15+)
+ * Both types may run for at most 6 hours in 24. At the limit the system calls [onTimeout] and the
+ * service must stop within seconds or the app crashes. [onTimeout] cancels the export, records it as
+ * failed with a plain reason, and stops the service. A real export takes minutes, not hours.
  *
  * ## State ownership
  * Export state lives in this class's **companion object**, not in the service instance and not in
@@ -120,6 +123,18 @@ class VideoExportService : Service() {
         @Volatile private var activeExporter: VideoExporter? = null
         @Volatile private var cancelPending = false
 
+        /** Set by [onTimeout]: the export ends as Failed (time limit), not as a user cancel. */
+        @Volatile private var timedOut = false
+
+        /**
+         * The type the platform reports for the service right after `startForeground()`
+         * (`Service.getForegroundServiceType()`, API 29+), or -1 when the start was refused or not
+         * attempted yet. Read by an instrumented test: a refused start does not fail the export (it
+         * runs on without the FGS), so without this the D1 type-masking defect was invisible.
+         */
+        @Volatile var lastForegroundServiceType: Int = -1
+            private set
+
         /** Default output base name; overridable so a test can find (or prove the absence of) the file. */
         fun defaultBaseName(): String = "chess_review_${System.currentTimeMillis()}"
 
@@ -140,6 +155,7 @@ class VideoExportService : Service() {
             if (_running.value) return false
             _running.value = true
             cancelPending = false
+            timedOut = false
             pendingRequest = Request(script, provider, baseName)
             _exportedUri.value = null
             timeLeftTracker.reset()
@@ -232,6 +248,19 @@ class VideoExportService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Android 15+ (API 35): the foreground service reached its type's time limit (6 hours in 24 for
+     * both `mediaProcessing` and `dataSync`). The system requires `stopSelf()` within a few seconds,
+     * or it raises an ANR/crash. Cancel the export cooperatively (the export job still publishes its
+     * terminal state from its `NonCancellable` block, as Failed with the reason) and stop now.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "foreground service time limit reached (type $fgsType); stopping the export")
+        timedOut = true
+        requestCancel()
+        stopForegroundAndSelf()
+    }
+
     private fun runExport(request: Request) {
         val exporter = VideoExporter(applicationContext)
         activeExporter = exporter
@@ -287,11 +316,18 @@ class VideoExportService : Service() {
                         fileSizeBytes = file.length(),
                         narrationWasSpoken = false,
                     )
-            } catch (e: VideoExportCancelledException) {
-                VideoExporter.State.Cancelled
             } catch (e: Exception) {
-                Log.e(TAG, "export failed", e)
-                VideoExporter.State.Failed(e.message ?: e.javaClass.simpleName)
+                when {
+                    // A time-limit stop is reported as what it is, not as the user's cancel. The
+                    // service's scope may already be cancelled here (stopSelf -> onDestroy), which is
+                    // why this check comes before the exception type.
+                    timedOut -> VideoExporter.State.Failed(getString(R.string.video_export_time_limit))
+                    e is VideoExportCancelledException -> VideoExporter.State.Cancelled
+                    else -> {
+                        Log.e(TAG, "export failed", e)
+                        VideoExporter.State.Failed(e.message ?: e.javaClass.simpleName)
+                    }
+                }
             }
 
             withContext(NonCancellable) {
@@ -299,6 +335,7 @@ class VideoExportService : Service() {
                 notificationJob = null
                 activeExporter = null
                 cancelPending = false
+                timedOut = false
                 // Order matters: clear `running` BEFORE publishing the terminal state. Observers
                 // wait on `state` and then read `running` (the dialog does exactly this to decide
                 // whether Cancel or Close is the right button), so publishing the terminal state
@@ -319,16 +356,19 @@ class VideoExportService : Service() {
 
     private fun startForegroundSafely(notification: Notification) {
         try {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID_PROGRESS,
-                notification,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                } else {
-                    0
-                },
-            )
+            // The platform call, NOT ServiceCompat.startForeground: androidx.core 1.13.1's API 34
+            // path masks the type with the types that existed in Android 14 (0x40000FFF), which
+            // silently turns mediaProcessing (0x2000, Android 15) into 0, and Android 14+ then
+            // refuses "FGS with type none" (found on API 36 in D1; the export ran on without a
+            // foreground service). Service.startForeground(int, Notification, int) exists from API 29.
+            lastForegroundServiceType = -1
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID_PROGRESS, notification, ExportForegroundServiceType.current())
+                lastForegroundServiceType = foregroundServiceType
+            } else {
+                startForeground(NOTIFICATION_ID_PROGRESS, notification)
+                lastForegroundServiceType = 0
+            }
         } catch (e: Exception) {
             // Denied POST_NOTIFICATIONS does NOT land here (the platform runs the FGS and just
             // hides the notification). A restrictive background-start policy can. Either way the

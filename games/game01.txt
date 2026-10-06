@@ -1,0 +1,12 @@
+[Site "Chess.com"]
+[White "Fouchon"]
+[Black "Sonarmind"]
+[Result "0-1"]
+[WhiteElo "2035"]
+[BlackElo "2043"]
+[TimeControl "300"]
+1. e4 d5 2. exd5 Nf6 3. d4 Nxd5 4. c4 Nf6 5. Nf3 Bg4 6. Be3 e5 7. Nc3 e4 8. h3
+Bh5 9. g4 Nxg4 10. hxg4 Bxg4 11. Qa4+ Bd7 12. Qb3 exf3 13. Qxb7 Bc6 14. Qb3 Qc8
+15. d5 Bb7 16. Bh3 Nd7 17. Qa4 c6 18. O-O-O Be7 19. d6 Bf6 20. c5 O-O 21. Ne4
+Be5 22. Bf5 g6 23. Rdg1 Bg7 24. Bh3 Qe8 25. Kb1 Bc8 26. Bh6 Qe5 27. Bxg7 Kxg7
+28. Qxc6 Rb8 29. b3 Bb7 30. Qxd7 Bxe4+ 31. Kc1 Qc3+ 32. Kd1 Qc2+ 33. Ke1 Qc1# 0-1

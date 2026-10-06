@@ -24,6 +24,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -317,10 +318,12 @@ fun VideoScreen(
         bottomBar = {
             // One full-width primary button, pinned under the player. Hidden in full screen, like the bar.
             if (!isFullScreen) {
+                // Lifted above the navigation bar (edge to edge: the bottom bar owns its insets).
                 Surface(color = MaterialTheme.colorScheme.background) {
                     Button(
                         onClick = { exportTapped() },
                         modifier = Modifier
+                            .navigationBarsPadding()
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                             .heightIn(min = 52.dp),

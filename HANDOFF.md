@@ -11,7 +11,32 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
-## FINAL STATE (R7, 2026-10-05) — read this first
+## D-TRACK: GOOGLE PLAY (2026-10-06) — read this first
+
+The owner will publish on Google Play. **D1 (build Play-ready) is done** (RUN_LOG "D1", RUN_PLAN "D-track");
+D0 (moving the two models to a first-run download) is a separate design, `docs/MODEL_DOWNLOAD_DESIGN.md`. The
+models are still in the APK.
+
+- **Toolchain now:** AGP 8.9.3, Gradle 8.11.1, Kotlin 1.9.24 (unchanged), compileSdk/targetSdk **36**, NDK
+  **28.2.13676358** in `:engine` and `:app`. Details and traps in `CLAUDE.md` (build gotchas).
+- **Release build is R8-minified** (dex 44.7 MB -> 3.1 MB) with JNI keep rules; every `.so` is 16 KB-aligned;
+  the export FGS is `mediaProcessing` on Android 15+ (`dataSync` below) with `onTimeout`.
+- **Outputs:** `./gradlew :app:bundleRelease` -> signed `app-release.aab` (Play: ~196 MB download per arm64
+  device, ~14 MB without the models; limit 200 MB). `./gradlew :app:assembleRelease` (a separate invocation)
+  -> `app-arm64-v8a-release.apk` (292,485,879 B) and the other ABIs plus `app-universal-release.apk`.
+  bundletool: `java -jar tools/bundletool-all-1.18.3.jar` (gitignored). Play App Signing and the FGS
+  declaration text: `docs/PUBLISHING.md` section 3.
+- **AVDs:** `chess34` (API 34) and `chess36` (API 36 `google_apis`, new). Run the instrumented suites on both.
+- **Counts (XML):** `:core` 490/0/0, `:app` unit 237/0/0, `:app` instrumented 104/0/0 on API 36 and on API 34,
+  `:engine` instrumented 20/0/0 on both, all 0 skipped; `lintDebug` 0 errors, 70 warnings.
+- **Verified on API 36 with the release APK:** fresh install, analysis, Summary, Board, Practise, Walkthrough,
+  Video, a narrated MP4 export with the Kokoro voice (pulled: mean -25.3 dB, max -5.6 dB), Share, no crashes.
+  Screenshots `docs/screenshots/d1_api36_*`.
+- **Next:** D2+ implements D0 once the design is accepted. Open items from D1 are at the end of its RUN_LOG entry.
+
+---
+
+## FINAL STATE (R7, 2026-10-05)
 
 **The deliverable is done: a signed release APK that works completely offline, proven on a device.**
 
@@ -114,11 +139,11 @@ cd /c/Claude/ChessAnalyzer
 scripts/fetch_stockfish.sh                # Stockfish source (not committed), first build only
 scripts/fetch_models.sh                   # the NNUE net + Kokoro voice into vendor/models/ (not committed); the build fails loudly without them
 ./gradlew :core:test                      # expect 490 tests, 0 skipped
-./gradlew :app:testDebugUnitTest          # expect 229 tests, 0 skipped
+./gradlew :app:testDebugUnitTest          # expect 237 tests, 0 skipped (D1)
 ./gradlew :app:assembleDebug              # expect exit 0; the APK is ~371 MB (debug) and both assets are Stored
 # emulator (cold boot takes 10+ min, sits "offline" the whole time — this is normal)
 "$ANDROID_HOME/emulator/emulator" -avd chess34 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
-./gradlew :app:connectedDebugAndroidTest  # expect 103 tests; CHECK skipped="0" in the XML. Pushes a ~371 MB APK, takes 20-40 minutes. Nothing to stage: the models are in the APK
+./gradlew :app:connectedDebugAndroidTest  # expect 104 tests (D1), on chess34 and on chess36; CHECK skipped="0" in the XML. Pushes a ~371 MB APK, takes 20-40 minutes. Nothing to stage: the models are in the APK
 python scripts/verify_tactic_references.py fixtures/tactic_references.json   # expect exit 0, "28 verified, 0 rejected"
 ./gradlew :engine:connectedDebugAndroidTest   # expect 20 tests, 0 skipped
 ```

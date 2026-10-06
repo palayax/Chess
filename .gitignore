@@ -26,5 +26,8 @@ pc/tts/.venv-kokoro/
 # Final signed release APKs (R7)
 dist/
 
+# Local build tools, e.g. tools/bundletool-all-<version>.jar (D1; see docs/PUBLISHING.md)
+tools/
+
 # PC producer TTS model downloads (hundreds of MB, re-fetchable)
 pc/tts/models/

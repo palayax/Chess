@@ -65,6 +65,8 @@ class ManifestPermissionsTest {
             setOf(
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                // D1: the export uses the mediaProcessing type on Android 15+ (ExportForegroundServiceType).
+                "android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING",
                 "android.permission.POST_NOTIFICATIONS",
             ),
             requestedPermissions().toSet(),

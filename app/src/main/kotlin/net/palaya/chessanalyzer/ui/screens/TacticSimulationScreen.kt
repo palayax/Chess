@@ -4,6 +4,7 @@ package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -169,8 +170,11 @@ fun TacticSimulationScreen(
             // which leaves. It replaces the old second exit ("Back to the game"). Landscape has no
             // room for a bottom bar, so there the same button sits under the card instead.
             if (!landscape) {
+                // Lifted above the navigation bar (edge to edge: the bottom bar owns its insets).
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    nextButton(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                    Box(modifier = Modifier.navigationBarsPadding()) {
+                        nextButton(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                    }
                 }
             }
         },

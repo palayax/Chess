@@ -5,6 +5,7 @@ package net.palaya.chessanalyzer.ui.screens
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -196,8 +197,13 @@ fun PracticeScreen(
         },
         bottomBar = {
             if (!landscape && showPrimary) {
+                // Edge to edge (enforced from targetSdk 35): Scaffold leaves the bottom bar's insets to
+                // the bar, so the button is lifted above the navigation bar here; the bar's colour
+                // still runs underneath it.
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    primaryButton(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                    Box(modifier = Modifier.navigationBarsPadding()) {
+                        primaryButton(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                    }
                 }
             }
         },

@@ -186,6 +186,39 @@ class VideoExportServiceInstrumentedTest {
     }
 
     /**
+     * D1: the export really runs as a foreground service of the type chosen for this SDK level
+     * (`mediaProcessing` on API 35+, `dataSync` on 29-34). A refused `startForeground()` does not
+     * fail the export, so only the platform's own answer (`getForegroundServiceType()`, recorded by
+     * the service) shows it. On API 36 androidx's `ServiceCompat` masked `mediaProcessing` to 0 and
+     * the platform refused the start; this would have failed then.
+     */
+    @Test
+    fun theExportRunsAsAForegroundServiceOfTheTypeChosenForThisSdk(): Unit = runBlocking {
+        val script = TestScripts.shortScript()
+        val baseName = "instrumented_service_fgs_type_${System.currentTimeMillis()}"
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        val started = AtomicBoolean(false)
+        scenario.onActivity { activity ->
+            started.set(VideoExportService.start(activity, script, null, baseName))
+        }
+        assertTrue("VideoExportService.start() should have accepted the export", started.get())
+        awaitState(120_000, "the export to get past the initial state") {
+            it != VideoExporter.State.Idle && it != VideoExporter.State.SynthesizingNarration(0, script.segments.size)
+        }
+        val expected = ExportForegroundServiceType.forSdk(android.os.Build.VERSION.SDK_INT)
+        assertTrue("this device has typed foreground services (API 29+)", expected != 0)
+        assertEquals(
+            "the platform's foreground-service type for the running export",
+            expected,
+            VideoExportService.lastForegroundServiceType,
+        )
+        VideoExportService.requestCancel()
+        awaitState(120_000, "the export to stop after cancel") { isTerminal(it) }
+        scenario.close()
+        outputFileFor(baseName).delete()
+    }
+
+    /**
      * The two layers *above* [VideoExporter] in the "every exported video used the device voice"
      * defect. `VideoScreen.startExport()` passes the selected provider to [VideoExportService.start],
      * which parks it in `pendingRequest` and must hand it back to `VideoExporter.export()` when

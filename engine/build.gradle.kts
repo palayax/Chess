@@ -7,10 +7,16 @@ plugins {
 }
 android {
     namespace = "net.palaya.chessanalyzer.engine"
-    compileSdk = 34
-    ndkVersion = "26.1.10909125"
+    compileSdk = 36
+    // NDK r28+ links with 16 KB ELF LOAD-segment alignment by default (Play requires 16 KB page-size
+    // support for apps targeting 35+ with native code). CMakeLists.txt also passes
+    // -Wl,-z,max-page-size=16384 explicitly, so a downgrade cannot silently undo it.
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         minSdk = 26
+        // Keeps NativeBridge (the JNI entry points libstockfish.so binds to by name) through R8 in
+        // any app that consumes this library. See consumer-rules.pro.
+        consumerProguardFiles("consumer-rules.pro")
         // arm64-v8a and x86_64 are known-good (see engine/src/main/cpp/CMakeLists.txt).
         // armeabi-v7a is included too — see the module's build report for whether it
         // ultimately built cleanly or had to be dropped.

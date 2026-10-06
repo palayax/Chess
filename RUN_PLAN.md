@@ -706,3 +706,31 @@ Runs after R3 and before R4 (bundling).
 **Remaining queue:**
 - **R6:** done (R6a accessibility, time left, Share; R6b recap end card and "moves" wording; R6c title and final-numbers card polish). Still open from the R6 list: nothing.
 - **R7:** **done** (final signed release APK, the airplane-mode offline proof (B5), full gate, fresh screenshots, final docs and handoff). Nothing is queued.
+
+---
+
+## D-track: Google Play readiness (owner, 2026-10-06)
+
+The owner will publish on Google Play. Current Play rules (checked 2026-10-06): target API 36 for new apps and updates from 31 Aug 2026, 16 KB page-size support for apps with native code that target 35+, an App Bundle, and a declared foreground-service type.
+
+| Step | Scope | Status |
+|---|---|---|
+| D0 | Design: move the two bundled models (net, Kokoro voice) from the APK to a first-run download (`docs/MODEL_DOWNLOAD_DESIGN.md`) | **done, accepted** (open questions settled by defaults: provisional `palayax/palaya-chess` URL, plain tar now and measure `.tar.gz` in D2f, signing key next to the keystore, Setup first, "Check for updates" in Settings) |
+| D1 | Build Play-ready: target/compile API 36 (AGP 8.9.3, Gradle 8.11.1), edge-to-edge and API 35/36 behaviour fixes, NDK r28 and 16 KB alignment of every `.so`, R8 + resource shrinking with JNI keep rules, `mediaProcessing` FGS type with `onTimeout`, signed AAB plus bundletool sizes, per-ABI APKs, API 36 AVD and the instrumented suites on API 34 and 36 | **done** (RUN_LOG D1) |
+| D2a–D2f | Implement D0 (remove the models from the APK), in the order of the design's §9 | queued after F1 |
+
+D1 left the models in the APK on purpose: the bundle is ~196 MB per arm64 device, just under Play's 200 MB base limit, and ~14 MB without the models.
+## Round 14 queue (owner, 2026-10-06; order confirmed by the owner)
+
+One task at a time (one Gradle invocation at a time). Each is verified from the result XML and screenshots before the next starts.
+
+| # | Task | Status |
+|---|---|---|
+| F1 | **Bug, games/game01.txt:** "Deep" took forever and stuck at move 23, then reported it could not analyse. Measured on the host (Stockfish 19, Threads 4, Hash 96, MultiPV 3, depth 18): the position after 23.Rdg1 (`r1q2rk1/pb1n1p1p/2pP2p1/2P1bB2/Q3N3/4Bp2/PP3P2/2K3RR b - - 1 23`) took 59-86 s and 80-129 M nodes cold, against 1-15 s for every other position (9.8 s warm, so the blow-up is not stable). The search has no node or time cap (`AnalysisService` sends `go depth D` only). The failure message is unknown: the owner's report is "can't analyse"; the likeliest is GAME_TEXT_LOST after a background process kill. Fix: per-strength node budget plus a time safety cap, capped plies flagged; elapsed/time-left and current-depth progress on the Analysing screen; an on-device diagnostic log (including the previous process's exit reason) shareable from Settings and from the error screen; a regression test on that position. | next |
+| D2a–D2f | Small installer: first-run model download (D-track above) | queued |
+| V1 | Voice picker: the 11 speakers already inside the Kokoro model (`voices.bin` = 11 x 522,240 B), with an on-device sample | queued |
+| V3 | Video pace: slower key moments (a pause before the critical move, readable sequence speed) and a Relaxed/Normal/Brisk setting, in the player and the MP4 | queued |
+| V2 | Best-line simulation: play the engine's recommended sequence move by move on the board (Back/Next/Play) for every key moment, and in the video instead of only an arrow | queued |
+| G1 | Famous games: a built-in library of ~100 classic games (bare moves, sources checked), optional collections downloaded on tap from our own GitHub release, and opening a PGN file from storage | queued |
+| C1 | Commentary: professional terminology and much more phrasing variety in the templates, every claim still verified | queued |
+| C2 | Measured spike: a small on-device LLM that only rephrases verified facts, with a claim checker and template fallback; report quality, rejection rate, speed and size for an owner decision | queued |

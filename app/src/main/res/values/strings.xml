@@ -336,6 +336,7 @@
     <string name="video_export_completed_title">Video saved</string>
     <string name="video_export_failed_title">Export failed</string>
     <string name="video_export_cancelled_title">Export cancelled</string>
+    <string name="video_export_time_limit">Android stopped the export after its 6-hour limit for background work. Try again.</string>
     <string name="video_export_cancel">Cancel</string>
     <string name="video_export_share">Share</string>
     <string name="video_export_open">Open</string>

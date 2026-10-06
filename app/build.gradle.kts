@@ -17,11 +17,16 @@ val hasReleaseSigning = keystoreProps.getProperty("storeFile") != null
 
 android {
     namespace = "net.palaya.chessanalyzer"
-    compileSdk = 34
+    // Google Play requires targetSdk 36 (Android 16) for new apps and updates from 31 Aug 2026.
+    compileSdk = 36
+    // Same NDK as :engine. :app compiles no C++, but AGP uses this NDK's llvm-strip to strip every
+    // .so it packages; left unset, AGP 8.9 looks for its own default NDK (27.0), which is not
+    // installed, and silently packages unstripped libraries (libstockfish.so 17 MB instead of 1.6 MB).
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         applicationId = "net.palaya.chessanalyzer"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -51,7 +56,11 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: code shrinking, optimisation and resource shrinking. Keep rules for the JNI
+            // bridges (Stockfish via :engine's consumer-rules.pro, sherpa-onnx here) are in
+            // proguard-rules.pro; the release build was verified end to end on a device (D1).
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
         }
@@ -70,6 +79,23 @@ android {
     // is decided when the final APK is packaged, so this has to be set here even for the net that
     // lives in :engine. Never use "" (that would also store the 32 MB classes.dex).
     androidResources { noCompress += listOf(".nnue", ".tar") }
+    // Per-ABI APKs for direct installs (D1). `assembleRelease` writes one APK per ABI
+    // (app-arm64-v8a-release.apk is the one for practically every phone) plus the universal
+    // app-universal-release.apk with all three. Only for release ASSEMBLE tasks: debug builds and
+    // connectedDebugAndroidTest keep the single app-debug.apk the docs and scripts use. Not when a
+    // bundle task is in the same invocation either: AGP 8.9's buildReleasePreBundle then fails with
+    // "Sequence contains more than one matching element" (seen in D1). Run `:app:bundleRelease` and
+    // `:app:assembleRelease` as two separate Gradle invocations to get both. Play splits by ABI itself.
+    splits {
+        abi {
+            val tasks = gradle.startParameter.taskNames
+            isEnable = tasks.any { it.contains("assembleRelease", ignoreCase = true) } &&
+                tasks.none { it.contains("bundle", ignoreCase = true) }
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
     // Every connectedDebugAndroidTest pushes a ~371 MB APK; the default install timeout is too short for it.
     installation { timeOutInMs = 600_000 }
 }
