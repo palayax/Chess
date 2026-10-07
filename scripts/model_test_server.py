@@ -3,8 +3,18 @@
 
 A debug build pointed at it downloads the models from this machine instead of GitHub:
 
-    ./gradlew :app:assembleDebug -PpalayaModelBaseUrl=http://10.0.2.2:8787/     (emulator -> host loopback)
+    adb reverse tcp:8787 tcp:8787                                                  (device 127.0.0.1 -> host, over adb)
+    ./gradlew :app:assembleDebug -PpalayaModelBaseUrl=http://127.0.0.1:8787/
     python scripts/model_test_server.py --root vendor/models --port 8787 [--fault ...]
+
+Use adb reverse, NOT http://10.0.2.2:8787/ (R8). The emulator's user-mode network (10.0.2.2 -> host loopback)
+drops single bytes of a long response: one byte at a time on 1440-byte segment boundaries, all within the last
+~128 KB of the stream, 3-16 bytes per 98.5 MB file in 12 of 12 unthrottled fetches on chess36 (emulator
+36.3.10). The host had handed every byte to the emulator process (sendall done in 0.04 s), the same server is
+byte-exact to host curl and through adb reverse (3 of 3 raw, and the app's whole setup), and a plain
+raw-socket server shows the same loss whether it closes at once, 10 s later or only after the client's EOF.
+The app then sees a body N bytes short, resumes the last N bytes and fails the SHA-256 (correctly, twice ->
+"didn't match"). --fault slow:3m hides it (0 of 2) but is slow; adb reverse needs neither.
 
 URLs, mirroring GitHub Releases (base + tag + "/" + file):
     /<release.tag>/<net file>         the NNUE net, found anywhere under --root by name
@@ -289,7 +299,8 @@ def main():
         print(f"serving {path}  ({os.path.getsize(file)} bytes, {file})")
     if state.manifest_dir:
         print(f"manifest from {state.manifest_dir} (signature {'present' if os.path.isfile(os.path.join(state.manifest_dir, 'models.json.sig')) else 'MISSING: 404'})")
-    print(f"listening on http://{args.host}:{args.port}/ (emulator: http://10.0.2.2:{args.port}/)"
+    print(f"listening on http://{args.host}:{args.port}/ (emulator: `adb reverse tcp:{args.port} tcp:{args.port}`"
+          f" and http://127.0.0.1:{args.port}/; 10.0.2.2 loses bytes of long downloads, see the header)"
           + (f", fault {args.fault} x{args.fault_times or 'always'}" if args.fault else ""))
     for s in servers[1:]:
         threading.Thread(target=s.serve_forever, daemon=True).start()

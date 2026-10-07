@@ -198,6 +198,38 @@ abstract class ModelDownloaderFaultMatrix {
         assertEquals(2, server.requestsFor(path).size)
     }
 
+    /**
+     * R8: the emulator's user-mode network (10.0.2.2) dropped single bytes in the last ~128 KB of a long
+     * response. The body then ends N bytes short; the resume asks for exactly the bytes still missing by
+     * count, gets the file's real last N bytes, and the whole no longer hashes. That file must never be
+     * accepted: one automatic restart, then DAMAGED, and no part left behind.
+     */
+    @Test
+    fun bytesLostInTransitAreNeverAcceptedAndTwiceInARowAreDamaged() {
+        val size = body.size.toLong()
+        val lost = (1..9).map { size - 100 - it * 8_640L }.toSet()
+        server.alwaysFault(path, Fault.LoseBytesAt(lost))
+        val result = download()
+        assertEquals(FailureReason.DAMAGED, (result as DownloadResult.Failed).reason)
+        assertFalse("the part must be deleted", part.exists())
+        assertFalse(states.contains(DownloadState.Verified))
+        assertEquals(
+            "short body -> resume at exactly the bytes on disk -> bad hash -> restart from 0 -> the same again",
+            listOf(null, "bytes=${size - 9}-", null, "bytes=${size - 9}-"),
+            server.requestsFor(path).map { it.range },
+        )
+        assertTrue(states.contains(DownloadState.HashFailed(1)))
+    }
+
+    @Test
+    fun bytesLostInTransitOnceAreRecoveredByTheAutomaticRestart() {
+        val size = body.size.toLong()
+        server.fault(path, Fault.LoseBytesAt(setOf(size - 30_000, size - 21_360, size - 12_720)))
+        assertComplete(download())
+        assertEquals(listOf(null, "bytes=${size - 3}-", null), server.requestsFor(path).map { it.range })
+        assertTrue(states.contains(DownloadState.HashFailed(1)))
+    }
+
     @Test
     fun aContentLengthThatDiffersFromThePinIsFatalAndDeletesThePart() {
         server.fault(path, Fault.WrongTotalSize(claimedTotal = body.size + 1L))

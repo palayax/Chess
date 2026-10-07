@@ -267,7 +267,7 @@ builds without `fetch_models.sh`. If `vendor/models/` files are present it also 
 `BuildConfig` fields in `:app`: `MODEL_BASE_URL` (default above, marked provisional in a comment and in About's
 source line), `SHERPA_ONNX_VERSION` (from `libs.versions.toml`, read by Gradle), `MODEL_MANIFEST_URL =
 MODEL_BASE_URL + "models/models.json"`. First-run URL = `MODEL_BASE_URL + release.tag + "/" + fileName`. A Gradle
-property `-PpalayaModelBaseUrl=http://10.0.2.2:8787/` overrides the base URL **for debug builds only**; the release
+property `-PpalayaModelBaseUrl=http://127.0.0.1:8787/` (emulator: with `adb reverse`, R8) overrides the base URL **for debug builds only**; the release
 build fails configuration if it is set.
 
 ### 3.2 `models.json` (upgrades only)
@@ -485,7 +485,9 @@ print app-release.apk | grep -c networkSecurityConfig` prints 0.
 
 `scripts/model_test_server.py --root vendor/models --port 8787 [--fault truncate:0.5|hash|404|500|slow:200k|drop:0.3|redirect|norange]`:
 serves `<tag>/<file>` and `models/models.json` from the lock, supports `Range`, prints every request. The emulator
-reaches it at `http://10.0.2.2:8787/` via `-PpalayaModelBaseUrl` on a debug build. Used for the end-to-end run below
+reaches it at `http://127.0.0.1:8787/` through `adb reverse tcp:8787 tcp:8787` via `-PpalayaModelBaseUrl` on a debug
+build. (Not `http://10.0.2.2:8787/`: the emulator's user-mode network drops single bytes near the end of a long
+response, so the file fails its SHA-256; found in D2c/V2, diagnosed in R8, see CLAUDE.md.) Used for the end-to-end run below
 and for watching the real UI under faults; the automated suite does not depend on it.
 
 ### 6.5 End to end on the emulator (chess34, debug build pointed at the host server)

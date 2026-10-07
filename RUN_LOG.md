@@ -3492,3 +3492,148 @@ words, layout and art; nothing copied.
 7. `desktop/` keeps its own timeline: a PC-rendered video shows the hold on the still board, not the line.
 8. The before/after timing table is from the host recordings (169 wpm); the device export used the on-device
    depth-14 analysis, whose two lines are on 10.g4 and 20...Na6.
+
+---
+
+## R8 (2026-10-07): real-GitHub fresh-install proof, and the emulator's lost bytes
+
+Baseline `4e0f25d` (clean, pushed to https://github.com/palayax/Chess). Nothing committed or pushed; nothing changed on
+GitHub. No main-source change: the release APK tested is `4e0f25d`'s code. desktop/ and pc/ untouched.
+
+### 1. Investigation: the bytes lost on the emulator (D2c, V2) — verdict (a), the emulator's user-mode network
+
+**Method and evidence** (chess36, emulator 36.3.10, `scripts/model_test_server.py` unchanged, the net = 98,511,183 B).
+A host script (`gapfind.py`, scratch) compares a capture with the original and names every gap (dropped / inserted /
+changed bytes, and where).
+
+| Path | Fetches | Result |
+|---|---|---|
+| `toybox nc` to 10.0.2.2:8787, unthrottled | 6 (3 with the client's stdin held open) | **every one short**, by 5, 12, 16, 15, 15, 13 B; sizes differ run to run |
+| `nc` through `adb reverse tcp:8787 tcp:8787` (device 127.0.0.1) | 3 | **3 of 3 byte-exact**, SHA-256 `1a298aa5…dfc2` |
+| plain raw-socket server (scratch `rawserve.py`), 10.0.2.2, close at once | 2 | short by 7, 6 |
+| same, close 10 s after the last byte | 2 | 1 exact, 1 short by 11 |
+| same, close only after the client's EOF (15 s) | 3 | short by 4, 3, 12 |
+| `model_test_server.py --fault slow:20m`, 10.0.2.2 | 2 | short by 6, 3 |
+| `model_test_server.py --fault slow:3m`, 10.0.2.2 | 2 | 2 exact |
+
+- **The loss pattern:** single bytes are missing **mid-stream**, never a cut tail: e.g. at offsets 98,464,320,
+  98,478,719, 98,487,359, 98,501,759, 98,510,399 (spacing 14,400 / 8,640 = 10 / 6 x 1,440 B, segment boundaries), and
+  **every gap lies within the last ~128 KB** of the response (first gap 29,688-127,504 B before the end, 9 runs). The
+  bytes after a gap are the original shifted, so the body is N bytes short.
+- **Not the server (b):** the host had handed all 98.5 MB to the emulator process (`sendall` returned in 0.04 s); the
+  same server process is byte-exact through adb reverse and to host curl; a 30-line raw-socket server loses bytes the
+  same way; holding the connection open until the client closes does not help. A sender cannot drop bytes from the
+  middle of a TCP stream; only the NAT between the host socket and the guest can.
+- **Not the downloader (c):** with a debug build pointed at `http://10.0.2.2:8787/` the app logged `transient failure
+  (ProtocolException at byte 98511175 of 98511183)`, `resuming at 98511175` (`Range: bytes=98511175-`, HTTP 206), `SHA-256
+  mismatch after 98511183 bytes`, the automatic restart, the same again, `failed, DAMAGED` (also at 98,511,171 and
+  98,511,170 in two more runs): Content-Length 98,511,183, received = the byte count in the log. Its `.part`, copied
+  during the 2 s backoff (`run-as`), was **98,511,170 B = exactly the bytes received**, with 12 single-byte gaps of the same
+  signature in the last 124 KB: everything that arrived was written, flushed and hashed. The resume asked for exactly
+  the bytes on disk (no off-by-one), and the file is then correctly refused.
+  The same debug build pointed at `http://127.0.0.1:8787/` through adb reverse: **net verified in 5.3 s, voice in 7.1 s,
+  "setup done" 16 s after the tap, first attempt, no retry**.
+- Consequence for users: none. A phone has no emulator NAT, and over HTTPS a lost byte would fail the TLS record MAC
+  (an `SSLException`, a transient error that resumes from the authenticated bytes on disk). The real-GitHub runs below
+  had no retry at all.
+
+**What was ours to fix: the test tooling and its documentation.**
+- `scripts/model_test_server.py`: the header now says to use `adb reverse tcp:8787 tcp:8787` with
+  `-PpalayaModelBaseUrl=http://127.0.0.1:8787/` (already allowed by the debug network security config and
+  `ModelDownloader.LOOPBACK_HOSTS`), and why not 10.0.2.2; the startup line says the same. No behaviour change.
+- CLAUDE.md (the model-server gotcha, the base-URL line, the release-build line, a screenshot gotcha) and
+  `docs/MODEL_DOWNLOAD_DESIGN.md` §3.1 / §6.4.
+- **Regression test (shared fault matrix, so host AND device):** `FaultHttpServer.Fault.LoseBytesAt(offsets)` (correct
+  headers, the bytes at those offsets never sent, clean close). `ModelDownloaderFaultMatrix`:
+  `bytesLostInTransitAreNeverAcceptedAndTwiceInARowAreDamaged` (9 bytes lost 8,640 B apart near the end, on every request:
+  ranges exactly `[none, bytes=size-9-, none, bytes=size-9-]`, never Verified, DAMAGED, no part left) and
+  `bytesLostInTransitOnceAreRecoveredByTheAutomaticRestart` (one bad response: short, resume, bad hash, restart,
+  Verified). Both pass on the host (`ModelDownloaderTest` 31/0/0) and on chess36 (`ModelDownloaderInstrumentedTest`).
+
+### 2. Real-GitHub fresh install (release build)
+
+`:app:assembleRelease` (one invocation): arm64-v8a 35,917,196 B (`85a44cdb…`), x86_64 40,175,185 B (`695cab41…`),
+armeabi-v7a 25,820,374 B, universal 97,160,748 B. aapt2: versionCode 2 / 1.1; `apksigner`: `ca4f7b42…0947`; the dex holds
+`https://github.com/palayax/Chess/releases/download/` (+ `models/models.json`, `.sig`). Installed: x86_64. The notification
+permission was granted with `pm grant` before launch on both devices.
+
+| | chess36 (API 36) | chess34 (API 34) |
+|---|---|---|
+| Install | fresh (no prior app) | fresh (no prior app) |
+| Tap -> "setup done" | **104.0 s** (17:52:07.294 -> 17:53:51.305 UTC) | **91.9 s** (19:28:31.092 -> 19:30:03.012 UTC) |
+| Net (98,511,183 B) | 49.6 s, verified, 1st attempt | 42.1 s, verified, 1st attempt |
+| Voice `.tar.gz` (102,543,452 B) | 50.7 s + unpack 3.3 s, verified, 1st attempt | 44.5 s + unpack 4.8 s, verified, 1st attempt |
+| Bytes | 201,054,635 | 201,054,635 |
+| Retries / hash failures | 0 / 0 | 0 / 0 |
+| Route (each file) | `github.com` -> 302 -> `release-assets.githubusercontent.com`, HTTP 200 | same |
+| On disk (`adb root`) | `nets/nn-1a298aa575a0.nnue` SHA-256 `1a298aa5…dfc2`; `.provisioned` `7190c480…5dea` | same |
+| "Check for updates" | "You're up to date." | "You're up to date." |
+
+`[models]` lines per file: download start, `redirect 302 to host release-assets.githubusercontent.com`, `downloading …
+(HTTP 200)`, 25/50/75 %, `verified (… SHA-256 matches the pin)`, installed / `voice: installed (7190c4801645), unpacked in
+N ms`, `setup complete`, `setup done: both files installed`. Screenshots (all viewed): `docs/screenshots/r8_api36_setup_start.png`,
+`r8_api36_downloading.png` (27 MB of 99 MB, "Downloading… 27 MB of 201 MB"), `r8_api36_done.png` (both Done, "All set.
+Palaya Chess works offline from now on."), `r8_api34_setup_start.png`, `r8_api34_downloading.png` (34 MB of 99 MB),
+`r8_api34_done.png`.
+
+### 3. Offline flow (chess36; airplane mode on: `airplane_mode_on 1`, "Active default network: none", ping "Network is unreachable")
+
+- **game01 at Standard** (shared as text with `am start -a SEND`): `analysis start: depth 14, multipv 3, node budget
+  25000000, time cap 150000 ms, threads 4` -> `analysis done: 67 positions, 2 capped` in **3 min 29.9 s**; Summary 72% / 84%
+  (`r8_api36_offline_summary.png`, viewed).
+- **Board, "Show the best line"** on 7... e4 (Mistake): "Best line instead of 7… e4", `7… exd4 8. Qxd4 Nc6 9. Qxd8+ Rxd8
+  10. a3 Bxf3`; stepped 0 / 7 -> 3 / 7 "8… Nc6, White to move", the next move Qxd8+ as the arrow, "The engine rates this
+  line +0.1.", "Engine depth 14" (`r8_api36_board_best_line.png`, viewed).
+- **Narrated export, George at Normal** (Settings: Narrator voice "George · British, male", Pace Normal; both visible in
+  `r8_api36_up_to_date.png`): `export start: 63 segments … fgs type 8192`; logcat `NeuralTtsProvider: loaded KOKORO:
+  speakers=11 sampleRate=24000 sid=9` (sid 9 = `bm_george`); "Video saved, 10 min 20 s · 52 MB" (`r8_api36_export_done.png`,
+  viewed); the export took 50 min 18 s (narration 63/63 at about 20 min, then rendering). The diagnostic log names the
+  provider `h0` in the release build (R8 renames the class; cosmetic).
+- **MP4 pulled and measured on the host:** 620.517 s (video 620.433 s), 51,625,771 B, h264 1280x720 30 fps + AAC 44.1 kHz
+  mono. `volumedetect` whole file: mean **-24.8 dB**, max **-7.3 dB**. Last 4 s: **-91.0 dB**; `silencedetect` (-50 dB): the
+  final silence runs 615.226 -> 620.517 s (**5.29 s**, the silent recap card). Median F0 over 60 s of speech **142 Hz** (a male
+  voice; V1 measured the male speakers at 102-144 Hz, Bella about 169). Frames at 2 s, 300 s and 618 s
+  (`r8_api36_mp4_frames.png`, viewed): the intro card with 72% / 84%; move 25 "Missed Tactic" Qh4 +3.2 with "Missed line —
+  Bxd7 Qxd7 Ng3 Be5 Qh4"; the recap.
+- **No network while offline:** no `[models]` line between "setup done" and the later update check; logcat of the app pid
+  (cleared before the offline phase): 0 lines matching http/socket/UnknownHost/github/ModelDownload/okhttp.
+
+### 4. Update check (chess36, airplane off)
+
+Settings -> Check for updates -> **"You're up to date."** (`r8_api36_up_to_date.png`, viewed). Exactly two requests:
+
+    update check: asking host github.com for the manifest and its signature
+    models.json: redirect 302 to host release-assets.githubusercontent.com
+    models.json: 1330 bytes from host release-assets.githubusercontent.com
+    models.json.sig: redirect 302 to host release-assets.githubusercontent.com
+    models.json.sig: 72 bytes from host release-assets.githubusercontent.com
+    update check: signature OK, 2 known entries; offered: nothing; not offered: engine-net nn-1a298aa575a0.nnue
+      (already installed); not offered: voice-kokoro-en kokoro-int8-en-v0_19.tar.gz (already installed)
+
+chess34 gave the same lines and the same sheet.
+
+### Counts (from the result XML)
+
+`:core` **522/0/0**, `:engine` unit **32/0/0**, `:app` unit **473/0/0** (471 + 2), all 0 skipped (`--rerun-tasks`);
+`lintDebug` **0 errors, 69 warnings**; `:app` connected on chess36 **173/0/0, 0 skipped** (171 + the 2 shared cases), 1335.0 s.
+The first connected attempt stopped at 21 of 173 with "INSTRUMENTATION_ABORTED: System has crashed": system_server's
+`GrallocUploadTh` "Failed to create context, error = EGL_BAD_CONFIG" (the emulator graphics fault D2f recorded); after a
+cold restart (`-no-snapshot-load`) the rerun was green. chess34 connected not run (the task asks for chess36).
+
+### Device state restored
+
+chess36: airplane off, our app uninstalled (by me, and by Gradle after the suite), the MP4 and the pushed files deleted,
+`adb unroot`, adb reverse removed, shut down. chess34: airplane off (never changed), our app uninstalled, `adb unroot`, shut
+down; `net.palaya.chessanalyzer.engine.test`, three older MP4s in `Movies/ChessAnalyzer` and the PGNs/scripts in
+`/data/local/tmp` were there before this task and were left as found. Host servers stopped.
+
+### Deviations
+
+1. The investigation found nothing of ours broken; the fix is the tooling's documented route (adb reverse) plus a
+   regression test that pins the downloader's correct refusal. No main-source change.
+2. Screenshots were taken with `adb emu screenrecord screenshot` (screencap gave white frames; the emulator ran
+   swiftshader_indirect although `-gpu swangle_indirect` was passed). CLAUDE.md gotcha added.
+3. The notification permission was granted with `pm grant` instead of through the dialog (the dialog was shown in D2c/D2f).
+4. The diagnostic log was read with `adb root` (as in D2f) rather than through Share.
+5. `dist/` still holds D2f's 1.1 build (pre-V2 code, arm64 `566b42a5…`, AAB `4f831b27…`); the APKs tested here are newer
+   builds of the same versionCode 2 from `4e0f25d`. Not copied to `dist/` and no AAB rebuilt (outside this task); see HANDOFF.

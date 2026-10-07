@@ -39,6 +39,14 @@ class FaultHttpServer : Closeable {
         /** Flip the byte at absolute file offset [offset] (the download then fails its SHA-256). */
         data class CorruptByteAt(val offset: Long) : Fault
 
+        /**
+         * Correct headers (full Content-Length), but the bytes at these absolute file offsets are never sent
+         * and the connection then closes cleanly: the body ends short by that many bytes, with the bytes
+         * after each gap shifted forward. The Android emulator's user-mode network did exactly this to the
+         * host test server (R8: single bytes on 1440-byte segment boundaries in the last ~128 KB).
+         */
+        data class LoseBytesAt(val offsets: Set<Long>) : Fault
+
         /** Answer [code] with an empty body (and Retry-After when given). */
         data class Status(val code: Int, val retryAfterSeconds: Int? = null) : Fault
 
@@ -240,6 +248,7 @@ class FaultHttpServer : Closeable {
         }
         val rate = (fault as? Fault.Slow)?.bytesPerSecond
         val corruptAt = (fault as? Fault.CorruptByteAt)?.offset
+        val lose = (fault as? Fault.LoseBytesAt)?.offsets.orEmpty()
         val began = System.nanoTime()
         var sent = 0L
         val chunk = 16 * 1024
@@ -253,8 +262,11 @@ class FaultHttpServer : Closeable {
                 val i = (corruptAt - start - sent).toInt()
                 bytes[i] = (bytes[i].toInt() xor 0xFF).toByte()
             }
+            val chunkStart = start + sent
+            val toSend = if (lose.none { it in chunkStart until chunkStart + n }) bytes
+            else bytes.filterIndexed { i, _ -> (chunkStart + i) !in lose }.toByteArray()
             try {
-                out.write(bytes)
+                out.write(toSend)
                 out.flush()
             } catch (e: SocketException) {
                 return

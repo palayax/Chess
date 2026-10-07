@@ -11,37 +11,51 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
-## OWNER TO-DO BEFORE GOOGLE PLAY (D2f, 2026-10-07) — only you can do these
+## WHAT IS LIVE, AND OWNER TO-DO BEFORE GOOGLE PLAY (R8, 2026-10-07)
 
-The app (1.1, versionCode 2) is built, signed and verified; it cannot go live until these are done. Details in
-`docs/PUBLISHING.md` (§4c for the GitHub steps, §6 for the release checklist).
+**Live and proven (R8, RUN_LOG "R8"):** the public repo https://github.com/palayax/Chess (source pushed, `4e0f25d`);
+the immutable `models-2026.10` release (net 98,511,183 B, voice `.tar.gz` 102,543,452 B) and the signed `models.json` +
+`.sig` on the rolling `models` tag (minVersionCode 2); the privacy policy at https://palayax.github.io/Chess/privacy/.
+A **release build installed fresh downloads both files from GitHub and verifies them first time, with no retry**
+(chess36 104 s, chess34 92 s, 201,054,635 B), then works fully offline (game01 analysed, "Show the best line", a
+George / Normal narrated MP4 exported and measured), and **Check for updates says "You're up to date."** with exactly two
+requests. The small-installer track is done. **Next: G1** (famous games).
 
-1. ~~Create the GitHub repo~~ **done 2026-10-07: `palayax/Chess`** (owner). The app, `publish_models.sh`, the
-   privacy policy, the listing and PUBLISHING now point at it. It must be **public**: the app downloads the models
-   from its Releases without signing in, and GPLv3 needs the source offered.
-2. **Push the source** (GPLv3 obligation). `keystore/`, `keystore.properties`, `*.pem`, `vendor/models/*` (except
-   `MODELS.lock` and `manifest_public_key.der`), `dist/` and `tools/` are gitignored; check `git status --ignored`
-   first. The About screen's source link and the listing already say https://github.com/palayax/Chess.
-3. **Publish the models**: `gh auth login`, `scripts/fetch_models.sh`, then
-   `scripts/publish_models.sh models-2026.10 --min-version-code 2`. It creates the immutable `models-2026.10`
-   release (the net, 98,511,183 B, and `kokoro-int8-en-v0_19.tar.gz`, 102,543,452 B) and the signed `models.json`
-   + `models.json.sig` on the rolling `models` tag. **Do this BEFORE the app is released**: until then a fresh
-   install's Download ends in "The engine files aren't on the server". Afterwards: release APK, fresh install,
-   Download reaches "All set", and Check for updates says "You're up to date."
-4. **Back up `keystore/` offline** (two places): `chessanalyzer-release.jks`, `keystore.properties` and
-   `models-signing.pem`. Losing the first two means no app updates for sideloaded users (Play can reset an upload
-   key); losing the `.pem` means no model updates until an app update ships a new key.
-5. **Host the privacy policy** (`docs/PRIVACY_POLICY.md`, ready, not published anywhere) on palaya.net and put the
-   URL in Play Console and the listing. Confirm the repo address in it first.
-6. ~~Decide the colours~~ **decided 2026-10-07: keep the current colours** (owner).
-7. **Choose the Play developer account type** (personal or organisation, e.g. Palaya Cyber Security LTD).
-8. **If it is a personal account:** Play requires a closed test with **at least 12 testers opted in for 14 days**
-   before you can apply for production. Recruit them early (an organisation account is exempt).
+The "lost bytes" seen on the emulator in D2c/V2 are the emulator's user-mode network (10.0.2.2), not the app: proven
+with raw fetches and the app's own part file; real phones are unaffected. For emulator runs against the host test
+server use `adb reverse tcp:8787 tcp:8787` and `-PpalayaModelBaseUrl=http://127.0.0.1:8787/` (CLAUDE.md).
 
-Then, in Play Console: upload `dist/PalayaChess-1.1-release.aab`, choose Play App Signing deliberately (PUBLISHING
-§3: keep the existing key if sideloaded 1.0/1.1 users must update in place), fill in the foreground-service
-declarations with two short videos (§3), the Data safety form (§5: no data collected or shared), content rating
-(Everyone), and the listing (`docs/STORE_LISTING.md`).
+**Only you can do these** (details in `docs/PUBLISHING.md` §3, §5, §6):
+
+1. ~~Create the GitHub repo~~ done (`palayax/Chess`, public). ~~Push the source~~ done. ~~Publish the models~~ done
+   (`models-2026.10` + signed manifest). ~~Host the privacy policy~~ done (GitHub Pages). ~~Decide the colours~~ done
+   (keep them).
+2. **Rebuild the upload files from the current code.** `dist/` still holds D2f's 1.1 build (before V1/V2/V3:
+   `PalayaChess-1.1-release.aab` `4f831b27…`). Run `:app:bundleRelease` (and `assembleRelease` for the sideload APKs) from
+   the current tree and upload THAT AAB. Same versionCode 2 is fine for a first upload; raise it for every later one.
+3. **Back up `keystore/` offline** (two places): `chessanalyzer-release.jks`, `keystore.properties` and
+   `models-signing.pem`. Losing the first two means no app updates for sideloaded users (Play can reset an upload key);
+   losing the `.pem` means no model updates until an app update ships a new key.
+4. **Choose the Play developer account type** (personal or organisation, e.g. Palaya Cyber Security LTD).
+5. **If it is a personal account:** Play requires a closed test with **at least 12 testers opted in for 14 days** before
+   you can apply for production. Recruit them early (an organisation account is exempt).
+6. **Listen to the narrator voices** (`docs/voice_samples/v1/`) and confirm or change the default (Bella).
+7. **Never delete or replace the `models-2026.10` assets**: every installed 1.1 downloads exactly those bytes (the pins
+   are compiled in). New models go to a new tag plus a re-signed `models.json`.
+
+Then, in Play Console: upload the rebuilt AAB, choose Play App Signing deliberately (PUBLISHING §3: keep the existing key
+if sideloaded 1.0/1.1 users must update in place), fill in the foreground-service declarations with two short videos
+(§3), the Data safety form (§5: no data collected or shared), content rating (Everyone), the privacy policy URL, and the
+listing (`docs/STORE_LISTING.md`).
+
+---
+
+## R8 DONE (2026-10-07): real-GitHub fresh-install proof
+
+RUN_LOG "R8". Nothing committed. Investigation verdict: (a) emulator NAT; tooling docs switched to adb reverse; two
+shared fault-matrix cases (`Fault.LoseBytesAt`) pin the downloader's refusal of such a file. Counts (XML): `:core`
+522/0/0, `:engine` unit 32/0/0, `:app` unit 473/0/0, lint 0 errors / 69 warnings, `:app` connected 173/0/0 on chess36,
+all 0 skipped. Screenshots `docs/screenshots/r8_*`.
 
 ---
 

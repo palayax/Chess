@@ -96,7 +96,7 @@ conflict.
   it for every upload. Publish model manifests with `--min-version-code 2`.
 - **Model download URLs.** `BuildConfig.MODEL_BASE_URL` = `https://github.com/palayax/Chess/releases/download/`
   (the owner's public repo, created 2026-10-07); first-run URL = base + `release.tag` + `/` + file name.
-  `-PpalayaModelBaseUrl=http://10.0.2.2:8787/` overrides it **for debug builds only** (a release task in the
+  `-PpalayaModelBaseUrl=http://127.0.0.1:8787/` (with `adb reverse tcp:8787 tcp:8787`) overrides it **for debug builds only** (a release task in the
   same invocation fails before anything runs). Cleartext is allowed only by the debug-only
   `app/src/debug/res/xml/network_security_config.xml` (10.0.2.2, 127.0.0.1, localhost) and by
   `ModelDownloader`'s own rule (`allowCleartextLoopback = BuildConfig.DEBUG`). Publish the release
@@ -240,14 +240,25 @@ conflict.
 - **A fresh install has no models (D2b) and opens on the Setup screen (D2c).** Nothing is copied out of
   the APK and there is no "Setting up the engine (one time)" phase. To get the models onto an emulator:
   `python scripts/model_test_server.py` on the host (it serves `vendor/models/`, faults with `--fault`,
-  `--fault slow:3m --fault-times 0` makes the states visible), a debug build made with
-  `-PpalayaModelBaseUrl=http://10.0.2.2:8787/`, then tap Download. Killing the server makes connects TIME
-  OUT on the emulator (15 s each, about 100 s until "The connection dropped"); airplane mode fails at once
+  `--fault slow:3m --fault-times 0` makes the states visible), `adb reverse tcp:8787 tcp:8787`, a debug build made
+  with `-PpalayaModelBaseUrl=http://127.0.0.1:8787/`, then tap Download.
+  **Do not use 10.0.2.2 for the model files (R8).** The emulator's user-mode network drops single bytes of a long
+  response (on 1440-byte segment boundaries, all in the last ~128 KB; 3-16 bytes per 98.5 MB, every unthrottled
+  fetch): the app sees the body end short, resumes the tail and fails the SHA-256 twice ("didn't match"). Proven
+  outside the app (raw `nc` with a diff against the file; a plain socket server does the same; adb reverse is
+  byte-exact) and inside it (its `.part` = exactly the bytes received, same gaps). It is not the downloader and
+  not the server; the fault matrix pins the behaviour (`Fault.LoseBytesAt`). A real phone has no such NAT, and
+  over HTTPS a lost byte would be a TLS error, which resumes cleanly. Killing the server made connects via
+  10.0.2.2 TIME OUT (D2c: 15 s each, about 100 s until "The connection dropped"); airplane mode fails at once
   (about 30 s of backoff). Alternatively push them by hand: launch the app once (so `filesDir` exists), then
   `adb push` the net and `run-as net.palaya.chessanalyzer` copy it to `files/nets/nn-1a298aa575a0.nnue`
   (the voice needs `files/tts_models/kokoro/` unpacked plus its `.provisioned` marker holding the tar
-  SHA-256). A release build points at `palayax/Chess`: until the models release exists there, its Download
-  ends in "The engine files aren't on the server" (NOT_FOUND) until `publish_models.sh` has run.
+  SHA-256). A release build points at `palayax/Chess`, whose `models-2026.10` release and signed `models` manifest are
+  live since 2026-10-07: a fresh release install downloads both files from GitHub (302 to
+  `release-assets.githubusercontent.com`) and verifies them (R8: about 100 s on the emulators, no retry).
+- **Screenshots on chess36/chess34 (R8):** emulator 36.3.10 runs `-gpu swangle_indirect` as `swiftshader_indirect`
+  ("change of renderer detected"), and `adb exec-out screencap` then returns an all-WHITE frame. Use the emulator
+  console instead: `adb emu screenrecord screenshot <host dir>` writes a correct `Screenshot_<n>.png` there.
 - **A release build is not debuggable, so `run-as` fails; the `google_apis` images allow `adb root`** (D2f): with
   root, `ls /data/data/net.palaya.chessanalyzer/files/...` reads the release app's storage directly (the
   migration proof used it). `adb unroot` afterwards. The `_playstore` images do not allow root.
