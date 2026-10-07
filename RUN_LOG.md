@@ -3637,3 +3637,68 @@ down; `net.palaya.chessanalyzer.engine.test`, three older MP4s in `Movies/ChessA
 4. The diagnostic log was read with `adb root` (as in D2f) rather than through Share.
 5. `dist/` still holds D2f's 1.1 build (pre-V2 code, arm64 `566b42a5…`, AAB `4f831b27…`); the APKs tested here are newer
    builds of the same versionCode 2 from `4e0f25d`. Not copied to `dist/` and no AAB rebuilt (outside this task); see HANDOFF.
+
+---
+
+## G1 (2026-10-07): famous games, host side (device verification pending)
+
+Baseline `e3843d7`, in an isolated worktree (branch `worktree-agent-a6fd8a30ef820d113`); no emulator or device was used,
+by instruction (another agent had both AVDs). Design, sources, verification and the G1b plan: `docs/FAMOUS_GAMES.md`.
+
+### What was built
+- **Library:** `app/src/main/assets/famous_games.pgn` (91 games, 60,043 B; bare moves, tags Event/Site/Date/Round/White/
+  Black/Result plus ECO from our CC0 `openings.tsv`) and `famous_games_index.tsv` (id, era, title, players, year, result,
+  one-sentence description in our words). Groups: Romantic 8, Classical 18, Between the wars 11, Post-war 17, Karpov and
+  Kasparov 10, Modern 22, Humans against computers 5. From the Immortal Game (1851), the Evergreen and the Opera Game to
+  Byrne - Fischer 1956, Fischer - Spassky 1972 game 6, Kasparov - Topalov 1999, Deep Blue - Kasparov 1996 game 1 and 1997
+  game 6, and the decisive games of the matches up to Ding - Gukesh 2024 game 14. AlphaZero left out: no Wikipedia article
+  gives a game score to check against.
+- **Sources:** Wikipedia only (en, de, and as second sources es, ru, ca, hu, fr, bg, it, pl, nl, cs), fetched as wikitext
+  through `action=raw`, moves only; chessgames.com never fetched (its links in the articles were not followed). Per game
+  in `docs/famous_games_sources.tsv`.
+- **Curation tools** (`scripts/famous_games/`): extractor (bold game moves vs plain variations, strict move-number
+  discipline, ten piece-letter languages, python-chess replay), survey of the chess-game categories of seven Wikipedias,
+  every World Championship article per game section and all interlanguage sister pages (about 1,300 pages), a resolver that
+  pairs each game with an independent second source, and `curate.py` that writes the three files.
+- **UI:** Home's "Famous games" card (under the start card) -> `FamousGamesScreen` (route `famous_games`): AppBarTitle +
+  Back, "Find a game" search (title, players, year; every word must match; accents folded), groups by era with heading
+  rows, rows with title, "White vs Black" (LTR) and "year · result" (LRM). A game's bottom sheet: title, players, event and
+  place, "year · result · N moves", our description, **Review this game** -> the same `startAnalysis` as a shared game
+  (Setup gate included: no net -> `setup_waiting_game.json` + Setup). About: a "Famous games" licence paragraph.
+- **Opening a PGN from storage:** verified by reading the flow (OpenDocument picker -> `readTextFromUri` ->
+  `startAnalysis`; unreadable -> snackbar; several games -> the first). Unchanged.
+- **Design reference (owner rule):** chess.com's master-games library. Taken: a searchable list by player and year; rows
+  carrying the players, the year and the result; one primary action that opens the game for analysis. Ours: grouping by
+  era instead of filter chips (simpler), our own words for every label and description. Pattern only, no assets or copy.
+
+### Verification
+- `python scripts/verify_famous_games.py`: `OK: 91 games verified with python-chess 1.11.2; second sources: none 20,
+  prefix 7, same-moves 61, same-position 3; 12 end in checkmate`. `scripts/famous_games/selftest_verifier.py`: a wrong
+  result on a mate, an illegal move, a `!` and a `{comment}` each make the verifier exit 1; the unchanged files pass.
+- 71 of 91 games agree with a second article (61 identical move lists; 3 the same position by transposition or an
+  equivalent piece choice; 7 where the second article stops earlier and our game passes through its last position). The
+  20 single-source games were each checked at the article's end (resignation, mate or result stated after the last move).
+  Disagreements found and resolved in `docs/FAMOUS_GAMES.md` §3 (Lasker - Bauer move order, Polish Immortal knight
+  choice, Bogoljubov - Alekhine fr breaks off at ply 81, Tal - Botvinnik 1960 g1 en truncated). Rejected while curating:
+  Capablanca - Marshall 1918 (the de article's bold moves at move 11 are a modern line, not the game), Estrin - Berliner
+  (extraction stopped short of the stated end), Ortueta - Sanz (the article's moves matched another article's), the
+  Immortal Losing Game (end unclear), Legall's mate (two versions in two articles), Adams - Torre (authenticity doubted).
+- Host tests: `FamousGamesLogicTest` (13: index reader and its rejections, PGN splitter, tags, ply count, search with
+  accents, grouping, library pairing and its rejections, LRM) and `FamousGamesAssetTest` (5: every real game replayed by
+  `:core`'s `PgnParser`/move generator, bare moves, factual tags, result vs final position, `+`/`#` vs our board, index =
+  PGN, no duplicates).
+- Instrumented: `FamousGamesInstrumentedTest` (2: Home -> library -> search "Kieseritzky" -> sheet -> Review -> Analysing
+  with the net in; and with no net -> Setup with the game kept and its text on disk). **Compiled only, not run.**
+
+### Counts (result XML in the worktree)
+`:core` 522/0/0, `:engine` unit 32/0/0, `:app` unit **491**/0/0 (473 + 18), all 0 skipped. `:app:lintDebug` 0 errors /
+69 warnings (unchanged; none in the new files). `:app:assembleDebug` OK (`app-debug.apk` 114.9 MB, holds
+`assets/famous_games.pgn` and `assets/famous_games_index.tsv`). `:app:compileDebugAndroidTestKotlin` OK.
+One lint round-trip: the first run had 3 errors (BidiSpoofing/ByteOrderMark) because literal U+2068/U+2069/U+200E/U+FEFF
+characters had been written into the new Kotlin files instead of `\u` escapes; replaced by escapes.
+
+### Left for G1-device (RUN_PLAN)
+Run `FamousGamesInstrumentedTest` on chess36 and chess34 (check `skipped="0"`); screenshots of Home with the card, the
+library (portrait, landscape, font 2.0, RTL with Hebrew), the sheet, the no-match line; TalkBack over a row and the sheet;
+review one famous game end to end (Summary). Note for the owner: the Summary still asks "Which side were you?" for a
+famous game; "Not me" answers it.

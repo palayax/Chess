@@ -62,6 +62,12 @@ import net.palaya.chessanalyzer.data.models.ModelDownloadService
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.homeSetupCard
 import net.palaya.chessanalyzer.ui.screens.SetupScreen
+import net.palaya.chessanalyzer.ui.screens.FamousGamesScreen
+import net.palaya.chessanalyzer.ui.screens.FamousGamesState
+import net.palaya.chessanalyzer.data.FamousGamesStore
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.util.readTextFromUri
 
 /**
@@ -220,6 +226,23 @@ fun ChessAnalyzerNavHost(
                 snackbarHostState = homeSnackbarHost,
                 setupCard = homeSetupCard(setupDisk, setupViewModel.sizes, setupRunning, setupProgress, gameWaitingForSetup),
                 onSetupCardClick = { goToSetup() },
+                onFamousGamesClick = { navController.navigate(Destination.FamousGames.route) { launchSingleTop = true } },
+            )
+        }
+
+        composable(Destination.FamousGames.route) {
+            // G1: read from the APK's assets once per process, off the main thread.
+            val state by produceState<FamousGamesState>(FamousGamesState.Loading) {
+                value = withContext(Dispatchers.IO) {
+                    runCatching { FamousGamesStore.load(context) }
+                        .fold({ FamousGamesState.Ready(it) }, { FamousGamesState.Failed })
+                }
+            }
+            FamousGamesScreen(
+                state = state,
+                onBack = { navController.popBackStack() },
+                // Exactly as if the game had been shared: analysed now, or kept for Setup while the net is missing.
+                onReview = { pgnText -> startAnalysis(pgnText) },
             )
         }
 

@@ -229,6 +229,22 @@ fun AboutScreen(
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 8.dp))
 
+                    // --- Famous games (G1): the scores are factual records, the words are ours ---
+                    Text(
+                        text = stringResource(R.string.about_license_famous_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.about_license_famous_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 8.dp))
+
                     // --- Piece artwork ---
                     Text(
                         text = stringResource(R.string.about_license_pieces_title),
