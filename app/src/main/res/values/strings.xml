@@ -22,6 +22,27 @@
     <string name="import_paste_from_clipboard">Paste from clipboard</string>
     <string name="import_clipboard_empty">Nothing to paste yet. Copy a game first.</string>
     <string name="import_invalid_pgn">That doesn\'t look like a chess game. Paste the moves or the game text and try again.</string>
+
+    <!-- G1: the built-in famous-games library (docs/FAMOUS_GAMES.md). Our own words. -->
+    <string name="famous_home_entry_title">Famous games</string>
+    <string name="famous_home_entry_body">Classic games from chess history, ready to review.</string>
+    <string name="famous_title">Famous games</string>
+    <!-- Short, so the field's one-line label is not cut at a 2.0 font; the hint says what to type. -->
+    <string name="famous_search_label">Find a game</string>
+    <string name="famous_search_hint">Player, year or name</string>
+    <string name="famous_search_clear">Clear search</string>
+    <string name="famous_no_results">No famous game matches “%1$s”.</string>
+    <string name="famous_load_failed">The famous games could not be opened.</string>
+    <string name="famous_review_action">Review this game</string>
+    <!-- "1851 · 1-0 · 23 moves" -->
+    <string name="famous_sheet_facts">%1$s · %2$s</string>
+    <string name="famous_era_romantic">Romantic era (before 1880)</string>
+    <string name="famous_era_classical">Classical era (1880–1914)</string>
+    <string name="famous_era_interwar">Between the wars (1915–1945)</string>
+    <string name="famous_era_postwar">Post-war era (1946–1984)</string>
+    <string name="famous_era_kasparov">Karpov and Kasparov era (1985–2005)</string>
+    <string name="famous_era_modern">Modern era (2006 to today)</string>
+    <string name="famous_era_computers">Humans against computers</string>
     <!-- "%1$s vs %2$s" for a game's two players (recent list, summary header). -->
     <string name="game_vs_format">%1$s vs %2$s</string>
     <!-- Recent-game subtitle: %1$s = date, %2$s = "17 moves". -->
@@ -326,6 +347,8 @@
 
     <string name="about_license_openings_title">Opening book</string>
     <string name="about_license_openings_body">Opening classification data is from lichess-org/chess-openings, dedicated to the public domain under CC0.</string>
+    <string name="about_license_famous_title">Famous games</string>
+    <string name="about_license_famous_body">The moves of the famous games are historical records of games as they were played, checked move by move against published scores (mainly Wikipedia\'s articles on the games). The titles and descriptions are written by Palaya; no annotations from any source are included.</string>
 
     <string name="about_license_pieces_title">Piece artwork</string>
     <!-- Piece artwork attribution is loaded at runtime from app/src/main/assets/PIECES_LICENSE.txt

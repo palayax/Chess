@@ -59,6 +59,8 @@ sealed class Destination(val route: String) {
      * so it survives "Not now" and a killed process.
      */
     data object Setup : Destination("setup")
+    /** The built-in famous-games library (G1, docs/FAMOUS_GAMES.md), opened from Home. */
+    data object FamousGames : Destination("famous_games")
     data object Settings : Destination("settings")
     data object About : Destination("about")
 

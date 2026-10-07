@@ -117,6 +117,8 @@ fun ImportScreen(
     /** D2c: "Finish setting up" above the start card until setup is complete (null hides it). */
     setupCard: HomeSetupCard? = null,
     onSetupCardClick: () -> Unit = {},
+    /** G1: opens the famous-games library (null hides the entry). */
+    onFamousGamesClick: (() -> Unit)? = null,
 ) {
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -134,6 +136,7 @@ fun ImportScreen(
         snackbarHostState = snackbarHostState,
         setupCard = setupCard,
         onSetupCardClick = onSetupCardClick,
+        onFamousGamesClick = onFamousGamesClick,
     )
 }
 
@@ -153,6 +156,7 @@ fun ImportScreenContent(
     initiallyShowPasteSheet: Boolean = false,
     setupCard: HomeSetupCard? = null,
     onSetupCardClick: () -> Unit = {},
+    onFamousGamesClick: (() -> Unit)? = null,
 ) {
     // The paste field lives in a sheet, not on the page: sharing a game into the app is the main
     // way in, so a permanently open text box was mostly noise. Saveable so rotating the phone with
@@ -196,6 +200,10 @@ fun ImportScreenContent(
                     onChooseFileClick = onChooseFileClick,
                     onPasteClick = { showPasteSheet = true },
                 )
+            }
+            if (onFamousGamesClick != null) {
+                // G1: the second way in, a game from chess history instead of one of your own.
+                item(key = "famous") { FamousGamesEntryCard(onClick = onFamousGamesClick) }
             }
 
             if (recentGames.isNotEmpty()) {
