@@ -37,3 +37,6 @@ tools/
 
 # PC producer TTS model downloads (hundreds of MB, re-fetchable)
 pc/tts/models/
+
+# Agent worktrees (isolated checkouts)
+.claude/worktrees/

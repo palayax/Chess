@@ -3637,3 +3637,182 @@ down; `net.palaya.chessanalyzer.engine.test`, three older MP4s in `Movies/ChessA
 4. The diagnostic log was read with `adb root` (as in D2f) rather than through Share.
 5. `dist/` still holds D2f's 1.1 build (pre-V2 code, arm64 `566b42a5…`, AAB `4f831b27…`); the APKs tested here are newer
    builds of the same versionCode 2 from `4e0f25d`. Not copied to `dist/` and no AAB rebuilt (outside this task); see HANDOFF.
+
+---
+
+## P1 (2026-10-07): the Google Play kit
+
+Baseline `e3843d7` (clean, pushed). No source change; nothing committed. The owner has a **personal** Play developer account
+(identity verification pending). Committed sources and docs are in `docs/play/`; binaries are in `dist/play-kit/` (gitignored).
+The D2f files already in `dist/` were left alone; nothing was deleted.
+
+### 1. Release build (at `e3843d7`, versionCode 2 / 1.1)
+
+`:app:bundleRelease` (2 min 4 s), then `:app:assembleRelease` as a separate invocation. Copies in `dist/play-kit/`:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `PalayaChess-1.1-release.aab` | 68,829,352 | `532b6c4af72d1a008463f56c7935148efbf4f1994cff76dc85add707bcaa9b33` |
+| `PalayaChess-1.1-arm64-release.apk` | 35,917,205 | `947cff21311ffb70dc0e57da97692274e5404b012ed233165220247b5fa88a0c` |
+| `PalayaChess-1.1-universal-release.apk` | 97,160,749 | `c38f8c4c4fedddf7fcc38eb064bd582836685d1730ebc5c82436c4dc7656320b` |
+
+The same build also made armeabi-v7a (25,820,377 B) and x86_64 (40,175,194 B) APKs; they were not copied.
+
+**Verification:**
+- **AAB signature:** `jarsigner -verify` says "jar verified". The signer is CN=Chess Analyzer, O=Palaya, and
+  `keytool -printcert -jarfile` gives SHA256 `CA:4F:7B:42:…:89:09:47`. The warnings are the usual ones for a self-signed upload
+  key: no timestamp, and the chain is not PKIX.
+- **APK signatures:** `apksigner verify --print-certs` (build-tools 36.1.0) on both APKs: v1 false, **v2 true, v3 true**, one signer,
+  certificate SHA-256 `ca4f7b42ce837f97d48e0e802b48b1c9c9c253ba4e604e56a8dff6979a890947`.
+- **Alignment:** `zipalign -c -P 16 -v 4` succeeds on both APKs (arm64 237 entries OK, universal 249 OK, 0 BAD).
+- **Version:** `aapt2 dump badging` gives versionCode 2, versionName 1.1, compileSdk 36.
+- **Permissions:** `aapt2 dump permissions` lists exactly the six documented ones (`INTERNET`, `ACCESS_NETWORK_STATE`,
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `POST_NOTIFICATIONS`). It also lists
+  androidx.core's own signature permission `net.palaya.chessanalyzer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, which is not a
+  runtime or Play-declared permission. There is no `AD_ID`.
+- **Cleartext:** `aapt2 dump xmltree` has no `networkSecurityConfig` and no `usesCleartextTraffic` (0 matches in each APK).
+- **No models:** `unzip -l` finds 0 entries matching `.nnue|.tar|voices.bin|model*.onnx|espeak` in the AAB and in both APKs. The
+  AAB's largest entries are the native libraries and BUNDLE-METADATA (debug symbols, proguard map).
+
+**bundletool 1.18.3 `get-size total`** (API 36, en-US, 420 dpi), compressed download per device:
+
+| ABI | Bytes |
+|---|---|
+| arm64-v8a | **14,510,518** |
+| x86_64 | 15,947,710 |
+| armeabi-v7a | 13,495,378 |
+
+D2f's figures were 14,473,967 / 15,911,159 / 13,458,827, so V1-V3 added about 37 KB.
+
+### 2. Graphics (`docs/play/make_graphics.py`, Pillow 12.1)
+
+| File | Size | Format | SHA-256 |
+|---|---|---|---|
+| `dist/play-kit/play_icon_512.png` | 93,571 B | 512x512 RGBA | `c535d3e40354f7eca61e9f682d57b0ec224d1ffa0ce6a97574ca5d6a584cf4f1` |
+| `dist/play-kit/play_feature_1024x500.png` | 107,209 B | 1024x500 RGB (no alpha) | `49cfa07e45f0ec49a7f8e2068bf71677799712cf5dc677c99f85c01f8873f8a6` |
+
+- **Icon:** the launcher icon itself. The adaptive icon's white background (`ic_launcher_background`) is composited with
+  `mipmap-xxxhdpi/ic_launcher_foreground.png`, cropped to the visible 72 dp of the 108 dp canvas, and scaled from 288 to 512
+  with Lanczos. The repo and `C:\Claude\PalayaWebSite` have no higher-resolution source of the Palaya mark, so the icon is
+  slightly soft at 512.
+- **Feature graphic:**
+  - Our own palette (`Color.kt`) and the launcher mark.
+  - Text: "Palaya Chess", the tagline "Review your chess games on your phone", and three points ("Every move graded",
+    "Missed tactics shown", "Practise your mistakes").
+  - The app's board, cut from our own screenshot `phone_02_best_line.png` (Cburnett pieces, credited in the app).
+  - Every element is at least 58 px from the edges, the text at least 64 px. No chess.com assets and nothing that looks like one.
+- **Font:** Segoe UI from the Windows fonts folder, rendered into the image and not shipped. No Roboto or other open font was on
+  the machine, and nothing was downloaded. The script also takes Roboto, DejaVu, or a font given by an env var.
+- Both images were viewed.
+
+### 3. Phone screenshots (`docs/play/screenshots/`, all 1080x1920 RGB, all viewed)
+
+**How they were taken:**
+- chess36 (API 36), started with **`-gpu host`** (see Deviations).
+- `wm size 1080x1920`. The emulator capture is letterboxed in 1080x2400, so rows 240-2160 were cropped out.
+- SystemUI demo mode: clock 10:00, battery 100 %, Wi-Fi and mobile full, notification icons hidden.
+- The **kit's universal release APK** was installed fresh and downloaded the models from the live GitHub release.
+- The Immortal Game (`fixtures/immortal.pgn`) was shared as text and analysed at **Standard** in 113 s: White 82 % / Black 72 %,
+  "White won, even after a blunder on move 18", ~1590 / ~1180.
+
+| File | Shows |
+|---|---|
+| `phone_01_summary.png` | Summary with "Not me" chosen (real names), accuracy, ratings, key moments |
+| `phone_02_best_line.png` | Board, "Best line instead of 11… cxb5", at 3 / 7 (12… Qg6), arrow, eval −0.6, "Engine depth 14" |
+| `phone_03_practise.png` | Practise 1 / 2, "From move 8 of your game", a hint shown |
+| `phone_04_walkthrough.png` | "What you missed: X-ray", 4 / 6 (19… Kd8, the knight about to take a8) |
+| `phone_05_video_review.png` | Video review playing the "Move 11: cxb5" key moment |
+| `phone_06_setup.png` | First-run Setup screen (fresh state after `pm clear`) |
+| `phone_07_board_blunder.png` | Board on 11… cxb5: Blunder badge, "This cost about 3 pawns", the explanation |
+| `phone_08_settings_voice.png` | Settings, the Narrator voice sheet (Bella default, Play sample) |
+
+The side was set to White for Practise and the walkthrough, which need a side. Those screens, and the video frame ("Adolf
+Anderssen · you"), therefore say "you". No tablet screenshots were made: they are optional and were not quick (Deviations).
+
+### 4. Foreground-service demo videos (`dist/play-kit/`)
+
+Both were recorded with the emulator console (`adb emu screenrecord start`, webm 1080x2400). ffmpeg 9.0.2 cropped, cut and
+encoded them to H.264 1080x1920 at 30 fps, without audio.
+
+| File | Length | Bytes | SHA-256 |
+|---|---|---|---|
+| `fgs_data_sync_demo.mp4` | 57.07 s | 2,119,048 | `b9ea5f44a72163a04e0f81007adabe13de0490b4267f41f5a9898b22b2d482a8` |
+| `fgs_media_processing_demo.mp4` | 56.80 s | 2,949,073 | `c3ff1e508107e0bbef87c7b21eb7a7df9d877ba90aa4dfc1195c1b60ac3497e6` |
+
+- **dataSync** (fresh install of the kit's universal APK):
+  - The Setup screen; Download tapped; the notification-permission dialog answered **Allow**; the progress.
+  - Home; the shade with "Setting up Palaya Chess · 36 MB of 201 MB", its bar, **Pause** and **Cancel**.
+  - Back in the app: "All set. Palaya Chess works offline from now on."
+  - The real download from the live GitHub release took about 83 s. Raw seconds 36-94 play at 4x, captioned "Sped up 4x (the
+    real download took about 85 s)".
+- **mediaProcessing** (the Immortal Game, Bella, Relaxed pace, 49 narration segments):
+  - Save video; "Preparing narration… (0/49)".
+  - A captioned time-lapse, one frame per 30 s.
+  - 13 minutes in, in real time: Home, then the shade with the expanded "Exporting video review" notification, its progress bar
+    and **Cancel**.
+  - A second time-lapse of "Rendering video…".
+  - At the end, in real time: "Video saved · 7 min 46 s · 39 MB"; Home; the shade with "Video saved · Tap to watch your video
+    review"; back to the app.
+  - The whole export took about 36 min on the emulator (23:02:27 -> 23:38:31; narration about 16 min, rendering about 20 min).
+  - The MP4 was pulled and measured: 465.58 s, 38,794,159 B, h264 1280x720 + AAC, mean −25.8 dB, max −5.8 dB.
+- Frames of the raw recordings and of both final MP4s were pulled into contact sheets and viewed.
+
+### 5. The answer sheet
+
+`docs/play/PLAY_CONSOLE_ANSWERS.md` lists every Console field and question, in Console order, with the answer to enter:
+
+- **Create app.**
+- **Store listing:** texts measured with `len()` (name 25, short description 79, full description 2,396; the full description is
+  STORE_LISTING.md's text, equal after whitespace normalisation), graphics and screenshots, store settings.
+- **Every App content section:** privacy policy; ads; app access / sign-in details, with a reviewer note; content rating, with the
+  category reasoning and every topic; target audience 13+; news; Data safety; government; financial; health; advertising ID;
+  foreground-service declarations, with texts under 500 characters each and the videos.
+- **App signing.**
+- **Testing:** internal, then closed (12 testers for 14 days, the message to testers, the apply-for-production answers).
+- **Production:** countries, and the 1.1 release notes (394 characters with the tags).
+
+A research subagent checked it against the Play Console Help pages on 2026-10-07; the sheet lists its sources. Its §12 lists
+14 items whose exact Console wording could not be confirmed.
+
+### Observations (no defect found, nothing changed)
+
+1. **Setup sizes.** The Setup screen says "about 100 MB" + "about 110 MB" = "about 210 MB". The real total is 201,054,635 B (98.5
+   + 102.5 MB). This is a conservative round-up, and the listing and the FGS text use the same 210.
+2. **Time left during rendering.** While "Rendering video…" runs, the export shows a progress bar but no time-left line. The
+   narration phase does show "About N min left" / "Less than a minute left", and that last line stayed for about 3 more minutes
+   while the final segments finished. Cosmetic.
+3. **Walkthrough on a 731 dp tall screen** (1080x1920 at 420 dpi). A two-line step text starts just under the bottom "Next" bar
+   until the user scrolls. The content scrolls, so nothing is lost; one-line steps fit.
+4. **Notification permission and the demo.** In the first dataSync recording, Home was pressed while the notification-permission
+   dialog was up, so the permission stayed ungranted. The download then ran with no visible notification, which is normal Android
+   behaviour for a foreground service without the permission. The recording was redone with Allow.
+
+### Device state restored
+
+- chess36:
+  - Demo mode exited and `sysui_demo_allowed 0`.
+  - `wm size reset` (Physical size 1080x2400 checked).
+  - Airplane mode 0 (never changed).
+  - Our app uninstalled (0 packages); the exported MP4 and `/data/local/tmp/ui.xml` deleted.
+  - No adb reverse.
+  - Emulator shut down (`adb emu kill`). It ran with `-no-snapshot-save`, so its quickboot snapshot is unchanged.
+- No host servers were started. chess34 was not used.
+
+### Deviations
+
+1. **Emulator started with `-gpu host`, not `-gpu swangle_indirect`.** Under swangle (in practice swiftshader), the console capture
+   had no status bar and the notification shade was an all-black frame, so the FGS videos would have shown nothing. With the host
+   GPU, `adb emu screenrecord screenshot` and `screenrecord start` capture everything, SystemUI included. CLAUDE.md's "System UI
+   isn't responding" with the host GPU did not occur.
+2. **Recorded with the emulator console, not `adb shell screenrecord`.** The device-side recorder gave a single black frame in a
+   3 s test. The console recorder captures the full 1080x2400 framebuffer at 24 fps, with a 180 s limit; the result was cropped
+   to 1080x1920.
+3. **Time-lapse in the mediaProcessing video.** The 36-minute middle is shown as time-lapse frames (a screenshot every 30 s), not as
+   a sped-up continuous recording, because the console recorder stops at 180 s. Both kinds of segment are captioned.
+4. **Serial-console notification in both videos.** The emulator's own "Serial console enabled" notification cannot be dismissed,
+   so it shows in the shade. The setup-done notification was swiped away before the export recording.
+5. **No tablet screenshots** (optional).
+6. **No CLAUDE.md change.** Suggested gotcha for the lead: screenshots or recordings that must include SystemUI (status bar,
+   notification shade) need chess36 started with `-gpu host` and captured with `adb emu screenrecord`. `adb shell
+   screencap`/`screenrecord` give black frames there.
+7. `.claude/worktrees/` is untracked in the tree. This task did not create it and left it alone.

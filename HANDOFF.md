@@ -11,6 +11,38 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
+## P1 DONE (2026-10-07): THE GOOGLE PLAY KIT. OWNER: START HERE
+
+The kit is ready.
+
+**Fill in Play Console from `docs/play/PLAY_CONSOLE_ANSWERS.md`.** It covers every field and question in order, with the exact
+answer: Create app, store listing, all App content sections (content rating, Data safety, foreground services and the rest),
+app signing, internal testing, then the closed test that personal accounts need (12 testers for 14 days), and production.
+Its §10 is your checklist; its §12 lists the wording that could not be confirmed.
+
+**Files to upload are in `dist/play-kit/`** (on this PC, gitignored), built at `e3843d7`:
+
+- `PalayaChess-1.1-release.aab`: upload this one. SHA-256 `532b6c4a…9b33`. Signed with the upload key `ca4f7b42…0947`.
+  About 14.5 MB to an arm64 phone.
+- `PalayaChess-1.1-arm64-release.apk` and `PalayaChess-1.1-universal-release.apk`: for direct installs only.
+- `play_icon_512.png`, the app icon, and `play_feature_1024x500.png`, the feature graphic. Both are remade by
+  `python docs/play/make_graphics.py`.
+- `fgs_data_sync_demo.mp4` and `fgs_media_processing_demo.mp4`: upload these to YouTube as **Unlisted**, then paste the two
+  links into the foreground-service declaration (sheet §3.12).
+
+**Screenshots:** 8 phone screenshots at 1080x1920 in `docs/play/screenshots/`.
+
+**Your decisions** (sheet §11):
+
+- App or Game: the sheet uses Game > Board.
+- The app signing key (sheet §4): the default is Google's key; keep your own only if sideloaded users must update from Play.
+- The tester list.
+- The production countries.
+
+Verification, sizes, hashes and deviations are in RUN_LOG "P1".
+
+---
+
 ## WHAT IS LIVE, AND OWNER TO-DO BEFORE GOOGLE PLAY (R8, 2026-10-07)
 
 **Live and proven (R8, RUN_LOG "R8"):** the public repo https://github.com/palayax/Chess (source pushed, `4e0f25d`);
@@ -30,20 +62,20 @@ server use `adb reverse tcp:8787 tcp:8787` and `-PpalayaModelBaseUrl=http://127.
 1. ~~Create the GitHub repo~~ done (`palayax/Chess`, public). ~~Push the source~~ done. ~~Publish the models~~ done
    (`models-2026.10` + signed manifest). ~~Host the privacy policy~~ done (GitHub Pages). ~~Decide the colours~~ done
    (keep them).
-2. **Rebuild the upload files from the current code.** `dist/` still holds D2f's 1.1 build (before V1/V2/V3:
-   `PalayaChess-1.1-release.aab` `4f831b27…`). Run `:app:bundleRelease` (and `assembleRelease` for the sideload APKs) from
-   the current tree and upload THAT AAB. Same versionCode 2 is fine for a first upload; raise it for every later one.
+2. ~~Rebuild the upload files from the current code~~ done in P1: upload `dist/play-kit/PalayaChess-1.1-release.aab`, NOT
+   the older D2f `dist/PalayaChess-1.1-release.aab` (`4f831b27…`). Same versionCode 2 is fine for a first upload; raise it
+   for every later one.
 3. **Back up `keystore/` offline** (two places): `chessanalyzer-release.jks`, `keystore.properties` and
    `models-signing.pem`. Losing the first two means no app updates for sideloaded users (Play can reset an upload key);
    losing the `.pem` means no model updates until an app update ships a new key.
-4. **Choose the Play developer account type** (personal or organisation, e.g. Palaya Cyber Security LTD).
+4. ~~Choose the Play developer account type~~ done: **personal** (identity verification pending).
 5. **If it is a personal account:** Play requires a closed test with **at least 12 testers opted in for 14 days** before
    you can apply for production. Recruit them early (an organisation account is exempt).
 6. **Listen to the narrator voices** (`docs/voice_samples/v1/`) and confirm or change the default (Bella).
 7. **Never delete or replace the `models-2026.10` assets**: every installed 1.1 downloads exactly those bytes (the pins
    are compiled in). New models go to a new tag plus a re-signed `models.json`.
 
-Then, in Play Console: upload the rebuilt AAB, choose Play App Signing deliberately (PUBLISHING §3: keep the existing key
+Then, in Play Console (step by step in `docs/play/PLAY_CONSOLE_ANSWERS.md`): upload the rebuilt AAB, choose Play App Signing deliberately (PUBLISHING §3: keep the existing key
 if sideloaded 1.0/1.1 users must update in place), fill in the foreground-service declarations with two short videos
 (§3), the Data safety form (§5: no data collected or shared), content rating (Everyone), the privacy policy URL, and the
 listing (`docs/STORE_LISTING.md`).
