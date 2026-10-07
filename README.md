@@ -20,8 +20,10 @@ tapped. Design: [`docs/MODEL_DOWNLOAD_DESIGN.md`](docs/MODEL_DOWNLOAD_DESIGN.md)
 ## Status
 
 Version 1.1 (versionCode 2): signed APKs and an App Bundle built and verified on emulators (API 34 and
-36), including the update from the bundled 1.0 build. Not yet live: the GitHub repo and the model release
-the app downloads from (owner steps in `HANDOFF.md` and `docs/PUBLISHING.md`). See `RUN_PLAN.md` for the
+36), including the update from the bundled 1.0 build. The model files the app downloads are published in
+this repository's [`models-2026.10`](https://github.com/palayax/Chess/releases/tag/models-2026.10) release,
+with the signed update list in the [`models`](https://github.com/palayax/Chess/releases/tag/models) release.
+Privacy policy: https://palayax.github.io/Chess/privacy/. Remaining owner steps for Google Play: `HANDOFF.md` and `docs/PUBLISHING.md`. See `RUN_PLAN.md` for the
 task breakdown and `RUN_LOG.md` for what has been built and verified, including the defects found along
 the way.
 

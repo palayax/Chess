@@ -17,7 +17,7 @@ downloading build; the owner's own to-do list is at the top of `HANDOFF.md`.
 | Network | only after a tap: the setup download, and Settings > Check for updates (`models.json` + `.sig`, then a file only on "Download and install"). Nothing in the background, nothing uploaded |
 | Permissions | `INTERNET`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `POST_NOTIFICATIONS` (checked with aapt2 on the release APK, D2f) |
 | Foreground services | `ModelDownloadService` (dataSync), `VideoExportService` (mediaProcessing on Android 15+, dataSync on 10-14) |
-| Privacy policy | `docs/PRIVACY_POLICY.md`, to be hosted on palaya.net (not hosted yet) |
+| Privacy policy | `docs/PRIVACY_POLICY.md`, live at https://palayax.github.io/Chess/privacy/ (GitHub Pages, `gh-pages` branch) |
 
 ---
 
@@ -365,8 +365,8 @@ reading of the form, not a legal conclusion; confirm against the form's wording 
   `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`,
   `POST_NOTIFICATIONS`. Pinned by the host `ManifestPermissionsTest` and the instrumented
   `NetworkPermissionTest`; "no request on its own" by `NoNetworkAfterSetupTest` and `UpdateCheckNetworkTest`.
-- **Privacy policy URL:** required because the app requests `INTERNET`: host `docs/PRIVACY_POLICY.md` on
-  palaya.net and enter that URL (also in the listing).
+- **Privacy policy URL:** required because the app requests `INTERNET`: `docs/PRIVACY_POLICY.md` is live at
+  https://palayax.github.io/Chess/privacy/ (GitHub Pages from the `gh-pages` branch); enter that URL (also in the listing).
 
 ---
 
@@ -378,7 +378,7 @@ Before the first Play upload (and again for each release):
       (§4b, §4c), then verify from outside: release APK, fresh install, Setup > Download reaches "All set";
       Settings > Check for updates says "You're up to date."
 - [ ] Public source repo pushed (GPLv3), linked in About (`about_license_source_url`) and in the listing
-- [ ] Privacy policy hosted on palaya.net; URL in Play Console and the listing
+- [x] Privacy policy hosted (https://palayax.github.io/Chess/privacy/); [ ] URL entered in Play Console and the listing
 - [ ] Back up `keystore/` (`chessanalyzer-release.jks` AND `models-signing.pem`) and `keystore.properties`
       offline, in two places
 - [ ] `versionCode` raised for every upload (1.1 = 2); `versionName` matches the listing's "What's new"

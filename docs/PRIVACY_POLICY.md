@@ -1,6 +1,6 @@
 <!--
-Published 2026-10-07 at https://palaya.net/chess/privacy (PalayaWebSite/chess/privacy.html, generated from this
-file). Keep the two in step, and keep it in step with docs/PUBLISHING.md §5 (Data safety answers). This comment
+Published 2026-10-07 at https://palayax.github.io/Chess/privacy/ (the gh-pages branch, privacy/index.html, generated from this
+file; GitHub Pages, owner's choice: GitHub only). Republish it whenever this file changes. Keep the two in step, and keep it in step with docs/PUBLISHING.md §5 (Data safety answers). This comment
 is not part of the page.
 -->
 

@@ -86,7 +86,7 @@ bold does not render on Play, so paste the text without the asterisks.)*
 - Content rating questionnaire: no user-generated content, no ads, no purchases, no sharing of location or
   personal data: expected rating **Everyone / PEGI 3**.
 - Ads: **No**. In-app purchases: **No**.
-- Privacy policy URL: the hosted copy of `docs/PRIVACY_POLICY.md` (on palaya.net; not hosted yet).
+- Privacy policy URL: https://palayax.github.io/Chess/privacy/
 
 ## Screenshots to capture (minimum 2, ideally 5; phone portrait)
 
