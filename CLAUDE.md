@@ -278,10 +278,14 @@ conflict.
 
 - **Generated text is a claim, and is verified.** Card texts and walkthroughs are shown as fact:
   `CommentaryGenerator` says a thing only when the position or the engine's numbers prove it (spec
-  §7.2), and `scripts/audit_commentary.py` re-checks every text of the two recorded games with
-  python-chess (`docs/COMMENTARY_AUDIT.md`). A new sentence template needs a verified claim behind it
-  and a case in `CommentaryClaimsTest`; an unverifiable sentence is dropped, not hedged. The text is a
-  pure function of the annotation and the viewer's side, so it is rewritten when the user picks a side.
+  §7.2), and `scripts/audit_commentary.py` re-checks every text of the three recorded games with
+  python-chess (`docs/COMMENTARY_AUDIT.md`; `mutate` is its negative control). A new sentence template
+  needs a verified claim behind it, a verifier in the script (an unrecognised sentence is WRONG), a row
+  in the vocabulary table of `docs/COMMENTARY_STYLE.md` and a case in `CommentaryClaimsTest` (its
+  template catalogue must list every phrasing); an unverifiable sentence is dropped, not hedged. A
+  professional term is used only where its definition is proved (C1). Phrasings rotate by
+  `Variety(ply)`, never by randomness, so the text is a pure function of the annotation and the
+  viewer's side, is rewritten when the user picks a side, and keeps the narration cache reproducible.
 - Move generation is verified by **perft** against the five standard positions: **depth 5** on the
   start position and Position 3, **depth 4** on Kiwipete, Position 4 and Position 5. If you
   touch move generation, those numbers must stay exact — they are the correctness oracle.

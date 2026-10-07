@@ -73,6 +73,31 @@ internal object BoardFacts {
         return df == 0 || dr == 0 || df == dr
     }
 
+    /**
+     * [position] with the move handed to the other side and nothing played - "what could the other side
+     * do if it were its turn?" - which is how a threat is tested (a back-rank mate threat) and how a
+     * piece is shown to be lost where it stands (a desperado). Null while the side to move is in check,
+     * where passing is not a meaningful question. Mirrors `MotifDetector.passTurn`.
+     */
+    fun passTurn(position: Position): Position? {
+        if (position.isInCheck()) return null
+        val fields = position.toFen().split(" ").toMutableList()
+        fields[1] = if (position.sideToMove == Color.WHITE) "b" else "w"
+        fields[3] = "-"
+        return try {
+            Position.fromFen(fields.joinToString(" "))
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * The best the side to move can net by capturing on [square], by [ExchangeEvaluator.see] over its
+     * legal captures there; null when it has none. A positive value means the piece there is winnable.
+     */
+    fun bestCapture(position: Position, square: Square): Int? =
+        position.legalMoves().filter { it.isCapture && it.to == square }.maxOfOrNull { ExchangeEvaluator.see(position, it) }
+
     /** Every neighbour of [square] on the board. */
     fun neighbours(square: Square): List<Square> {
         val out = ArrayList<Square>(8)

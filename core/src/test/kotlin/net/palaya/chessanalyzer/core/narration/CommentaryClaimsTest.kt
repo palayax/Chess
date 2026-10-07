@@ -2,14 +2,17 @@ package net.palaya.chessanalyzer.core.narration
 
 import net.palaya.chessanalyzer.core.analysis.BestLineCaption
 import net.palaya.chessanalyzer.core.analysis.BestLines
+import net.palaya.chessanalyzer.core.analysis.BoardFacts
 import net.palaya.chessanalyzer.core.analysis.CandidateLine
 import net.palaya.chessanalyzer.core.analysis.CommentaryGenerator
+import net.palaya.chessanalyzer.core.analysis.ExchangeEvaluator
 import net.palaya.chessanalyzer.core.analysis.GameReport
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.PieceType
 import net.palaya.chessanalyzer.core.chess.Position
+import net.palaya.chessanalyzer.core.chess.Square
 import net.palaya.chessanalyzer.core.chess.moveToSan
 import net.palaya.chessanalyzer.core.chess.parseSan
 import net.palaya.chessanalyzer.core.chess.parseUci
@@ -20,14 +23,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ANALYSIS_SPEC §7.2 / docs/COMMENTARY_AUDIT.md: every card text of the two recorded real games, for
+ * ANALYSIS_SPEC §7.2 / docs/COMMENTARY_AUDIT.md: every card text of the three recorded real games, for
  * no side, White and Black, is checked against the position it is about. The independent
  * (python-chess) audit lives in `scripts/audit_commentary.py`; these are the rules it found
- * broken, kept as tests so they stay fixed.
+ * broken, kept as tests so they stay fixed, plus the C1 rules: every sentence is one of the catalogued
+ * templates (docs/COMMENTARY_STYLE.md), every professional term is re-verified on the board here too,
+ * and the variety is deterministic.
  */
 class CommentaryClaimsTest {
 
-    private val games = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom)
+    private val games = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
     private val sides = listOf<Color?>(null, Color.WHITE, Color.BLACK)
 
     private val reports: Map<Pair<String, Color?>, GameReport> by lazy {
@@ -38,7 +43,7 @@ class CommentaryClaimsTest {
         for ((name, _) in games) for (side in sides) for (a in reports.getValue(name to side).annotations) block(name, side, a)
     }
 
-    private val sentenceSplit = Regex("(?<=\\.)\\s+(?=[A-Z])")
+    private val sentenceSplit = Regex("(?<=\\.)\\s+")
 
     private val errorClasses = setOf(MoveClassification.INACCURACY, MoveClassification.MISTAKE, MoveClassification.BLUNDER)
 
@@ -51,25 +56,21 @@ class CommentaryClaimsTest {
 
     @Test
     fun `defect 1 - 20 Na6 allows White's mate and does not force one`() {
-        assertEquals(
-            "This lets White play Nxg7+, which starts a forced mate. Better was Ba6.",
-            textAt("immortal", 40)
-        )
-        assertEquals(
-            "This lets your opponent play Nxg7+, which starts a forced mate. Better was Ba6.",
-            textAt("immortal", 40, Color.BLACK)
-        )
-        assertEquals(
-            "This lets you play Nxg7+, which starts a forced mate. Better was Ba6.",
-            textAt("immortal", 40, Color.WHITE)
-        )
+        val charge = Regex("^(This lets White play|Now White can play|This hands White) Nxg7\\+, which (starts a forced mate in 5|begins a forced mate in 5|sets a forced mate in 5 in motion)\\.")
+        val t = textAt("immortal", 40)
+        assertTrue(t, charge.containsMatchIn(t))
+        assertTrue(t, t.endsWith(" Better was Ba6."))
+        assertFalse(t, "forces" in t)
+        assertEquals(t.replace("White", "you").replace("Black", "your opponent"), textAt("immortal", 40, Color.WHITE))
+        assertEquals(t.replace("White", "your opponent").replace("Black", "you"), textAt("immortal", 40, Color.BLACK))
     }
 
     @Test
     fun `defect 2 - a brilliant move says what it offers and allows nothing`() {
         val a = reports.getValue("chesscom" to null).annotations.first { it.ply == 19 }
         assertEquals(MoveClassification.BRILLIANT, a.classification)
-        assertEquals("Nxb5 is a sacrifice: it offers the knight on b5.", a.text)
+        assertTrue(a.text, Regex("^Nxb5 (is a sacrifice: it offers|sacrifices|offers) the knight on b5").containsMatchIn(a.text))
+        assertFalse(a.text, "lets" in a.text || "allow" in a.text)
     }
 
     @Test
@@ -77,22 +78,22 @@ class CommentaryClaimsTest {
         // 14.Rd1 in the Opera Game: Rxd1 is illegal, the rook on d7 is pinned to its king by Bb5.
         val a = reports.getValue("chesscom" to null).annotations.first { it.ply == 27 }
         assertNotEquals("Rd1 is not a brilliancy", MoveClassification.BRILLIANT, a.classification)
-        assertFalse(a.text, a.text.contains("sacrifice"))
+        assertFalse(a.text, a.text.contains("sacrific"))
     }
 
     @Test
     fun `defect 3 - 6 Nf6 does not pin anything, it lets White play Qb3`() {
-        assertEquals(
-            "This lets White play Qb3, which pins the pawn on b7 to the knight on b8. Better was Qf6.",
-            textAt("chesscom", 12)
-        )
+        val t = textAt("chesscom", 12)
+        assertTrue(t, Regex("^(This lets White play|Now White can play|This hands White) Qb3, which (pins the pawn on b7 to the knight on b8|ties the pawn on b7 to the knight on b8 with a relative pin)\\.").containsMatchIn(t))
+        assertTrue(t, t.endsWith(" Better was Qf6."))
     }
 
     @Test
     fun `an attack on a loose piece is an attack, never a win`() {
         // 5...Nf6 attacks the e4 pawn; 7.Nf3 attacked the queen, which then left. Neither "wins" anything.
-        assertEquals("Nf6 matches the engine's top choice. This attacks the undefended pawn on e4.", textAt("immortal", 10))
-        assertEquals("Nf3 matches the engine's top choice. This attacks the undefended queen on h4.", textAt("immortal", 11))
+        val loose = "(attacks the undefended|hits the loose|attacks the) (pawn on e4|queen on h4)(, which is en prise)?\\."
+        assertTrue(textAt("immortal", 10), Regex("^Nf6 .*\\. (This|It) $loose$").matches(textAt("immortal", 10)))
+        assertTrue(textAt("immortal", 11), Regex("^Nf3 .*\\. (This|It) $loose$").matches(textAt("immortal", 11)))
     }
 
     // -----------------------------------------------------------------------
@@ -102,11 +103,14 @@ class CommentaryClaimsTest {
     @Test
     fun `none of the unprovable wordings survives anywhere`() {
         val banned = listOf(
-            "forces mate", "allowed", "drops the", "wins the ", "traps the", "sets up a", "sets up an",
-            "keeping material level", "stunning", "opens a discovered attack", "The point becomes clear"
+            "forces mate", "allowed", "drops the", "sets up a deflection", "sets up an", "sets up a clearance",
+            "keeping material level", "stunning", "opens a discovered attack", "The point becomes clear", "probably", "might",
+            "plan", "idea", "intends", "strategic"
         )
+        val winsAPieceOnASquare = Regex("wins the (pawn|knight|bishop|rook|queen|king) on")
         every { name, side, a ->
             for (b in banned) assertFalse("$name/$side ply ${a.ply}: '$b' in [${a.text}]", b in a.text)
+            assertFalse("$name/$side ply ${a.ply}: [${a.text}]", winsAPieceOnASquare.containsMatchIn(a.text))
         }
     }
 
@@ -125,18 +129,21 @@ class CommentaryClaimsTest {
         }
     }
 
+    private val chargeLead = Regex("^(?:This lets (you|your opponent|White|Black) play (\\S+?)|Now (you|your opponent|White|Black) can play (\\S+?)|This hands (you|your opponent|White|Black) (\\S+?))(?:,|;) ")
+
     @Test
     fun `a reply or a charge appears only on an error, names a legal opponent move, and the right beneficiary`() {
-        val lets = Regex("^This lets (you|your opponent|White|Black) play (\\S+?)(?:,|;) ")
         every { name, side, a ->
             val pos = Position.fromFen(a.fenBefore)
             val after = pos.makeMove(pos.parseUci(a.uci))
-            val m = lets.find(a.text)
+            val m = chargeLead.find(a.text)
             if (a.classification !in errorClasses) {
-                assertFalse("$name/$side ply ${a.ply}: a charge on ${a.classification}: [${a.text}]", "lets" in a.text || "allows" in a.text)
+                assertFalse("$name/$side ply ${a.ply}: a charge on ${a.classification}: [${a.text}]", "lets" in a.text || "allows" in a.text || "can play" in a.text || "hands" in a.text)
             }
             if (m != null) {
-                val reply = after.parseSan(m.groupValues[2]) // throws unless it is a legal move for the opponent
+                val who = m.groupValues[1].ifEmpty { m.groupValues[3] }.ifEmpty { m.groupValues[5] }
+                val replySan = m.groupValues[2].ifEmpty { m.groupValues[4] }.ifEmpty { m.groupValues[6] }
+                val reply = after.parseSan(replySan) // throws unless it is a legal move for the opponent
                 assertEquals(a.color.opposite(), reply.color)
                 val opponent = a.color.opposite()
                 val expected = when {
@@ -144,7 +151,7 @@ class CommentaryClaimsTest {
                     opponent == side -> "you"
                     else -> "your opponent"
                 }
-                assertEquals("$name/$side ply ${a.ply}: [${a.text}]", expected, m.groupValues[1])
+                assertEquals("$name/$side ply ${a.ply}: [${a.text}]", expected, who)
             }
         }
     }
@@ -164,7 +171,7 @@ class CommentaryClaimsTest {
             a.bestMoveUci?.let { u -> runCatching { before.makeMove(before.parseUci(u)) }.getOrNull()?.let(positions::add) }
             for (m in mention.findAll(a.text)) {
                 val type = PieceType.valueOf(m.groupValues[1].uppercase())
-                val square = net.palaya.chessanalyzer.core.chess.Square.fromAlgebraic(m.groupValues[2])
+                val square = Square.fromAlgebraic(m.groupValues[2])
                 assertTrue(
                     "$name/$side ply ${a.ply}: '${m.value}' is not true in any position of [${a.text}]",
                     positions.any { it.pieceAt(square)?.type == type }
@@ -193,10 +200,173 @@ class CommentaryClaimsTest {
             MoveClassification.BEST, MoveClassification.GREAT, MoveClassification.BRILLIANT,
             MoveClassification.EXCELLENT, MoveClassification.GOOD, MoveClassification.BOOK, MoveClassification.FORCED
         )
+        // The GREAT lead says "the next-best option gives up real ground" about the alternatives, which is praise.
+        val negative = Regex(
+            "^\\S+ (gives back ground|is not the most precise|concedes a little ground|gives up real ground|goes wrong|lets the position slip" +
+                "|gives up a big chunk of the position|is a serious slip|throws a big chunk of the position away)\\." +
+                "|lets |allow|hands |That takes|swings from|that is what this cost|Better was"
+        )
         every { name, side, a ->
             if (a.classification in approved) {
-                assertFalse("$name/$side ply ${a.ply}: [${a.text}]", "lets" in a.text || "allow" in a.text || "gives back" in a.text)
+                assertFalse("$name/$side ply ${a.ply}: [${a.text}]", negative.containsMatchIn(a.text))
             }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // C1: every sentence is a catalogued template, and every term is re-verified here
+    // -----------------------------------------------------------------------
+
+    private val who = "(?:you|your opponent|White|Black)"
+    private val piece = "(?:pawn|knight|bishop|rook|queen|king)"
+    private val on = "the $piece on [a-h][1-8]"
+    private val material = "(?:a queen|a rook|a piece|a pawn|the exchange)"
+    private val bands = "(?:decisively winning|winning|clearly better|slightly better|about level|slightly worse|clearly worse|losing|decisively lost)"
+
+    /** The verb phrases a found / allowed / better sentence may carry (docs/COMMENTARY_STYLE.md, the vocabulary table). */
+    private val phrases = listOf(
+        "is checkmate", "is mate", "delivers checkmate",
+        "(?:starts|begins) a forced mate(?: in \\d+)?", "sets a forced mate in \\d+ in motion",
+        "is a back-rank mate", "is mate on the back rank",
+        "is a smothered mate(?:: the king is boxed in by its own pieces)?",
+        "forks $on(?:, $on)* and $on(?: with a pawn)?", "is a (?:pawn )?fork, hitting $on(?:, $on)* and $on(?: at once)?", "lands a fork on $on(?:, $on)* and $on",
+        "attacks $on(?:, $on)* and $on at once", "creates a double attack on $on(?:, $on)* and $on",
+        "pins $on to $on", "puts $on in an absolute pin against the king on [a-h][1-8]", "ties $on to $on with a relative pin",
+        "skewers $on, with $on behind it", "is a skewer: it attacks $on, and $on stands behind it on the same line",
+        "uncovers $on, which now attacks $on", "is a discovered attack: $on is unmasked against $on",
+        "gives check by uncovering $on", "is a discovered check from $on",
+        "gives double check", "is a double check: only a king move can answer it",
+        "attacks the undefended $piece on [a-h][1-8]", "hits the loose $piece on [a-h][1-8]", "attacks $on, which is en prise",
+        "leaves $on undefended, with $on attacking it", "leaves $on en prise to $on",
+        "(?:attacks|hits) $on with an? $piece", "leaves $on attacked by an? $piece",
+        "attacks $on more often than it is defended", "piles up on $on: more attackers than defenders", "leaves $on attacked more often than it is defended",
+        "leaves $on with no safe square", "traps $on: every square it can reach loses material",
+        "(?:wins|picks up) $material",
+        "promotes (?:the pawn )?to an? $piece", "underpromotes to an? $piece", "is an underpromotion, to an? $piece",
+        "is a desperado: the $piece was lost anyway, so it takes $on on the way out",
+        "threatens \\S+, mate on the back rank", "sets up a back-rank mate: \\S+ is the threat",
+        // the engine's line (the detector's own descriptions, opened with the move)
+        "deflects $on away from guarding [a-h][1-8]", "drags $on off [^,]+, and \\S+ follows", "clears [a-h][1-8] so that \\S+ can come through",
+        "takes away $on, which was what held [a-h][1-8]; \\S+ follows", "lures the $piece to [a-h][1-8], and \\S+ mates", "drags the $piece to [a-h][1-8], where \\S+ forks it",
+        "cuts $on off from [a-h][1-8], and \\S+ follows", "is the Greek gift: the knight comes to [a-h][1-8] and the queen to [a-h][1-8] behind it",
+        "sets up a windmill: the rook keeps coming back to [a-h][1-8] with check, taking material each time round",
+        "is a zwischenzug: it comes first, and \\S+ follows", "exploits the overloaded $piece on [a-h][1-8], which cannot guard [a-h][1-8] and [a-h][1-8] at once"
+    ).joinToString("|") { "(?:$it)" }
+
+    private val san = "\\S+"
+    private val templates = listOf(
+        "$san (?:follows known opening theory|is still opening theory|stays in book)",
+        "(?:$san was the only legal move|$san was forced: the only legal move|No choice here: $san was the only legal move)",
+        "$san (?:matches the engine's top choice|is the engine's first choice|is the top engine move here)",
+        "$san (?:is very close to the best move|is nearly the engine's top choice|comes within a whisker of the best move)",
+        "$san (?:is a sound move|is a reasonable move|is a solid choice)",
+        "$san (?:was the only move that kept things on track|is the only move here: the next-best option gives up real ground|is an only move, and nothing else keeps the position on track)",
+        "$san (?:is a sacrifice: it offers|sacrifices) $on", "$san offers $on: a sacrifice the engine rates among the best moves here",
+        "$san leaves $on open to capture, and the engine still rates it among the best moves", "$san is among the engine's best moves here",
+        "$san (?:gives back ground|is not the most precise|concedes a little ground)",
+        "$san (?:gives up real ground|goes wrong|lets the position slip)",
+        "$san (?:gives up a big chunk of the position|is a serious slip|throws a big chunk of the position away)",
+        "(?:This|It) (?:$phrases)", "(?:In the engine's line, |The engine's line shows it: )$san (?:$phrases)",
+        "(?:This lets $who play $san|Now $who can play $san|This hands $who $san)(?:, which|; in the engine's line it) (?:$phrases)",
+        "This allows a forced mate(?: in \\d+)?", "This walks into a forced mate in \\d+", "After this, $who has a forced mate in \\d+",
+        "That takes $who from $bands to $bands", "The position swings from $bands to $bands for $who", "From $bands to $bands in one move: that is what this cost $who",
+        "Better was $san", "Better was $san(?:, which|: it|; in the engine's line it|: in the engine's line it) (?:$phrases)",
+        "Better was $san(?:, forcing mate in \\d+|, with a forced mate in \\d+|: mate in \\d+ was on the board)",
+        "Better was $san(?:, keeping|, which holds on to|: it keeps) (?:a decisive advantage|a winning position)",
+        "A forced mate in \\d+ was on the board", "A decisive advantage was on the board"
+    ).map { Regex("^(?:$it)\\.$") }
+
+    @Test
+    fun `every sentence of every text is one of the catalogued templates`() {
+        var sentences = 0
+        every { name, side, a ->
+            for (s in sentenceSplit.split(a.text)) {
+                sentences++
+                assertTrue("$name/$side ply ${a.ply}: no template matches [$s] in [${a.text}]", templates.any { it.matches(s) })
+            }
+        }
+        assertTrue("$sentences sentences", sentences > 500)
+    }
+
+    @Test
+    fun `the professional terms are re-verified on the board wherever they appear`() {
+        var terms = 0
+        every { name, side, a ->
+            val before = Position.fromFen(a.fenBefore)
+            val move = before.parseUci(a.uci)
+            val after = before.makeMove(move)
+            val t = a.text
+            val tag = "$name/$side ply ${a.ply}: [$t]"
+            fun found(regex: String) = Regex("(?:This|It) $regex\\.").find(t)
+            found("(?:wins|picks up) the exchange")?.let {
+                terms++
+                assertTrue(tag, ExchangeEvaluator.isExchangeCapture(before, move))
+                assertTrue(tag, ExchangeEvaluator.see(before, move) in ExchangeEvaluator.EXCHANGE_MIN_CP..ExchangeEvaluator.EXCHANGE_MAX_CP)
+            }
+            found("puts the (\\w+) on ([a-h][1-8]) in an absolute pin against the king on ([a-h][1-8])")?.let { m ->
+                terms++
+                assertEquals(tag, PieceType.KING, after.pieceAt(Square.fromAlgebraic(m.groupValues[3]))?.type)
+            }
+            Regex("(?:This|It) (?:hits the loose|attacks the undefended) (\\w+) on ([a-h][1-8])\\.|(?:This|It) attacks the (\\w+) on ([a-h][1-8]), which is en prise\\.").find(t)?.let { m ->
+                terms++
+                val sq = Square.fromAlgebraic(m.groupValues[2].ifEmpty { m.groupValues[4] })
+                assertTrue(tag, BoardFacts.defenders(after, sq).isEmpty())
+                assertTrue(tag, move.to in BoardFacts.attackers(after, sq, a.color))
+            }
+            Regex("forced mate in (\\d+)").find(t)?.let { m ->
+                terms++
+                val n = m.groupValues[1].toInt()
+                val moverBefore = a.mateInBefore?.let { if (a.color == Color.WHITE) it else -it }
+                val moverAfter = a.mateInAfter?.let { if (a.color == Color.WHITE) it else -it }
+                val isCharge = chargeLead.containsMatchIn(t) || t.contains("allows a forced mate") || t.contains("walks into") || t.contains("has a forced mate")
+                if (isCharge) assertEquals(tag, -n, moverAfter) else assertEquals(tag, n, moverBefore)
+            }
+            Regex("from ($bands) to ($bands)").find(t)?.let { m ->
+                terms++
+                assertEquals(tag, CommentaryGenerator.standingWords(a.winPercentBefore), m.groupValues[1])
+                assertEquals(tag, CommentaryGenerator.standingWords(a.winPercentAfter), m.groupValues[2])
+                assertTrue(tag, a.classification in errorClasses || a.classification == MoveClassification.MISS)
+            }
+            Regex("(?:is the only move here|is an only move|only move that kept)").find(t)?.let {
+                terms++
+                assertEquals(tag, MoveClassification.GREAT, a.classification)
+            }
+            Regex("keeping a winning position|holds on to a winning position|it keeps a winning position").find(t)?.let {
+                terms++
+                assertEquals(tag, MoveClassification.MISS, a.classification)
+                assertTrue(tag, a.winPercentBefore in 82.0..95.0)
+            }
+            Regex("a decisive advantage").find(t)?.let {
+                assertEquals(tag, MoveClassification.MISS, a.classification)
+                assertTrue(tag, a.winPercentBefore >= 95.0)
+            }
+        }
+        assertTrue("$terms term uses checked", terms >= 40)
+    }
+
+    @Test
+    fun `the three games use the new vocabulary`() {
+        val all = reports.filterKeys { it.second == null }.values.flatMap { it.annotations }.joinToString(" ") { it.text }
+        val used = listOf("the exchange", "absolute pin", "relative pin", "en prise", "loose", "forced mate in", "only move", "zwischenzug", "overloaded", "desperado", "back rank", " from ")
+            .filter { it in all }
+        // Which terms the three games happen to use depends on the games; the ones every game has are these.
+        for (term in listOf("forced mate in", "only move", " from ")) assertTrue("'$term' never appears in the three games", term in all)
+        assertTrue("terms used: $used", used.size >= 5)
+    }
+
+    @Test
+    fun `no two consecutive cards of the same class share a lead phrasing, and the wording is stable`() {
+        for ((name, _) in games) {
+            val annotations = reports.getValue(name to null).annotations
+            for (i in 1 until annotations.size) {
+                val a = annotations[i - 1]
+                val b = annotations[i]
+                if (a.classification != b.classification) continue
+                fun lead(x: MoveAnnotation) = sentenceSplit.split(x.text).first().replace(x.san, "SAN")
+                assertNotEquals("$name plies ${a.ply} and ${b.ply}: [${a.text}] / [${b.text}]", lead(a), lead(b))
+            }
+            // Byte-identical on a second analysis of the same game.
+            assertEquals(annotations.map { it.text }, games.first { it.first == name }.second.report(null).annotations.map { it.text })
         }
     }
 
@@ -239,8 +409,11 @@ class CommentaryClaimsTest {
             val white = generator.regenerate(reports.getValue(name to null), Color.WHITE)
             for (a in white.annotations) {
                 assertFalse("$name ply ${a.ply}: [${a.text}]", a.text.contains("White allowed") || a.text.contains("White "))
-                if (a.color == Color.BLACK && "lets" in a.text) assertTrue(a.text, "This lets you play" in a.text)
-                if (a.color == Color.WHITE && "lets" in a.text) assertTrue(a.text, "This lets your opponent play" in a.text)
+                val charge = chargeLead.find(a.text)
+                if (charge != null) {
+                    val who = charge.groupValues[1].ifEmpty { charge.groupValues[3] }.ifEmpty { charge.groupValues[5] }
+                    assertEquals(a.text, if (a.color == Color.BLACK) "you" else "your opponent", who)
+                }
             }
             for (k in white.keyMoments) {
                 assertEquals(white.annotations.first { it.ply == k.ply }.text, k.summary)
@@ -314,18 +487,24 @@ class CommentaryClaimsTest {
         // A free rook is "a rook".
         val rook = bestLine("4k3/8/8/8/3r4/8/8/3QK3 w - - 0 1", listOf("d1d4", "e8f7"), cp = 1200)
         assertEquals("The engine rates this line +12.0. In this line White wins a rook.", BestLineCaption.text(rook, null))
-        // A rook for a bishop (+170) is "material", not "a pawn" or "a piece".
+        // A rook for a bishop (+170) is "the exchange" (C1), not "a pawn" or "a piece".
         val exchange = bestLine("4k3/8/8/4p3/3r4/8/8/B3K3 w - - 0 1", listOf("a1d4", "e5d4"), cp = 150)
         assertEquals(170, exchange.settledGainCp)
-        assertEquals("The engine rates this line +1.5. In this line White wins material.", BestLineCaption.text(exchange, null))
+        assertEquals("The engine rates this line +1.5. In this line White wins the exchange.", BestLineCaption.text(exchange, null))
+        // A bishop for a rook that is never taken back is a rook, not the exchange: the pieces are counted.
+        val wholeRook = bestLine("4k3/8/8/8/3r4/8/8/B3K3 w - - 0 1", listOf("a1d4", "e8f7"), cp = 500)
+        assertEquals("The engine rates this line +5.0. In this line White wins a rook.", BestLineCaption.text(wholeRook, null))
+        // A line that stops after the capture, with the take-back still to come, is settled first: Bxg7 Kxg7 is the exchange.
+        val stops = bestLine("4k3/6R1/7K/8/3b4/8/8/8 b - - 0 1", listOf("d4g7"), cp = 170)
+        assertEquals("The engine rates this line -1.7. In this line Black wins the exchange.", BestLineCaption.text(stops, null))
     }
 
     @Test
     fun `every line caption of the recorded games plus game01 is proved by the recording and the board`() {
-        val fixtures = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
         var checked = 0
         var materialClaims = 0
-        for ((name, g) in fixtures) {
+        var exchangeClaims = 0
+        for ((name, g) in games) {
             for (side in sides) {
                 for (a in g.report(side).annotations) {
                     for (l in BestLines.linesFor(a)) {
@@ -354,6 +533,10 @@ class CommentaryClaimsTest {
                                 assertTrue("$name ${a.ply}: $text (${l.settledGainCp})", kotlin.math.abs(l.settledGainCp - value) <= 40)
                             }
                         }
+                        if (text.contains("the exchange")) {
+                            exchangeClaims++
+                            assertTrue("$name ${a.ply}: $text", ExchangeEvaluator.winsTheExchange(Position.fromFen(l.startFen), pos, l.mover))
+                        }
                         // 4. who it is about: colours with no side, "you" / "your opponent" otherwise
                         if (side == null) assertFalse(text, text.contains("you")) else assertFalse(text, text.contains("White") || text.contains("Black"))
                         // 5. never the classification's name, never a hedge
@@ -362,7 +545,6 @@ class CommentaryClaimsTest {
                 }
             }
         }
-        assertTrue("$checked captions, $materialClaims material claims", checked > 300 && materialClaims > 0)
+        assertTrue("$checked captions, $materialClaims material claims, $exchangeClaims exchange claims", checked > 300 && materialClaims > 0)
     }
 }
-

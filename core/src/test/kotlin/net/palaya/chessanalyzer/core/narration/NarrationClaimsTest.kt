@@ -83,6 +83,37 @@ class NarrationClaimsTest {
     }
 
     @Test
+    fun `a found mate is never followed by material in the bank, and material words follow the 40 cp rule`() {
+        // C1: a mating motif's swing is the mate's saturated value, not material. Before C1 every found
+        // forced mate ended "So that's a whole queen."
+        val mating = setOf(
+            net.palaya.chessanalyzer.core.analysis.TacticType.MATE_NET, net.palaya.chessanalyzer.core.analysis.TacticType.BACK_RANK_MATE,
+            net.palaya.chessanalyzer.core.analysis.TacticType.SMOTHERED_MATE, net.palaya.chessanalyzer.core.analysis.TacticType.GREEK_GIFT
+        )
+        var mates = 0
+        for ((name, game) in listOf("immortal" to RealGameFixture.immortal, "game01" to RealGameFixture.game01, "chesscom" to RealGameFixture.chesscom)) {
+            val script = VideoScriptGenerator(null).generate(game.report(null), game.pgn, NarrationOptions())
+            for (seg in script.segments) {
+                if (seg.kind == SegmentKind.FOUND_TACTIC && seg.tactic?.type in mating) {
+                    mates++
+                    for (word in listOf("in the bank", "just like that", "So that's", "serious material", "a whole queen")) {
+                        assertFalse("$name seg ${seg.index}: [${seg.narration}]", word in seg.narration)
+                    }
+                }
+                assertFalse("$name seg ${seg.index}: [${seg.narration}]", "everything holds" in seg.narration)
+            }
+        }
+        assertTrue("found mates in the three games: $mates", mates >= 3)
+        assertEquals(MaterialPayoff.ROOK, NarrationVocabulary.materialPayoff(500))
+        assertEquals(MaterialPayoff.SERIOUS_MATERIAL, NarrationVocabulary.materialPayoff(800))
+        assertEquals(MaterialPayoff.MATERIAL, NarrationVocabulary.materialPayoff(170))
+        assertEquals(MaterialPayoff.SERIOUS_MATERIAL, NarrationVocabulary.materialPayoff(10_000))
+        assertEquals(MaterialGain.PIECE, NarrationVocabulary.materialGain(330))
+        assertEquals(null, NarrationVocabulary.materialGain(170))
+        assertEquals(null, NarrationVocabulary.materialGain(800))
+    }
+
+    @Test
     fun `every missed line the video walks still ends with a payoff beat on a position`() {
         val script = VideoScriptGenerator(null).generate(
             RealGameFixture.immortal.report(null), RealGameFixture.immortal.pgn, NarrationOptions()

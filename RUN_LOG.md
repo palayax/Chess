@@ -3637,3 +3637,128 @@ down; `net.palaya.chessanalyzer.engine.test`, three older MP4s in `Movies/ChessA
 4. The diagnostic log was read with `adb root` (as in D2f) rather than through Share.
 5. `dist/` still holds D2f's 1.1 build (pre-V2 code, arm64 `566b42a5…`, AAB `4f831b27…`); the APKs tested here are newer
    builds of the same versionCode 2 from `4e0f25d`. Not copied to `dist/` and no AAB rebuilt (outside this task); see HANDOFF.
+
+---
+
+## C1 (2026-10-07/08): professional terminology and deterministic variety in the commentary
+
+Owner request of 2026-10-06: the game description and the tactics/sequence commentary should "sound more natural and
+interesting" and "use more professional terminology and terms", like a good human commentator. An LLM (C2) is deferred
+to the next version by the owner (Gemini Nano on-device), so this improves the deterministic generator. The hard rule
+stayed: every sentence is a verified claim (ANALYSIS_SPEC §7.2); an unverifiable sentence is dropped, never hedged.
+Host-side only, in an isolated worktree; no emulator, no device. Design doc: `docs/COMMENTARY_STYLE.md`.
+
+### What changed
+
+**Card text (`CommentaryGenerator`, rewritten).** Every template has two or three phrasings; `Variety(ply)` picks
+`(ply + hash(template)) mod n`, so the same game always reads the same, two consecutive cards of one template never
+share a phrasing, and the text stays a pure function of the annotation and the viewer's side (ANALYSIS_SPEC §7.3). Tone
+by class: short for a blunder or a mate, calm for an inaccuracy. New terms, each with its proof in the vocabulary table
+of `docs/COMMENTARY_STYLE.md` and re-verified on the board before it is said: fork / pawn fork, absolute pin (the rear
+piece is the king) and relative pin, skewer, discovered attack / check, double check, en prise and loose (attacked by
+the mover, no defender), trapped, wins the exchange (a minor piece takes a rook and is taken back, counted in pieces),
+zwischenzug (a forcing move before a capture the engine's line still makes; said as the engine's line), overloaded (the
+sole defender of two attacked pieces; the engine's line cashes one), desperado (lost where it stood, loses material,
+still lost where it landed), a back-rank mate threat (king boxed in by its own pawns; the named heavy-piece move mates
+after a pass), forced mate in N (the engine's own distance), only move (GREAT's MultiPV gap of 10 win-percent), and
+the evaluation in words on every error that crossed a band of §9 ("That takes White from winning to about level.").
+A MISS keeps "a winning position" below 95 win-percent and "a decisive advantage" from 95. The walkthrough step says
+"winning the exchange", the best-line caption "In this line White wins the exchange." (`ExchangeEvaluator.describeCapture`,
+`winsTheExchange`, `settledPosition`).
+
+**Narration (`EnglishNarration`, `NarrationVocabulary`, `VideoScriptGenerator`).** Two or three spoken phrasings per motif with
+the same terms ("That's an absolute pin: ...", "The queen on c six is en prise: ...", "A zwischenzug, an in-between move: ...",
+"A deflection: ..."); "is exposed" / "is left open" instead of "falls" / "drops" for a piece the opponent may still save;
+the evaluation words aligned with the card ("decisively winning", "slightly better", "decisively lost"); material named only
+within 40 cp of a unit ("a rook up" for +800 was an R1b "found, not fixed", now "material"); "the exchange up" for a line
+that gives a minor for a rook; a found *mating* motif no longer ends "So that's a whole queen" (its 10,000 cp swing was
+read as material); `BetterWas` says "which gives nothing away" instead of "and everything holds" (the engine's top move
+gives nothing away by definition; "holds" claimed a position that may already be lost). Hebrew structure untouched:
+`MaterialGain.EXCHANGE` and `MaterialPayoff.MATERIAL` added to the enums, `TacticPoint` renders a list, catalogue regenerated.
+
+**Terms skipped (no proof in one position's data):** simplifies, liquidates, trades into a winning endgame, loses a tempo,
+converts; x-ray and battery stay out of the card (static, worth nothing by themselves); no plan, idea or intention ever.
+
+### Verification
+
+- `scripts/audit_commentary.py` rewritten for every new template and term (python-chess, independent of `:core`):
+  `after` now covers three games (the Immortal Game, the Opera Game, game01; `CommentaryAuditDumpTest` writes all three) -
+  **144 texts, 137 supported, 7 harmless flavour, 0 WRONG; 243 sentences, 218 supported, 25 flavour, 0 WRONG; 0 of 288
+  side variants differ beyond the subject words**. `lines` - **432 move records, 678 lines, 18 video lines, 3 captions
+  say "the exchange", 2478 checks, 0 WRONG**. A sentence the verifier does not recognise is WRONG, so an untracked template
+  cannot pass. Baseline before C1 on the same three games: 144 texts / 221 sentences, 0 WRONG; the 22 extra sentences are
+  the evaluation-in-words sentences.
+- **Mutation check (`mutate`):** 24 deliberate breakages of one term or template each (a fork on pieces the moved piece
+  does not attack, a pawn fork by a knight, "wins the exchange" as "wins a rook" and the reverse, a relative pin called
+  absolute, "en prise" for a defended piece, "loose" for a piece with defenders, mate in N+1, the evaluation bands swapped,
+  a zwischenzug on a quiet move, an overloaded defender with a second guard, an "only move" lead on a plain best move, a
+  desperado on an ordinary capture, a back-rank threat that is not there, a trapped piece with a safe square, "Better was"
+  naming the wrong move, a charge against an approved move, "a decisive advantage" on a MISS at 92.5, a sacrifice of the
+  king, a smothered mate that is a plain mate, "delivers checkmate" on a quiet move): **21 applied, 21 flagged, 0 missed**
+  (three found no sentence of their shape in the three games to relabel). The script exits non-zero on a miss.
+- `CommentaryClaimsTest` (three games, three sides): every sentence is one of the catalogued templates; every term is
+  re-verified on the board in Kotlin too (the exchange by `isExchangeCapture` and SEE, the absolute pin's king, en prise's
+  empty defender list, the mate distance against the annotation, the bands against `standingWords`, "only move" against
+  GREAT, the MISS band); no two consecutive cards of one class share a lead phrasing; a second analysis is byte-identical;
+  regenerate equals analysis-time text. `CommentaryGeneratorTest`: each new term on a real or constructed position with its
+  negative (a zwischenzug on a quiet move, an overload with a second defender, a desperado of a safe queen, a back-rank
+  threat with luft, the exchange against a free rook), the variety's determinism and stepping, the ply read off the FEN.
+  `NarrationClaimsTest`: no found mate says material, no "everything holds", the 40 cp material words.
+- App test `SideCommentaryMappingTest` asks the generator for the expected wording instead of pinning one phrasing (it tests
+  the side mapping, not the words; the shape - charge, beneficiary, "Better was g6" last - is asserted).
+
+### Counts (from the result XML, final code)
+
+`:core:test` **541/0/0** (522 baseline + 19 new: `CommentaryGeneratorTest` the new terms and the variety, `CommentaryClaimsTest`
+the template catalogue, the Kotlin re-verification, the consecutive-lead rule and the vocabulary count, `NarrationClaimsTest`
+the mate/material rule; all three games in `CommentaryAuditDumpTest`), `:app:testDebugUnitTest` **474/0/0** (473 + 1,
+`SideCommentaryMappingTest.theNeutralBlunderTextHasTheExpectedShape`), `:desktop:test` **25/0/0** (needs `pc/bin` and
+`pc/tts/.venv-kokoro`, junctioned to the main checkout's, read-only), `:app:lintDebug` **0 errors, 69 warnings**,
+`:app:compileDebugAndroidTestKotlin` compiles (not run; `PanelChipLabelTest` and the chip labels untouched). All 0 skipped.
+Audit (`scripts/audit_commentary.py`): `after` 0 WRONG on 144 texts, `lines` 0 WRONG on 2478 checks, `mutate` 21/21 flagged.
+
+### Pacing and video length (`PaceMeasurementDumpTest`, 169 wpm, story = speech + puzzle holds, before -> after)
+
+| Game (plies) | Budget | Story before | Story after | Relaxed total before -> after |
+|---|---|---|---|---|
+| scholar's mate (7) | 60.0 s | 52.5 s | 52.5 s | 61.0 -> 61.0 s |
+| Opera Game (33) | 358.0 s | 306.9 s | 308.8 s (+1.9) | 345.4 -> 347.3 s |
+| Immortal Game (45) | 442.0 s | 422.0 s | 420.1 s (-1.9) | 466.5 -> 464.6 s |
+| game01 (66) | 582.0 s | 544.6 s | 546.7 s (+2.1) | 631.1 -> 633.2 s |
+| Byrne-Fischer (82) | 694.0 s | 537.3 s | 535.4 s (-1.9) | 588.8 -> 586.9 s |
+
+Same segments, same pace time (no beat added or removed); the longer motif sentences add one to two seconds and the dropped
+material sentence after a found mate takes two to four back. Every game is inside its budget; the Immortal Game is still the
+one the budget trims. Protected tiers, the FULL cap and the 15 percent pace cap hold (`PacingTiersTest`, `PaceTimingTest`
+unchanged and green). The recap card, "about N min left" and "N of M" are untouched (no new segment; cards are not spoken).
+
+### Reference (chess.com, pattern only)
+
+Game Review's coach text: the badge carries the move-quality label and the sentence goes straight to the piece and the
+threat, names the tactic by its proper term, and reads the evaluation in plain words (winning / better / equal) rather
+than as a number. Taken: the label-free opener, the term-first phrasing, the words-for-evaluation bands. Our own words,
+our own thresholds (ANALYSIS_SPEC §9); nothing copied.
+
+### Device follow-up (pending; not run here)
+
+- Hear the new terms through the Kokoro voice on chess36: "zwischenzug", "en prise", "desperado", "skewer", "decisively",
+  "exchange" (as in "the exchange up"). espeak-ng's English rules may read "zwischenzug" and "en prise" oddly; if so, the
+  narration needs a pronunciation respelling in `EnglishNarration` for the spoken form only (the card text is read, not heard).
+- A Board card, a Summary key-moment card and the recap card on a real game: the longer error cards (charge + evaluation
+  words + "Better was") must wrap, not clip, at font scale 2.0 ("Text is never clipped at 2.0").
+- One export at Relaxed: the story is 1 to 4 s longer per game; the "about N min left" estimate and the "N of M" count
+  are unchanged in kind (no new segment).
+
+### Deviations
+
+1. The task's `:core:test` baseline was 522; the suite is now 540 (18 new tests), 0 failures, 0 skipped.
+2. "Forced mate in N" says the engine's distance at the analysis depth (the Immortal Game's 20...Na6 is "mate in 5" at
+   depth 12 where the game mated in 3); it is the engine's number, as the best-line caption's "The engine sees a forced
+   mate in N" already was.
+3. `GameSummarySentence` (the one-line game summary on the Summary screen and the recap card) is unchanged: the app's
+   `RecapCardTest`, `SummarySentenceMappingTest` and the recap card pin its exact wording, and the owner's complaint
+   named the move cards and the tactics commentary.
+4. The three mutations that found no sentence of their shape in the three games (a real fork, a real skewer, a direct
+   check to relabel) are covered by injected sentences instead (a fork / pawn fork / skewer / discovered check / trapped
+   piece claimed where the board shows none), all flagged.
+5. `vendor/Stockfish/` was copied from the main checkout for `:engine:generateModelPins` (gitignored; nothing committed).

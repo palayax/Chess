@@ -1,6 +1,8 @@
 package net.palaya.chessanalyzer.core.narration
 
+import net.palaya.chessanalyzer.core.analysis.ExchangeEvaluator
 import net.palaya.chessanalyzer.core.analysis.TacticInstance
+import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.Position
 
 /**
@@ -33,28 +35,48 @@ internal object NarrationVocabulary {
         else -> LossSeverity.A_LITTLE
     }
 
-    /** Spoken size of a tactic's advertised centipawn swing. */
+    /**
+     * Spoken size of a tactic's advertised centipawn swing. A unit is named only when the swing is
+     * within [ExchangeEvaluator.GAIN_TOLERANCE_CP] of it (the rule of ANALYSIS_SPEC 6.1; before C1 "a
+     * rook" was said for anything from 500 up, so +800 was "a rook"); a gain of two pawns or more
+     * that is no whole unit is "serious material", one pawn or more "material", less "a better position".
+     */
     fun materialPayoff(swing: Int): MaterialPayoff = when {
-        swing >= 900 -> MaterialPayoff.WHOLE_QUEEN
-        swing >= 500 -> MaterialPayoff.ROOK
-        swing >= 320 -> MaterialPayoff.PIECE
+        unit(swing, 900) -> MaterialPayoff.WHOLE_QUEEN
+        unit(swing, 500) -> MaterialPayoff.ROOK
+        unit(swing, 325) -> MaterialPayoff.PIECE
+        unit(swing, 100) -> MaterialPayoff.PAWN
         swing >= 200 -> MaterialPayoff.SERIOUS_MATERIAL
-        swing >= 100 -> MaterialPayoff.PAWN
+        swing >= 100 -> MaterialPayoff.MATERIAL
         else -> MaterialPayoff.BETTER_POSITION
     }
 
     /**
      * Material actually netted along a line, by unit, or null below a pawn. The same cut-offs as
-     * `ExchangeEvaluator.describeGain`, kept here so the narration never has to parse that
-     * function's English.
+     * `ExchangeEvaluator.describeGain` (a unit within 40 cp of its value, else no unit), kept here so
+     * the narration never has to parse that function's English. Null for a gain of a pawn or more that
+     * is no whole unit: the sentence then says "material".
      */
     fun materialGain(centipawns: Int): MaterialGain? = when {
-        centipawns >= 900 -> MaterialGain.QUEEN
-        centipawns >= 500 -> MaterialGain.ROOK
-        centipawns >= 300 -> MaterialGain.PIECE
-        centipawns >= 100 -> MaterialGain.PAWN
+        unit(centipawns, 900) -> MaterialGain.QUEEN
+        unit(centipawns, 500) -> MaterialGain.ROOK
+        unit(centipawns, 325) -> MaterialGain.PIECE
+        unit(centipawns, 100) -> MaterialGain.PAWN
         else -> null
     }
+
+    /**
+     * What [winner] netted between two boards of a line, settled: [MaterialGain.EXCHANGE] when the line
+     * gave a minor piece for a rook and nothing else, otherwise [materialGain] of the settled value.
+     */
+    fun materialGainAlong(from: Position, to: Position, winner: Color, settledCp: Int): MaterialGain? = when {
+        settledCp < 100 -> null
+        ExchangeEvaluator.winsTheExchange(from, ExchangeEvaluator.settledPosition(to, winner), winner) &&
+            settledCp in ExchangeEvaluator.EXCHANGE_MIN_CP..ExchangeEvaluator.EXCHANGE_MAX_CP -> MaterialGain.EXCHANGE
+        else -> materialGain(settledCp)
+    }
+
+    private fun unit(cp: Int, value: Int): Boolean = kotlin.math.abs(cp - value) <= ExchangeEvaluator.GAIN_TOLERANCE_CP
 
     /** The opening family a book name belongs to, or null when there is no plan blurb for it. */
     fun openingFamily(openingName: String?): OpeningFamily? {

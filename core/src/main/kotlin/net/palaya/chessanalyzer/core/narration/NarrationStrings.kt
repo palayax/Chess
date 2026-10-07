@@ -147,11 +147,17 @@ enum class Standing {
 /** How much a move gave away. See [NarrationVocabulary.lossSeverity]. */
 enum class LossSeverity { THE_WHOLE_GAME, MOST_OF_THE_ADVANTAGE, A_BIG_CHUNK, REAL_GROUND, A_LITTLE }
 
-/** Spoken size of a tactic's material payoff. See [NarrationVocabulary.materialPayoff]. */
-enum class MaterialPayoff { WHOLE_QUEEN, ROOK, PIECE, SERIOUS_MATERIAL, PAWN, BETTER_POSITION }
+/**
+ * Spoken size of a tactic's material payoff. See [NarrationVocabulary.materialPayoff]. A unit is named
+ * only within 40 cp of its value (C1); [MATERIAL] is a gain of a pawn or more that is no whole unit.
+ */
+enum class MaterialPayoff { WHOLE_QUEEN, ROOK, PIECE, SERIOUS_MATERIAL, PAWN, MATERIAL, BETTER_POSITION }
 
-/** Material actually netted along a line, by unit. See [NarrationVocabulary.materialGain]. */
-enum class MaterialGain { QUEEN, ROOK, PIECE, PAWN }
+/**
+ * Material actually netted along a line, by unit. See [NarrationVocabulary.materialGain]. [EXCHANGE] is
+ * a rook won for a minor piece and nothing else (`ExchangeEvaluator.winsTheExchange`, C1).
+ */
+enum class MaterialGain { QUEEN, ROOK, EXCHANGE, PIECE, PAWN }
 
 /**
  * What a missed line delivers when it does not simply cash material or mate.

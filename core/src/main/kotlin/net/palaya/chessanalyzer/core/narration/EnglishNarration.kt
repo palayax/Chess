@@ -141,7 +141,7 @@ object EnglishNarration : NarrationStrings {
 
             // -- found tactic --------------------------------------------------------------
             Sentence.JustTheTrade -> listOf("That's just the trade going through.", "Taking back, nothing more.", "Even trade, and we move on.")
-            Sentence.NothingDefendingIt -> listOf("Nothing was defending it.", "It was sitting there with no defender.", "Completely undefended.")
+            Sentence.NothingDefendingIt -> listOf("Nothing was defending it.", "It was sitting there with no defender.", "Completely undefended.", "It was en prise, with nothing defending it.")
             is Sentence.MaterialInTheBank -> {
                 val what = materialPayoff(sentence.payoff)
                 listOf("That's $what in the bank.", "${cap(what)}, just like that.", "So that's $what.")
@@ -178,7 +178,9 @@ object EnglishNarration : NarrationStrings {
             }
             is Sentence.BetterWas -> {
                 val phrase = Vocabulary.movePhrase(sentence.move)
-                listOf("${cap(phrase)} was the move.", "Instead, $phrase, and everything holds.", "The move was $phrase.")
+                // "and everything holds" claimed the better move holds a position that may already be
+                // lost; the engine's top move gives nothing away by definition, which is what is said (C1).
+                listOf("${cap(phrase)} was the move.", "Instead, $phrase, which gives nothing away.", "The move was $phrase.")
             }
             is Sentence.MateWasAvailable ->
                 one("There was mate in ${number(sentence.mateIn)} on the board, starting with ${Vocabulary.movePhrase(sentence.move)}.")
@@ -309,7 +311,7 @@ object EnglishNarration : NarrationStrings {
                     "But no — $clause, and the moment passes."
                 )
             }
-            is Sentence.TacticPoint -> one(tacticPoint(sentence))
+            is Sentence.TacticPoint -> tacticPoint(sentence)
             is Sentence.TacticLesson -> one(tacticLesson(sentence.type))
             is Sentence.TextbookOffer ->
                 one("There's a clean textbook ${tacticName(sentence.type)} waiting in the game report if you want to see the pattern on its own.")
@@ -580,16 +582,17 @@ object EnglishNarration : NarrationStrings {
     // Words for the enums
     // -----------------------------------------------------------------------
 
+    /** The same words the card text uses for the same bands (`CommentaryGenerator.standingWords`, C1). */
     private fun standing(s: Standing): String = when (s) {
-        Standing.COMPLETELY_WINNING -> "completely winning"
+        Standing.COMPLETELY_WINNING -> "decisively winning"
         Standing.WINNING -> "winning"
         Standing.CLEARLY_BETTER -> "clearly better"
-        Standing.A_LITTLE_BETTER -> "a little better"
+        Standing.A_LITTLE_BETTER -> "slightly better"
         Standing.ABOUT_LEVEL -> "about level"
         Standing.SLIGHTLY_WORSE -> "slightly worse"
         Standing.CLEARLY_WORSE -> "clearly worse"
         Standing.LOSING -> "losing"
-        Standing.COMPLETELY_LOST -> "completely lost"
+        Standing.COMPLETELY_LOST -> "decisively lost"
     }
 
     private fun lossSeverity(l: LossSeverity): String = when (l) {
@@ -606,12 +609,14 @@ object EnglishNarration : NarrationStrings {
         MaterialPayoff.PIECE -> "a piece"
         MaterialPayoff.SERIOUS_MATERIAL -> "serious material"
         MaterialPayoff.PAWN -> "a pawn"
+        MaterialPayoff.MATERIAL -> "material"
         MaterialPayoff.BETTER_POSITION -> "a much better position"
     }
 
     private fun materialGain(g: MaterialGain?): String = when (g) {
         MaterialGain.QUEEN -> "a queen"
         MaterialGain.ROOK -> "a rook"
+        MaterialGain.EXCHANGE -> "the exchange"
         MaterialGain.PIECE -> "a piece"
         MaterialGain.PAWN -> "a pawn"
         null -> "material"
@@ -712,70 +717,131 @@ object EnglishNarration : NarrationStrings {
     // Tactics, spoken
     // -----------------------------------------------------------------------
 
-    private fun tacticPoint(t: Sentence.TacticPoint): String {
+    /**
+     * One spoken sentence about a motif, in a commentator's vocabulary (C1): the motif is named by its
+     * proper term ("a fork", "an absolute pin", "a zwischenzug", "en prise") and the sentence says what
+     * the detector proved and no more - "is attacked", "is exposed", never "falls" for a piece the
+     * opponent may still save. Several phrasings where the facts allow; the generator rotates them.
+     */
+    private fun tacticPoint(t: Sentence.TacticPoint): List<String> {
         val targetSpoken = t.target?.let { Vocabulary.square(it) }
         val victim = t.victim?.let { piece(it) }
         val second = t.second?.let { Vocabulary.square(it) }
         return when (t.type) {
             TacticType.HANGING_PIECE ->
-                if (victim != null && targetSpoken != null) "The $victim on $targetSpoken has nothing defending it."
-                else "There's a piece sitting there with no defender at all."
+                if (victim != null && targetSpoken != null) listOf(
+                    "The $victim on $targetSpoken has nothing defending it.",
+                    "The $victim on $targetSpoken is en prise: nothing defends it.",
+                    "The $victim on $targetSpoken is loose, with no defender at all."
+                ) else one("There's a piece sitting there with no defender at all.")
 
-            TacticType.FORK, TacticType.PAWN_FORK, TacticType.DOUBLE_ATTACK ->
-                if (targetSpoken != null && second != null) "It hits two things at once, on $targetSpoken and on $second."
-                else "It hits two things at once, and only one of them can run."
+            TacticType.FORK, TacticType.PAWN_FORK -> {
+                val forkWord = if (t.type == TacticType.PAWN_FORK) "pawn fork" else "fork"
+                if (targetSpoken != null && second != null) listOf(
+                    "It hits two things at once, on $targetSpoken and on $second.",
+                    "That's a $forkWord: $targetSpoken and $second are both attacked, and only one of them can get away.",
+                    "A $forkWord. Two targets, on $targetSpoken and on $second, and only one can be saved."
+                ) else listOf(
+                    "It hits two things at once, and only one of them can run.",
+                    "That's a $forkWord: two pieces attacked by one, and only one of them can get away."
+                )
+            }
+
+            TacticType.DOUBLE_ATTACK ->
+                if (targetSpoken != null && second != null) listOf(
+                    "It hits two things at once, on $targetSpoken and on $second.",
+                    "That's a double attack: $targetSpoken and $second are both hit, and only one can be saved."
+                ) else one("It hits two things at once, and only one of them can run.")
 
             TacticType.PIN_ABSOLUTE ->
-                if (targetSpoken != null) "The piece on $targetSpoken is pinned to the king, so it simply cannot move."
-                else "That piece is pinned to the king and cannot move at all."
+                if (targetSpoken != null) listOf(
+                    "The piece on $targetSpoken is pinned to the king, so it cannot leave that line.",
+                    "That's an absolute pin: the piece on $targetSpoken is tied to its own king and cannot step off the line."
+                ) else one("That piece is pinned to the king and cannot leave the line.")
 
             TacticType.PIN_RELATIVE ->
-                if (targetSpoken != null) "The piece on $targetSpoken is pinned, and moving it costs more than staying put."
-                else "That piece is pinned, and moving it costs more than staying put."
+                if (targetSpoken != null) listOf(
+                    "The piece on $targetSpoken is pinned, and moving it costs more than staying put.",
+                    "That's a relative pin: the piece on $targetSpoken is tied to something worth more behind it."
+                ) else one("That piece is pinned, and moving it costs more than staying put.")
 
             TacticType.SKEWER ->
-                if (targetSpoken != null) "The front piece has to step aside, and the one behind it on $targetSpoken drops."
-                else "The front piece has to move, and whatever is behind it drops."
+                if (targetSpoken != null && second != null) listOf(
+                    "The piece on $targetSpoken has to step aside, and the one behind it on $second is exposed.",
+                    "That's a skewer: the piece on $targetSpoken is attacked, and whatever stands behind it on $second is next."
+                ) else one("The front piece has to move, and whatever is behind it is exposed.")
 
-            TacticType.DISCOVERED_ATTACK -> "Moving that piece uncovers an attack from the one standing behind it."
-            TacticType.DISCOVERED_CHECK -> "Moving that piece gives check from behind, so the reply is forced."
-            TacticType.DOUBLE_CHECK -> "It's a double check. Against a double check the king has to move, nothing else is even legal."
+            TacticType.DISCOVERED_ATTACK -> listOf(
+                "Moving that piece uncovers an attack from the one standing behind it.",
+                "A discovered attack: the piece steps aside and unmasks the one behind it."
+            )
+            TacticType.DISCOVERED_CHECK -> listOf(
+                "Moving that piece gives check from behind, so the reply is forced.",
+                "A discovered check: the piece steps aside, and the one behind it checks the king."
+            )
+            TacticType.DOUBLE_CHECK -> listOf(
+                "It's a double check. Against a double check the king has to move, nothing else is even legal.",
+                "Double check. The king has to move, and nothing else is legal."
+            )
 
             TacticType.BACK_RANK_MATE ->
-                if (targetSpoken != null) "It's a back rank mate on $targetSpoken. The king's own pawns are the problem."
-                else "It's a back rank mate, and the king's own pawns are the problem."
+                if (targetSpoken != null) listOf(
+                    "It's a back rank mate on $targetSpoken. The king's own pawns are the problem.",
+                    "Back-rank mate on $targetSpoken: the king's own pawns shut it in."
+                ) else one("It's a back rank mate, and the king's own pawns are the problem.")
 
-            TacticType.SMOTHERED_MATE -> "It's a smothered mate. The king suffocates between its own pieces."
-            TacticType.GREEK_GIFT -> "It's the Greek gift. Bishop goes in, the king gets dragged out, the knight and queen finish it."
-            TacticType.WINDMILL -> "It's a windmill. Check, take, check, take, and the material just piles up."
+            TacticType.SMOTHERED_MATE -> one("It's a smothered mate. The king suffocates between its own pieces.")
+            TacticType.GREEK_GIFT -> one("It's the Greek gift. Bishop goes in, the king gets dragged out, the knight and queen finish it.")
+            TacticType.WINDMILL -> one("It's a windmill. Check, take, check, take, and the material just piles up.")
 
             TacticType.DEFLECTION ->
-                if (targetSpoken != null) "It drags the defender off $targetSpoken, and once it's gone nothing holds together."
-                else "It drags the defender away from the job it was doing."
+                if (targetSpoken != null) listOf(
+                    "It drags the defender off $targetSpoken, and once it's gone nothing holds together.",
+                    "A deflection: the defender is pulled away from $targetSpoken, and what it was guarding is left open."
+                ) else one("It drags the defender away from the job it was doing.")
 
-            TacticType.DECOY -> "It lures a piece onto a square where it gets hit, and that's the whole point."
-            TacticType.OVERLOADED_PIECE -> "One piece is doing two jobs here, and it can't do both."
+            TacticType.DECOY -> listOf(
+                "It lures a piece onto a square where it gets hit, and that's the whole point.",
+                "A decoy: it drags a piece onto the wrong square, and that is the whole idea."
+            )
+            TacticType.OVERLOADED_PIECE -> listOf(
+                "One piece is doing two jobs here, and it can't do both.",
+                "An overloaded defender: one piece holding two things, and it can only keep one."
+            )
             TacticType.REMOVING_THE_DEFENDER ->
-                if (targetSpoken != null) "Take the defender first, and then $targetSpoken falls."
-                else "Take the defender first, and then everything it was holding falls."
+                if (targetSpoken != null) listOf(
+                    "Take the defender first, and then $targetSpoken is left without its guard.",
+                    "Removing the defender: once it is gone, $targetSpoken has nothing holding it."
+                ) else one("Take the defender first, and then everything it was holding is left open.")
 
             TacticType.TRAPPED_PIECE ->
-                if (targetSpoken != null) "The piece on $targetSpoken has no squares left. It's trapped."
-                else "That piece has run out of squares."
+                if (targetSpoken != null) listOf(
+                    "The piece on $targetSpoken has no squares left. It's trapped.",
+                    "The piece on $targetSpoken is trapped: every square it can reach loses it."
+                ) else one("That piece has run out of squares.")
 
-            TacticType.INTERFERENCE -> "It cuts the defender's line, and the piece it was covering falls."
-            TacticType.CLEARANCE -> "It clears the square for the piece coming in behind it."
-            TacticType.ZWISCHENZUG -> "There's an in-between move first. Take the free check, then go back and take the piece."
-            TacticType.MATE_NET -> "It's a forced mate. The king has nowhere to run."
-            TacticType.PERPETUAL_CHECK -> "It's a perpetual. Check, check, and the game is drawn by repetition."
-            TacticType.STALEMATE_TRICK -> "There's a stalemate trick here, and it saves the half point."
-            TacticType.PROMOTION_TACTIC -> "The pawn is going to make a new queen and nothing stops it."
-            TacticType.UNDERPROMOTION -> "The pawn promotes to a knight instead of a queen, and that's the only move that works."
-            TacticType.PASSED_PAWN_BREAKTHROUGH -> "The pawn breaks through, and the queening square can't be covered."
-            TacticType.DESPERADO -> "That piece is lost anyway, so it takes something on its way out."
-            TacticType.BATTERY -> "The queen and the rook are lined up on the same file, and that is a lot of pressure."
-            TacticType.X_RAY -> "The attack goes straight through the piece in the middle."
-            TacticType.FORTRESS -> "It builds a fortress. Extra material means nothing if it can't get in."
+            TacticType.INTERFERENCE -> one("It cuts the defender's line, and the piece it was covering is left open.")
+            TacticType.CLEARANCE -> one("It clears the square for the piece coming in behind it.")
+            TacticType.ZWISCHENZUG -> listOf(
+                "A zwischenzug, an in-between move: something forcing goes in first, and the capture is still there afterwards.",
+                "The in-between move comes first. The capture is not going anywhere."
+            )
+            TacticType.MATE_NET -> listOf(
+                "It's a forced mate. The king has nowhere to run.",
+                "This is a forced mate, and the king cannot get out."
+            )
+            TacticType.PERPETUAL_CHECK -> one("It's a perpetual. Check, check, and the game is drawn by repetition.")
+            TacticType.STALEMATE_TRICK -> one("There's a stalemate trick here, and it saves the half point.")
+            TacticType.PROMOTION_TACTIC -> one("The pawn is going to make a new queen and nothing stops it.")
+            TacticType.UNDERPROMOTION -> one("The pawn promotes to a knight instead of a queen, and that's the only move that works.")
+            TacticType.PASSED_PAWN_BREAKTHROUGH -> one("The pawn breaks through, and the queening square can't be covered.")
+            TacticType.DESPERADO -> listOf(
+                "That piece is lost anyway, so it takes something on its way out.",
+                "A desperado: the piece is lost anyway, so it sells itself as dearly as it can."
+            )
+            TacticType.BATTERY -> one("The queen and the rook are lined up on the same file, and that is a lot of pressure.")
+            TacticType.X_RAY -> one("The attack goes straight through the piece in the middle.")
+            TacticType.FORTRESS -> one("It builds a fortress. Extra material means nothing if it can't get in.")
         }
     }
 

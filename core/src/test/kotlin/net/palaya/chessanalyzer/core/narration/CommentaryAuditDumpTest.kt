@@ -45,7 +45,8 @@ class CommentaryAuditDumpTest {
     @Test
     fun dump() {
         val out = StringBuilder()
-        for ((name, game) in listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom)) {
+        val games = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
+        for ((name, game) in games) {
             for (side in listOf<Color?>(null, Color.WHITE, Color.BLACK)) {
                 for (a in game.report(side).annotations) {
                     out.appendLine(line(name, side, a, a.text))
@@ -53,7 +54,7 @@ class CommentaryAuditDumpTest {
             }
         }
         File("build/commentary_audit/after.jsonl").apply { parentFile.mkdirs() }.writeText(out.toString())
-        assertTrue("both games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33))
+        assertTrue("three games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33 + RealGameFixture.game01.pgn.moves.size))
     }
 
     /**

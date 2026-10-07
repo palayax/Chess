@@ -74,6 +74,7 @@ class MotifClaimsTest {
         assertEquals(Color.BLACK, nxd7.color)
         // Whatever the detector read out of it, the card must not credit Black with it (CommentaryGenerator).
         assertTrue(nxd7.text, "deflect" !in nxd7.text)
-        assertEquals("Nxd7 is a sound move.", nxd7.text)
+        // One GOOD lead sentence and nothing else (the lead's wording rotates, C1).
+        assertTrue(nxd7.text, Regex("^Nxd7 is a (sound move|reasonable move|solid choice)\\.$").matches(nxd7.text))
     }
 }

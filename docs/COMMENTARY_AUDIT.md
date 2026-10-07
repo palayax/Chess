@@ -82,11 +82,68 @@ and "ends up completely on top" as payoffs of a missed line, "a rook up, for not
 Three things" before one lesson, "found the engine's top move one times out of 8", "converted one
 chances of your own" (all fixed, `NarrationClaimsTest`).
 
+## C1 (2026-10-07): professional terms and deterministic variety, re-audited
+
+The owner asked for commentary that "sounds more natural and interesting" with "more professional
+terminology". `CommentaryGenerator` was rewritten with two or three phrasings per template, a register per
+class, the evaluation in words, and the terms of `docs/COMMENTARY_STYLE.md` (the vocabulary-to-proof table
+there is the contract). The rule of this audit did not move: every term is a claim with a proof on the board
+or in the engine's numbers, and the verifier here re-derives each one with python-chess.
+
+**What the verifier now checks, per term.** A "fork" / "pawn fork": the moved piece attacks every named
+target (and is a pawn). "Absolute pin": the rear piece is the king; "relative pin": a bigger piece.
+"Skewer", "discovered attack", "discovered check", "double check": the geometry on the position after the
+move. "En prise" / "loose": attacked by the moved piece, no defender. "Trapped": every legal move of the
+piece loses material by its own swap-off. "Wins the exchange": a knight or bishop takes a rook for a net
+inside `rook - minor` ± 40 (a card or a walkthrough step); a line or a caption: the pieces counted between
+the start and the settled end show one minor given, one rook taken and nothing else. "Zwischenzug": check
+or a capture of something bigger first, a non-losing capture waiting on an enemy piece worth a minor or
+more, and the recorded PV makes it on the mover's next move or the one after. "Overloaded": on the position
+before the move the named piece is the opponent's and the sole defender of both squares, each an attacked
+opponent's piece, and the PV lands on one. "Desperado": the piece could be taken where it stood (null
+move), the capture loses material, it can be taken where it landed. A back-rank "threat": king boxed in by
+its own men with a pawn among them, and the named rook or queen move mates after a null move. "Forced mate
+in N": the engine's own distance, before the move for the mover's and the better move's, after it for the
+reply's. "Only move": the engine's top move with a MultiPV gap of 10 win-percent. The evaluation words:
+`standing_words(wpBefore) -> standing_words(wpAfter)` on the mover's win-percent, a crossed band, an error
+class, the right subject. "A winning position" / "a decisive advantage" on a MISS: 82..95 / 95 and up.
+Every lead ("X is the engine's first choice", "X is an only move", "X goes wrong") names the move played and
+carries its class's proof (the top move; the MultiPV gap; the loss band). A sentence the verifier does not
+recognise is WRONG, so a template that is added without its verifier fails the audit.
+
+**Result (2026-10-07, `after`, three games x three sides, 432 texts; the no-side 144 are audited claim by
+claim and the two side variants must differ from them only in the subject words):** 144 texts: 137
+supported, 7 harmless flavour, **0 WRONG**; 243 sentences: 218 supported, 25 flavour, 0 WRONG; 0 of 288 side
+variants differ beyond the subject words. `lines`: 432 move records, 678 lines, 18 video lines, 3 captions
+say "the exchange", 2478 checks, **0 WRONG**. Before C1 the same dump audited 144 texts / 221 sentences,
+0 WRONG: the 22 added sentences are the evaluation-in-words sentences on errors.
+
+**Negative controls (`mutate`).** The verifier is fed the recorded texts with one template or term broken
+at a time and must flag every one: a fork on pieces the moved piece does not attack, a pawn fork by a
+knight, "wins the exchange" said as "wins a rook" and the reverse, a relative pin called absolute, "en
+prise" for a defended piece, "loose" for a piece with defenders, forced mate in N said as N+1, the two
+evaluation bands swapped, a zwischenzug on a quiet move, an overloaded defender that is not the sole guard,
+an "only move" lead on a plain best move, a desperado on an ordinary capture, a back-rank threat that is
+not there, a trapped piece with a safe square, "Better was" naming the wrong move, a charge against a move
+the engine approved of, "a decisive advantage" on a MISS at 92.5 percent, a sacrifice of a piece nobody can
+take, a smothered mate that is a plain mate, "delivers checkmate" on a quiet move. **24 mutations, 21
+applied (three found no sentence of that shape in the three games: a real fork, a real skewer, a direct
+check to relabel), 21 flagged, 0 missed.** The script exits non-zero if a mutation is not flagged.
+
+**Narration.** The "found, not fixed" items below from R1b are fixed by C1 where they were material words:
+`materialGain` / `materialPayoff` now name a unit only within 40 cp ("a rook up" for +800 is "material"),
+and a line that gives a minor for a rook is "the exchange" (`MaterialGain.EXCHANGE`). The spoken motif
+sentences carry the same terms as the cards with the same proofs; the narration is still outside this
+script's claim-by-claim audit (`NarrationClaimsTest`, `NarrationStringsTest` hold its rules).
+
 ## Found, not fixed
 
-- The video narration's material cut-offs (`NarrationVocabulary.materialGain`, `materialPayoff`) still name
-  a rook for any gain of 500 or more and a queen for 900 or more ("a rook up" for +800); the walkthrough text
-  stopped doing that, the narration was out of scope.
+- `LessonPositive` and `LessonOpponentMissedToo` (below) are unchanged by C1.
+- Terms the owner listed that C1 did not add, because their definition is not on the board or in one
+  position's numbers: "simplifies", "liquidates", "trades into a winning endgame" (needs an endgame
+  definition and an eval after the trade the data does not hold), "loses a tempo" (no provable definition
+  of a lost tempo), "converts" (a judgement about a whole game), "x-ray" and "battery" (static, worth
+  nothing by themselves; the card drops them as before).
 - `LessonPositive` ("The plan-making is working; the gap is in the tactics...") and `LessonOpponentMissedToo`
   ("converted N chances of your own", counted from found motifs whether or not they were chances) assert a
   diagnosis the data does not support. They are narration, not annotation text.
@@ -100,10 +157,15 @@ chances of your own" (all fixed, `NarrationClaimsTest`).
 
 ## Tests that keep it fixed
 
-`CommentaryGeneratorTest` (defects 1-3 on real positions, ownership, the charge rule, the sacrifice leads),
-`CommentaryClaimsTest` (every text of both games for all three sides: no unprovable wording; "Better was" is
-the engine's move, once, last; a reply is a legal opponent move with the right beneficiary; every piece named
-on a square stands there; second person only with a side; text regenerated for a side equals the text an
+`CommentaryGeneratorTest` (defects 1-3 on real positions, ownership, the charge rule, the sacrifice leads;
+since C1 also each new term on a real or constructed position with its negative: a zwischenzug on a quiet
+move, an overload with a second defender, a desperado of a safe queen, a back-rank threat with luft, the
+exchange against a free rook, the absolute pin, the mate distance, the evaluation bands, the variety's
+determinism and stepping), `CommentaryClaimsTest` (every text of the three games for all three sides: every
+sentence is one of the catalogued templates, every term is re-verified on the board in Kotlin as well, no
+unprovable wording; "Better was" is the engine's move, once, last; a reply is a legal opponent move with
+the right beneficiary; every piece named on a square stands there; second person only with a side; no two
+consecutive cards of one class share a lead phrasing; text regenerated for a side equals the text an
 analysis for that side would have written), `MotifClaimsTest` (clearance, deflection, descriptions),
 `MoveClassifierTest` (a pinned attacker is not a sacrifice), `SimulationBuilderTest` /
 `SimulationIntroTest` (collecting, recaptures, settled payoff, blank payoff, repeated first move),
@@ -115,14 +177,18 @@ analysis for that side would have written), `MotifClaimsTest` (clearance, deflec
     python scripts/audit_commentary.py after  core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
     python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
+    python scripts/audit_commentary.py mutate core/build/commentary_audit/after.jsonl
+
+`after` covers the Immortal Game, the Opera Game and game01 since C1 (the dump test writes all three),
+and exits non-zero on any WRONG claim or side variant; `mutate` is the negative control (above).
 
 The `lines` mode (V2, ANALYSIS_SPEC §6.2) audits every engine line the Board's "Show the best line" can display
 and every line the video plays, for the Immortal Game, the Opera Game and game01 and all three sides: each move
 legal and its SAN python-chess's, a prefix of the recorded PV cut by `min(PV, depth / 2, 8)` (shorter only at
 mate), alternatives within 2 win-% and never the move played, and every caption sentence re-derived (the
 engine's score and mate, checkmate from the board, the settled material gain by python-chess's own exchange
-evaluation and the 40 cp names). Result on 2026-10-07: 432 move records, 678 lines, 18 video lines, 2478
-checks, 0 WRONG.
+evaluation and the 40 cp names, "the exchange" by the piece count since C1). Result on 2026-10-07: 432 move
+records, 678 lines, 18 video lines, 2478 checks, 0 WRONG; after C1 the same, with 3 captions saying "the exchange".
 
 (Needs `python-chess`; `scripts/record_analysis.py` also needs a Stockfish binary and is only used to record
 the analyses the tests replay.)

@@ -47,6 +47,9 @@ data class BestLine(
     val sans: List<String> get() = steps.map { it.san }
     val endFen: String get() = steps.lastOrNull()?.fenAfter ?: startFen
 
+    fun startPosition(): Position = Position.fromFen(startFen)
+    fun endPosition(): Position = Position.fromFen(endFen)
+
     /** The line's score from White's side (the eval bar and every printed score are White-relative, §9.4). */
     val whiteCp: Int? get() = scoreCp?.let { if (mover == Color.WHITE) it else -it }
     val whiteMateIn: Int? get() = mateIn?.let { if (mover == Color.WHITE) it else -it }
@@ -207,7 +210,8 @@ object BestLineCaption {
         if (gain < MIN_GAIN_CP) return null
         val subject = who(line.mover, viewer)
         val verb = if (subject == "you") "win" else "wins"
-        val what = ExchangeEvaluator.describeGain(gain) ?: "material"
+        // "the exchange" when the shown plies give a minor piece for a rook and nothing else (C1).
+        val what = ExchangeEvaluator.describeSettled(line.startPosition(), line.endPosition(), line.mover, MIN_GAIN_CP) ?: "material"
         return "In this line $subject $verb $what."
     }
 
