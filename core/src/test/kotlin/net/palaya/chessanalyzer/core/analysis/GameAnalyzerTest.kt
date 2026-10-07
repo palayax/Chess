@@ -196,17 +196,21 @@ class GameAnalyzerTest {
         val report = GameAnalyzer(MoveClassifier(NeutralSee()), NoTactics())
             .analyze(game, evals, userColor = Color.WHITE, book = null)
 
+        // V2: each line also carries its whole PV and the one depth it was searched to (spec §6.2, §8.2).
         assertEquals(
             listOf(
-                CandidateLine(1, "e2e4", "e4", 30, null),
-                CandidateLine(2, "d2d4", "d4", 20, null),
-                CandidateLine(3, "g1f3", "Nf3", null, 4),
-                CandidateLine(4, "a1a8", null, -15, null)
+                CandidateLine(1, "e2e4", "e4", 30, null, listOf("e2e4", "e7e5"), 14),
+                CandidateLine(2, "d2d4", "d4", 20, null, listOf("d2d4", "d7d5"), 14),
+                CandidateLine(3, "g1f3", "Nf3", null, 4, listOf("g1f3"), 14),
+                CandidateLine(4, "a1a8", null, -15, null, listOf("a1a8"), 14)
             ),
             report.annotations[0].candidateLines
         )
         assertEquals(
-            listOf(CandidateLine(1, "e7e5", "e5", 40, null), CandidateLine(2, "d7d5", "d5", -25, null)),
+            listOf(
+                CandidateLine(1, "e7e5", "e5", 40, null, listOf("e7e5"), 14),
+                CandidateLine(2, "d7d5", "d5", -25, null, listOf("d7d5"), 14)
+            ),
             report.annotations[1].candidateLines
         )
         // The best line is also what the rest of the annotation says.

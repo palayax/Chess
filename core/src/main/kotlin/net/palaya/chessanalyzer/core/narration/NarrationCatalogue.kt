@@ -52,6 +52,7 @@ object NarrationCatalogue {
         Sentence.CaptionMove(12, Color.BLACK, "Nf6", "?"),
         Sentence.CaptionMissed("Nf3", "e4"),
         Sentence.CaptionMissedLine(listOf("Nf3", "e5", "Nxe5")),
+        Sentence.CaptionBestLine(18, Color.BLACK, listOf("Nf5", "Qd2", "Nd4")),
         Sentence.CaptionBackToGame(12, Color.WHITE, "Nf3"),
         Sentence.CaptionPuzzle(Color.WHITE),
         Sentence.CaptionTurningPoint(23, "Qh5", "31.5"),

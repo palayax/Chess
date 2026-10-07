@@ -735,7 +735,7 @@ One task at a time (one Gradle invocation at a time). Each is verified from the 
 | D2a–D2f | Small installer: first-run model download (D-track above) | **done** (D2a-D2f); owner steps before Play at the top of HANDOFF.md |
 | V1 | Voice picker: the 11 speakers already inside the Kokoro model (`voices.bin` = 5,755,904 B = 11 x 523,264 B), with an on-device sample | **done** (RUN_LOG "V1 + V3") |
 | V3 | Video pace: slower key moments (a pause before the critical move, readable sequence speed) and a Relaxed/Normal/Brisk setting, in the player and the MP4 | **done** (RUN_LOG "V1 + V3"; ANALYSIS_SPEC §9.8) |
-| V2 | Best-line simulation: play the engine's recommended sequence move by move on the board (Back/Next/Play) for every key moment, and in the video instead of only an arrow | **next** (V3's `SegmentLeadIn` approach and `VideoPace.lineMoveMinMs` are the rate to reuse) |
-| G1 | Famous games: a built-in library of ~100 classic games (bare moves, sources checked), optional collections downloaded on tap from our own GitHub release, and opening a PGN file from storage | queued |
+| V2 | Best-line simulation: play the engine's recommended sequence move by move on the board (Back/Next/Play) for every key moment, and in the video instead of only an arrow | **done** (RUN_LOG "V2"; ANALYSIS_SPEC §6.2 and §9.8) |
+| G1 | Famous games: a built-in library of ~100 classic games (bare moves, sources checked), optional collections downloaded on tap from our own GitHub release, and opening a PGN file from storage | **next** |
 | C1 | Commentary: professional terminology and much more phrasing variety in the templates, every claim still verified | queued |
 | C2 | Measured spike: a small on-device LLM that only rephrases verified facts, with a claim checker and template fallback; report quality, rejection rate, speed and size for an owner decision | queued |

@@ -3291,3 +3291,204 @@ chess34 not run: no FGS or setup code was touched. `:engine` connected not re-ru
 **Device state restored.** chess36 was off at the start with nothing of ours installed: both exported MP4s, the share
 script and the UI dump were deleted, Gradle uninstalled the app and the test APK, airplane mode off, emulator shut down.
 The two MP4s are kept on the host only (scratchpad), not in the repo.
+
+## V2 (2026-10-07): best-line simulation
+
+Owner request of 2026-10-06: "The alternate best tactics is not simulated and only appear with color arrow. Add
+simulation for the best moves / sequence." Nothing committed. desktop/ and pc/ untouched (desktop/ only compiled
+and tested: `:desktop:test` 25/0/0 after the narration-contract change). Download/setup/update code untouched.
+
+### What was there (verified in the tree first)
+
+- **Board** (`ReviewScreen`): the engine's best move was one green arrow on the position after the played move,
+  plus "Better was X" on the card. **Summary** key moments: a sentence, and "Show me what I missed" only where a
+  walkthrough exists. **Video**: error beats, inaccuracy beats and the turning point drew the best move as an
+  arrow over the position before the move (`annotateDirective`); only a move with a detected missed motif got a
+  narrated detour.
+- **Walkthrough** (`TacticSimulationScreen`) plays `MoveAnnotation.simulation`, which `GameAnalyzer` builds only
+  when the played move lost at least 5 win-% AND the detector found a motif for the best move (`tacticsMissed`),
+  cut at 8 plies or the realised payoff. So a mistake whose better line wins nothing a detector names, every move
+  without a motif, and any good key moment had no sequence anywhere.
+- `MoveAnnotation.candidateLines` held each MultiPV line's **first move only** (uci, san, score); the full PVs were
+  in the eval cache but not on the annotation. Only `bestLineSan` (the whole best PV, no depth) was kept.
+
+### The line rules (ANALYSIS_SPEC §6.2, `core.analysis.BestLines` / `BestLine` / `BestLineCaption`)
+
+- `CandidateLine` gains `pvUci` and `depth` (defaulted trailing fields; `GameAnalyzer` fills them, depth = the
+  smaller of the line's and the position's, one depth by §8.2).
+- **N = min(PV length, depth / 2, 8), stop at mate.** Measured on the five recorded games: the best line before each
+  of the 41 moves that lost >= 5 win-% was 8-29 plies at depth 12-20, longer than the depth in 38 of 41 (the tail
+  is extensions / quiescence). depth / 2 keeps every shown move backed by at least half the search: 6 at Quick, 7 at
+  Standard, 8 at Deep; 8 = the walkthrough's cap. "Until the tactic resolves" was measured and rejected: the last
+  material change in those PVs fell at ply 0-25, median 12, beyond what the depth supports.
+- **Which lines:** line 1 always; lines 2/3 within 2.0 win-% (`PracticeSelector.ACCEPT_LOSS`, §2/§11's
+  best-or-near-best bound), never the move played. On the five games: 246 alternatives among 678 lines shown for
+  the three audited games x three sides.
+- **Which moves:** INACCURACY, MISTAKE, MISS, BLUNDER, plus any Summary key moment with a line.
+- **Caption:** the engine's score as the engine's ("The engine rates this line +2.3." / "The engine sees a forced
+  mate in 3 for White."), then only what the shown plies prove ("The line ends in checkmate." / "In this line White
+  wins a piece." from the settled gain, 40 cp naming rule, "material" between values); you / your opponent per side.
+
+### Board, Summary, Walkthrough
+
+- `ui/components/LinePlayer.kt` (new): `LinePlaybackState` (step, play), `LinePlaybackEffect` (Play at a step
+  rate), `LineBoard` (position, last move lit, next move as an arrow, check), `LineStepper` (Back / caption with
+  who is to move and "2 / 7" in a polite live region / Next / Play-pause, pinned LTR, 56 dp buttons). Pure logic in
+  `ui/model/LinePlaybackLogic.kt`. **The Walkthrough now uses it** (its own stepper row and replay code are gone; it
+  gains Play and the last-move highlight); the Board's line mode is the second user.
+- `ReviewScreen`: "Show the best line" on the comment card (`CommentCard.onShowBestLine`) enters the mode in place:
+  `LineBoard` replaces the board, the eval bar shows the line's score, chips for the alternatives (one TalkBack stop
+  each: "Best: e4, rated +0.4, selected", role Tab), the stepper, and `BestLineCard` (title "Best line instead of
+  11… cxb5" / "Instead of …: line 2" / "The engine's line from 8. h3" when the played move was the engine's,
+  notation with the current move in green and no-break spaces, the caption, "Engine depth 14", "Back to the
+  game"). System back leaves the mode. Play steps at the user's video pace (`settings.videoPace.lineMoveMinMs`).
+- Summary: a key moment without a walkthrough offers "Show the best line" (`GameReport.plysWithBestLine`), which
+  opens `review/{id}?ply=N&line=true` straight in line mode.
+- Fixed on the way: `ReviewScreen` clamped `initialPly` to `moves.size - 1`, so the LAST move of a game could never
+  be opened from a key moment (or its line); it now clamps to the last ply.
+
+### Video (ANALYSIS_SPEC §9.8)
+
+- `ScriptSegment.bestLine: SegmentBestLine?` (fen, uci, san, captions "Best line — 18... Nf5 19. Qd2", stepMs,
+  finalHoldMs). **Decision: the line extends the segment by pace time, inside the §9.8 cap**: it is the first part
+  of the segment's `holdAfterMs`, so `TimelineBuilder`, the exporter's PCM track (silence) and the player need
+  nothing new; `SegmentFrameBuilder.build(..., speechMs)` draws it from the end of the timeline's speech (both the
+  exporter and `VideoPlayerController` pass `TimedSegment.speechDurationMs`). Story, words, cached narration, the
+  recap card, the budget and "N of M" / "about N min left" are unchanged (no new segment, no new speech).
+- Where: a beat whose narration names the better move over a still board (`betterMoveBeats`: error beat at
+  DWELL/FULL, brief beat on a report key moment), only on MISTAKE/MISS/BLUNDER (an inaccuracy is "never a walk"
+  by §9.7 and keeps its arrow). `bestLinePlan` shares the room under the cap that the V3 pace time leaves AT
+  RELAXED, most important first (tier, loss, ply), up to 4 plies each (`BestLines.VIDEO_MAX_PLIES`), fewer when
+  four do not fit, so every pace plays the same moves and V3's pauses are never scaled down for a line.
+- Drawn as an excursion: tinted border, chip "Engine's best line" (`PanelLabels.bestLine`, `panel_best_line`), no
+  verdict chip, eval bar = the beat's (position-before) eval, each move slides 400 ms and rests with its caption.
+- First attempt (all better-move beats, 4 plies, scaled with the rest) failed the V3 tests: game01 and the
+  scholar's mate hit the cap, which scaled every lead-in (scholar's 4.Qxf7# pause 931 ms < 1 s), and the 17-move
+  Opera Game passed 6 minutes. Replaced by the plan above; all V3 pacing tests pass unchanged.
+- **Timing, one key moment (host recording, 169 wpm, Normal):** the Opera Game's 9...b5 (BLUNDER beat) was on screen
+  9.73 s (speech + gap, the best move an arrow); now 16.73 s: the speech ends at 9.48 s, then Kd8 O-O-O+ Kc7 Bxf7 at
+  1.5 s each and 1.0 s on the final position. Relaxed 9.73 -> 19.23 s, Brisk 9.73 -> 14.63 s. Per game (pace time
+  added, Relaxed / Normal / Brisk): Opera 1 moment, +9.5 / 7.0 / 4.9 s; Immortal 2 (11...cxb5, 16...Bc5), +19.0 /
+  14.0 / 9.8 s; game01 3 (24.Bh3, 7...e4 four plies, 13...Bc6 one), +22.5 / 16.5 / 11.4 s; scholar's 1 (3...Nf6, one
+  ply), +3.5 / 2.5 / 1.6 s; Byrne-Fischer 0. All under the cap (game01 Relaxed 86.5 of 87.3 s).
+
+### Audit (`scripts/audit_commentary.py lines`, python-chess)
+
+New mode over `core/build/commentary_audit/best_lines.jsonl` (`CommentaryAuditDumpTest.dumpBestLines`: the Immortal
+Game, the Opera Game and game01, no side / White / Black, every move): each line replayed (legal, SAN = python-chess's,
+moves = SAN count), a prefix of the recorded PV, length = the rule (or shorter only at mate), depth = the recording's,
+alternatives within 2 win-% and not the played move, every caption sentence re-derived independently (score
+formatting with Java rounding, the mate side, checkmate from the board, the settled gain with python-chess's own
+exchange evaluation, the 40 cp names, the subject words), and every video line (1-4 plies of the Board's best line,
+legal, numbered captions, only on MISTAKE/MISS/BLUNDER). **Result: 432 move records, 678 lines (246 alternatives),
+18 video lines; 2478 checks, 2478 supported, 0 WRONG.** Discrimination proved: a tampered copy (a wrong SAN, an
+unproved "wins a rook", an extra PV move) is flagged on all three. The existing `after` audit is unchanged: 78 texts
+0 WRONG, 15 walkthroughs 0 WRONG, 0 side-variant differences.
+
+### Reference (chess.com, pattern only)
+
+Game Review's "Show" plays the engine line from the mistake and "Best" reveals the better move (alignment doc
+S1/S3/S7/S14); the analysis board lists the top engine lines with their scores and steps through any of them.
+Taken: play the line from the position before the move on the same board, step / play, the top lines with their
+evaluation as choices, notation with move numbers and the current move marked, a way back to the game. Our own
+words, layout and art; nothing copied.
+
+### On the emulator (chess36, debug build)
+
+- Models: the first-run download from `scripts/model_test_server.py` failed its checksum twice in a row ("The
+  download didn't match the expected file, twice in a row"; each full GET ended at byte 98,511,174 of 98,511,183, the
+  9-byte resume then failed the SHA-256), on a retry too. The file on the host matches the pin. Not investigated
+  (download code is out of scope; D2c-D2f passed the same flow on this host); the models were pushed by hand as
+  CLAUDE.md describes (net into `files/nets/`, the tar unpacked into `files/tts_models/kokoro/` + `.provisioned`).
+  The server was stopped. **Worth a look in a later task.**
+- chess36 had to be restarted with `-gpu swangle_indirect`: with the default host GPU every `screencap` was black
+  (CLAUDE.md gotcha added).
+- The Immortal Game and game01 shared as text and analysed on the device (Standard, depth 14).
+- **Screenshots (all viewed):** `docs/screenshots/v2_board_show_best_line.png` (11...cxb5's card: "Show me what I
+  missed" and "Show the best line"), `v2_line_start.png` (Start of the line, Black to move, 0 / 7, the h7-h5 arrow,
+  eval bar -0.5 = the line's score), `v2_line_middle.png` (12... Qg6, 3 / 7, g5-g6 lit, next move Ba4 as the arrow,
+  Qg6 green in the notation), `v2_line_end.png` (14... d5, 7 / 7, Next disabled, Play back after the run),
+  `v2_line_landscape.png` (board left, stepper and card right), `v2_line_font2.png` (font 2.0: nothing clipped, the
+  notation wraps), `v2_line_rtl_he.png` (app locale he: the bar mirrors, the board, stepper and notation stay LTR),
+  `v2_summary_show_best_line.png` (game01: 8.h3, a Brilliant key moment with no walkthrough, offers the line).
+- **Video export** (the Immortal Game, Relaxed, Bella): "8 min 1 s · 40 MB"; pulled: format 481.221 s, audio
+  481.221 s, video 481.133 s; mean -25.8 dB, max -5.9 dB; "About 10 min left" ... "Less than a minute left" during the
+  51-segment narration step. Silences >= 3 s (ffmpeg silencedetect -50 dB): 57.9-67.9 s and 338.2-351.7 s are the two
+  best lines (10.g4 and 20...Na6 on the device's depth-14 analysis), the rest the V3 holds.
+- **Frames at 4 fps across 10.g4** (`docs/screenshots/v2_video_best_line_4fps.png`, 55-69 s, viewed): the error beat
+  with its two arrows and "? Mistake" for 3 s while the voice speaks; then, in silence, the purple border and the chip
+  "Engine's best line", no verdict: 10. Ba4 (8 frames = 2.0 s, caption "Best line — 10. Ba4"), 10... Na6 (8), 11. g3
+  (8), 11... g6 (8), the final position held 6 more frames (1.5 s); then the next beat (an inaccuracy) starts.
+- Device state restored: the MP4 and every pushed file deleted from the device, app locale back to the system,
+  font 1.0, auto-rotate on; the app and test APK were uninstalled by Gradle at the end of the connected run.
+
+### Tests
+
+- **Host, new:** `BestLineTest` (9: PV to SAN with each step legal by the core move generator, Black-first
+  numbering, illegal/garbage lines, the truncation rule at 12/14/16/18/30/0, no-PV lines, mate stop, settled gain,
+  alternatives margin and played-move exclusion, every line of every move of the five recorded games = the legal PV
+  prefix cut by the rule), `BestLineVideoTest` (5: lines only on better-move beats of error moves, the Board's moves;
+  the line fits the hold at Relaxed/Normal/Brisk at the pace's own rate; pace time not story, same moves at every
+  pace; game01/Opera have lines and a side changes no move; the measurement dump), 4 cases in `CommentaryClaimsTest`
+  (engine score White-relative; mate side and checkmate; settled material and the 40 cp names; every caption of the
+  Immortal, Opera and game01 for three sides re-derived), `CommentaryAuditDumpTest.dumpBestLines`,
+  `LinePlaybackLogicTest` (6 in :app: positions, stepping/Play, numbering and side to move, which moves offer the
+  line, notation, the timeline at three paces with real vs estimated speech and a lead-in). Updated:
+  `GameAnalyzerTest` (candidate lines now carry PV and depth), `NarrationStringsTest` (the new caption is read, not
+  spoken).
+- **Instrumented, new:** `BestLineModeInstrumentedTest` (4: enter, step, back, Play to the end, the alternative chip
+  through its semantics action, Back to the game, system back; TalkBack: buttons with words, the live-region caption,
+  the heading, the chip sentence with role and state; a quiet move offers nothing; opened from the Summary in line
+  mode; a Summary key moment without a walkthrough offers the line), `BestLineVideoInstrumentedTest` (export with a
+  tone voice: container = timeline incl. the line, each MP4 frame during the line matches the renderer's frame for
+  that instant (max cell diff 1.1 vs 96-149 to the neighbouring step), audio RMS 8032 while speaking and 0.0 during
+  the line, and `VideoPlayerController` on the same cached clips lays out the same total and draws the same frame),
+  `PanelChipLabelTest.theBestLineAfterTheSpeechIsAnExcursionWithNoVerdict`. Updated:
+  `NarratorAndPaceInstrumentedTest` (the pace-time sum counts best lines).
+
+### Counts (from the result XML, final code)
+
+`:core` **522/0/0** (503 + 9 `BestLineTest` + 5 `BestLineVideoTest` + 4 `CommentaryClaimsTest` + 1 `dumpBestLines`),
+`:engine` unit **32/0/0**, `:app` unit **471/0/0** (465 + 6 `LinePlaybackLogicTest`), all 0 skipped; lint **0 errors /
+69 warnings** (a "Line %1$d instead of" wording that lint read as a plural was reworded); `assembleRelease` OK;
+`:app` connected **171/0/0, 0 skipped** on chess36 (1093.9 s) and on chess34 (1081.7 s) (165 + 4 + 1 + 1); `:desktop:test`
+25/0/0 (narration contract changed). `:engine` connected not re-run (no engine change). Audit: 2478 / 0 WRONG.
+
+### Files
+
+- core: `analysis/BestLine.kt` (new: `BestLine`, `BestLineStep`, `BestLines`, `BestLineCaption`), `analysis/Contract.kt`
+  (`CandidateLine.pvUci`, `.depth`), `analysis/GameAnalyzer.kt`, `narration/NarrationContract.kt` (`ScriptSegment.bestLine`,
+  `SegmentBestLine`), `narration/VideoScriptGenerator.kt` (`betterMoveBeats`, `bestLinePlan`, `bestLineTail`),
+  `narration/NarrationStrings.kt` + `EnglishNarration.kt` + `NarrationCatalogue.kt` (`CaptionBestLine`); tests
+  `BestLineTest.kt`, `BestLineVideoTest.kt` (new), `CommentaryClaimsTest.kt`, `CommentaryAuditDumpTest.kt`,
+  `GameAnalyzerTest.kt`, `NarrationStringsTest.kt`.
+- app: `ui/components/LinePlayer.kt`, `ui/model/LinePlaybackLogic.kt` (new), `ui/screens/ReviewScreen.kt` (line mode,
+  last-ply clamp), `ui/screens/TacticSimulationScreen.kt` (on the shared player), `ui/components/CommentCard.kt`,
+  `ui/screens/GameReportScreen.kt`, `ui/model/GameModels.kt` (`plysWithBestLine`), `data/mapper/DomainMapper.kt`,
+  `ui/navigation/Destinations.kt` + `ChessAnalyzerNavHost.kt` (`line=` arg, pace rate), `video/SegmentFrameBuilder.kt`,
+  `video/BoardFrameRenderer.kt` (`PanelLabels.bestLine`), `video/VideoExporter.kt`, `ui/video/VideoPlayerController.kt`,
+  `res/values/strings.xml`; tests `LinePlaybackLogicTest.kt`, `BestLineModeInstrumentedTest.kt`,
+  `BestLineVideoInstrumentedTest.kt` (new), `PanelChipLabelTest.kt`, `NarratorAndPaceInstrumentedTest.kt`.
+- scripts: `audit_commentary.py` (`lines` mode, game01). docs: `ANALYSIS_SPEC.md` (§6.2 new, §9.8 "The best line in
+  the video"), `COMMENTARY_AUDIT.md`, `screenshots/v2_*.png` (9), CLAUDE.md (swangle gotcha), RUN_PLAN.md, HANDOFF.md,
+  this log.
+
+### Deviations
+
+1. **The video plays lines only on MISTAKE / MISS / BLUNDER key moments, and only as many as fit the pace cap.**
+   Inaccuracies keep their arrow (§9.7 says an inaccuracy is never a walk of the missed line), and a moment the cap
+   has no room for keeps its arrow too (game01's 13...Bc6 gets one ply). Playing every better-move beat for four plies
+   pushed game01 and the scholar's mate over the 15 % cap (scaling V3's pauses below a second) and the 17-move Opera
+   Game past 6 minutes. The Board offers every line regardless.
+2. A move with a detected missed motif keeps its narrated detour in the video (it already walked the line); the new
+   silent line is for the moments that had only an arrow.
+3. The Summary's key moments offer "Show the best line" only where there is no walkthrough ("Show me what I missed"
+   already plays that line); the Board offers both.
+4. Line mode is per-screen state: a font-size or locale change (which recreates the activity) returns to the game;
+   rotation keeps it (the activity handles orientation).
+5. Fixed beyond the brief: the Board could not be opened at a game's last move (`initialPly` clamp).
+6. The emulator models were pushed by hand after two checksum failures from `model_test_server.py` (above; not
+   investigated, flagged for a later task).
+7. `desktop/` keeps its own timeline: a PC-rendered video shows the hold on the still board, not the line.
+8. The before/after timing table is from the host recordings (169 wpm); the device export used the on-device
+   depth-14 analysis, whose two lines are on 10.g4 and 20...Na6.

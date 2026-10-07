@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -49,7 +50,8 @@ import net.palaya.chessanalyzer.ui.theme.tacticTypeName
  * sections 4 and 6.4): the classification and the move, "Better was Nf6" and "This cost about 2
  * pawns" for the mistake classes only, the engine's explanation, which sequence the move belongs
  * to (the move list's band carries no text), and the actions: "Show me what I missed" when there
- * is a walkthrough, and "See how a skewer works" when the pattern has a textbook example.
+ * is a walkthrough, "Show the best line" (V2) on a mistake or a key moment, and "See how a skewer
+ * works" when the pattern has a textbook example.
  *
  * The card sizes to its content; the screen puts it in the scrolling area under the controls.
  */
@@ -71,6 +73,11 @@ fun CommentCard(
      * moment, or there is no later one.
      */
     onNextKeyMoment: (() -> Unit)? = null,
+    /**
+     * Enter the Board's best-line mode for this move (V2, ANALYSIS_SPEC 6.2). Null hides the button: the
+     * move is neither a mistake class nor a key moment, or the engine left no line for it.
+     */
+    onShowBestLine: (() -> Unit)? = null,
 ) {
     val pattern: TacticType? = remember(move) {
         move.core?.let { a -> (a.tacticsFound + a.tacticsMissed).maxByOrNull { it.confidence }?.type }
@@ -154,6 +161,16 @@ fun CommentCard(
                             if (showMeIsAboutAMiss(move)) R.string.review_show_me_missed else R.string.review_show_me,
                         ),
                     )
+                }
+            }
+
+            if (onShowBestLine != null) {
+                Spacer(modifier = Modifier.height(if (onShowMeClick != null) 4.dp else 12.dp))
+                FilledTonalButton(
+                    onClick = onShowBestLine,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(text = stringResource(R.string.review_show_best_line))
                 }
             }
 

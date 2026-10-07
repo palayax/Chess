@@ -5,6 +5,7 @@ import net.palaya.chessanalyzer.core.chess.parseUci
 import net.palaya.chessanalyzer.core.narration.BoardDirective
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.ScriptTiming
+import net.palaya.chessanalyzer.core.narration.SegmentBestLine
 import net.palaya.chessanalyzer.core.narration.SegmentLeadIn
 import net.palaya.chessanalyzer.core.narration.SegmentKind
 import net.palaya.chessanalyzer.core.narration.VideoScript
@@ -61,6 +62,10 @@ object SegmentFrameBuilder {
      * @param elapsedMs time since the segment started, lead-in included: while it is inside
      *   [ScriptSegment.leadIn] the lead-in is drawn (ANALYSIS_SPEC 9.8), and the segment's own board
      *   starts after it, so a PlayMove slides exactly when its narration starts.
+     * @param speechMs how long the segment's speech lasts on the timeline ([TimedSegment.speechDurationMs]).
+     *   A segment's [ScriptSegment.bestLine] (V2) starts when the speech ends, so the in-app player and the
+     *   exporter pass the same timeline value and draw the line at the same instant. Null falls back to
+     *   the estimate with the timeline's floor, which is what the timeline uses before any audio exists.
      */
     fun build(
         script: VideoScript,
@@ -69,13 +74,23 @@ object SegmentFrameBuilder {
         orientation: BoardOrientation,
         /** Resolved once per frame stream by the caller — see [BoardFrameRenderer.PanelLabels]. */
         labels: BoardFrameRenderer.PanelLabels = BoardFrameRenderer.PanelLabels.ENGLISH,
+        speechMs: Long? = null,
     ): RenderInstruction {
         val leadIn = segment.leadIn
         if (leadIn != null && elapsedMs < leadIn.durationMs) {
             return buildLeadIn(script, segment, leadIn, elapsedMs, orientation, labels)
         }
+        val line = segment.bestLine
+        if (line != null) {
+            val lineStart = bestLineStartMs(segment, speechMs)
+            if (elapsedMs >= lineStart) return buildBestLine(script, segment, line, elapsedMs - lineStart, orientation, labels)
+        }
         return buildBoard(script, segment, (elapsedMs - segment.leadInMs).coerceAtLeast(0L), orientation, labels)
     }
+
+    /** When a segment's best line starts, from the segment's start: after the lead-in and the speech. */
+    fun bestLineStartMs(segment: ScriptSegment, speechMs: Long?): Long =
+        segment.leadInMs + (speechMs ?: segment.estimatedSpeechMs.coerceAtLeast(ScriptTiming.MIN_SEGMENT_MS))
 
     /** The segment's own board, [elapsedMs] after its lead-in (if any) ended. */
     private fun buildBoard(
@@ -265,6 +280,68 @@ object SegmentFrameBuilder {
                 checkedKingSquare = checkedSquare(fen),
                 caption = segment.caption,
                 recentMoves = recent(steps.size),
+            )
+        )
+    }
+
+    /**
+     * The engine's best line after a key moment's speech (ANALYSIS_SPEC 9.8, V2): one move every
+     * [SegmentBestLine.stepMs] from the position before the move, each sliding for [MOVE_ANIMATION_MS] and
+     * then resting with its caption (the line so far, numbered), then the final position held. Drawn as an
+     * excursion (the tinted border and the best-line chip) so the viewer can tell it from the game; no
+     * verdict chip, because none of these moves was played or classified. The eval bar keeps the
+     * segment's eval: the line is the engine's best play from that position, so its evaluation is that one.
+     */
+    private fun buildBestLine(
+        script: VideoScript,
+        segment: ScriptSegment,
+        line: SegmentBestLine,
+        elapsedMs: Long,
+        orientation: BoardOrientation,
+        labels: BoardFrameRenderer.PanelLabels,
+    ): RenderInstruction {
+        val base = BoardFrameRenderer.BoardFrameSpec(
+            boardState = net.palaya.chessanalyzer.ui.model.BoardState.empty(),
+            labels = labels,
+            chapterLabel = chapterLabelFor(script, segment.index),
+            segmentKind = null,
+            speakerColor = segment.speakerColor,
+            userColor = script.userColor,
+            ply = segment.ply,
+            header = script.header,
+            evalWinPercentWhite = segment.eval?.winPercentWhite,
+            evalCp = segment.eval?.evalCp,
+            evalMateIn = segment.eval?.mateIn,
+            moveNumber = segment.moveNumber,
+            orientation = orientation,
+            excursionActive = true,
+            excursionLabel = labels.bestLine,
+            recentMoves = recentPlayedSans(script, segment.index),
+        )
+        val steps = line.uci
+        if (steps.isEmpty() || line.stepMs <= 0) {
+            return RenderInstruction.Board(base.copy(boardState = fenToBoardState(line.fen), caption = segment.caption))
+        }
+        val stepIndex = (elapsedMs / line.stepMs).toInt().coerceIn(0, steps.size - 1)
+        val local = elapsedMs - stepIndex * line.stepMs
+        var pos = Position.fromFen(line.fen)
+        for (i in 0 until stepIndex) pos = safeMakeMove(pos, steps[i])
+        val beforeState = fenToBoardState(pos.toFen())
+        val fromTo = uciSquares(steps[stepIndex])
+        val settled = local >= MOVE_ANIMATION_MS
+        val afterPos = safeMakeMove(pos, steps[stepIndex])
+        val animating = if (!settled && fromTo != null) {
+            val progress = easeInOut((local.toFloat() / MOVE_ANIMATION_MS).coerceIn(0f, 1f))
+            beforeState.pieces[fromTo.first]?.let { BoardFrameRenderer.AnimatingPiece(it, fromTo.first, fromTo.second, progress) }
+        } else null
+        return RenderInstruction.Board(
+            base.copy(
+                boardState = if (settled) fenToBoardState(afterPos.toFen()) else beforeState,
+                lastMove = fromTo,
+                animating = animating,
+                checkedKingSquare = if (settled) checkedSquare(afterPos.toFen()) else null,
+                caption = line.captions.getOrNull(stepIndex) ?: segment.caption,
+                san = line.san.getOrNull(stepIndex),
             )
         )
     }

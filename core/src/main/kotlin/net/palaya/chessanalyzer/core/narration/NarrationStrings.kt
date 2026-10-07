@@ -324,6 +324,12 @@ sealed interface Sentence {
     /** "Missed line — Nf3 e5 Nxe5" */
     data class CaptionMissedLine(val sans: List<String>) : Sentence
 
+    /**
+     * "Best line — 18... Nf5 19. Qd2 Nd4": the engine's line played silently after a key moment's speech
+     * (ANALYSIS_SPEC 9.8, V2), numbered from [firstMoveNumber] / [firstColor], [sans] so far.
+     */
+    data class CaptionBestLine(val firstMoveNumber: Int, val firstColor: Color, val sans: List<String>) : Sentence
+
     /** "Back to the game — 12. Nf3" */
     data class CaptionBackToGame(val moveNumber: Int, val color: Color, val san: String) : Sentence
 

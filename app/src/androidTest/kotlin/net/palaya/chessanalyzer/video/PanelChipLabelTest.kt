@@ -225,6 +225,56 @@ class PanelChipLabelTest {
     }
 
     // -----------------------------------------------------------------------
+    // V2: the best line after the speech shows no verdict, and the move carries none either
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun theBestLineAfterTheSpeechIsAnExcursionWithNoVerdict() {
+        val line = net.palaya.chessanalyzer.core.narration.SegmentBestLine(
+            fen = fenBefore,
+            uci = listOf("g1f3", "b8c6"),
+            san = listOf("Nf3", "Nc6"),
+            captions = listOf("Best line — 2. Nf3", "Best line — 2. Nf3 Nc6"),
+            stepMs = 1_500L,
+            finalHoldMs = 1_000L,
+        )
+        val seg = segment(
+            kind = SegmentKind.BLUNDER,
+            board = BoardDirective.Annotate(fenBefore),
+            classification = MoveClassification.MISTAKE,
+        ).copy(bestLine = line, holdAfterMs = line.durationMs)
+        val speech = 2_600L // the real voice, longer than the 2 s estimate: the line waits for it
+        fun at(ms: Long) = (SegmentFrameBuilder.build(script(seg), seg, ms, BoardOrientation.WHITE_DOWN, speechMs = speech) as RenderInstruction.Board).spec
+
+        // While the voice speaks, the beat's own frame: its verdict, its caption, no excursion.
+        val speaking = at(speech - 100)
+        assertEquals("? Mistake", BoardFrameRenderer.panelChip(speaking)!!.text)
+        assertEquals("4... g6 ?", speaking.caption)
+        assertEquals(false, speaking.excursionActive)
+        // From the end of the speech the line plays: the first move slides, then rests with its caption.
+        val sliding = at(speech + 100)
+        assertNotNull(sliding.animating)
+        assertEquals(true, sliding.excursionActive)
+        assertEquals("Engine's best line", sliding.excursionLabel)
+        assertEquals(null, BoardFrameRenderer.panelChip(sliding))
+        val landed = at(speech + SegmentFrameBuilder.MOVE_ANIMATION_MS + 50)
+        assertEquals(null, landed.animating)
+        assertEquals("Best line — 2. Nf3", landed.caption)
+        assertEquals("Nf3", landed.san)
+        // The second move, then the final position held with the whole line in the caption.
+        val second = at(speech + 1_500L + SegmentFrameBuilder.MOVE_ANIMATION_MS + 50)
+        assertEquals("Best line — 2. Nf3 Nc6", second.caption)
+        val held = at(speech + line.durationMs - 100)
+        assertEquals(null, held.animating)
+        assertEquals("Nc6", held.san)
+        assertEquals(second.boardState, held.boardState)
+        // The eval bar keeps the beat's eval: the line is the engine's best play from that position.
+        assertEquals(62.0, held.evalWinPercentWhite!!, 0.0)
+        // Without a timeline value, the estimate (2 s) is where the line starts.
+        assertEquals(true, (SegmentFrameBuilder.build(script(seg), seg, 2_100L, BoardOrientation.WHITE_DOWN) as RenderInstruction.Board).spec.excursionActive)
+    }
+
+    // -----------------------------------------------------------------------
     // The recap card (R6b) says a class the way the panel chip does
     // -----------------------------------------------------------------------
 

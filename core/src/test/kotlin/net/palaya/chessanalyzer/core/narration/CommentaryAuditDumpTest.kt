@@ -1,5 +1,7 @@
 package net.palaya.chessanalyzer.core.narration
 
+import net.palaya.chessanalyzer.core.analysis.BestLineCaption
+import net.palaya.chessanalyzer.core.analysis.BestLines
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.TacticInstance
 import net.palaya.chessanalyzer.core.chess.Color
@@ -52,5 +54,41 @@ class CommentaryAuditDumpTest {
         }
         File("build/commentary_audit/after.jsonl").apply { parentFile.mkdirs() }.writeText(out.toString())
         assertTrue("both games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33))
+    }
+
+    /**
+     * V2 (ANALYSIS_SPEC 6.2): every line the Board can display for every move of the two recorded games
+     * plus game01, for each side, with its caption, and the line the video plays for the same move (Normal
+     * pace), as JSON lines to `core/build/commentary_audit/best_lines.jsonl` - the input of
+     * `scripts/audit_commentary.py lines`, which replays each with python-chess.
+     */
+    @Test
+    fun dumpBestLines() {
+        val out = StringBuilder()
+        val games = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
+        for ((name, game) in games) {
+            for (side in listOf<Color?>(null, Color.WHITE, Color.BLACK)) {
+                val report = game.report(side)
+                val script = VideoScriptGenerator(side).generate(report, game.pgn, NarrationOptions(speechWpm = 169, pace = VideoPace.NORMAL))
+                val video = script.segments.mapNotNull { s -> s.bestLine?.let { s.ply!! to it } }.toMap()
+                for (a in report.annotations) {
+                    val lines = BestLines.linesFor(a).joinToString(",") { l ->
+                        "{\"multiPv\":${l.multiPv},\"depth\":${l.depth},\"startFen\":${q(l.startFen)}," +
+                            "\"uci\":[${l.ucis.joinToString(",") { q(it) }}],\"san\":[${l.sans.joinToString(",") { q(it) }}]," +
+                            "\"scoreCp\":${l.scoreCp},\"mateIn\":${l.mateIn},\"caption\":${q(BestLineCaption.text(l, side))}}"
+                    }
+                    val v = video[a.ply]
+                    val videoJson = if (v == null) "null" else
+                        "{\"fen\":${q(v.fen)},\"uci\":[${v.uci.joinToString(",") { q(it) }}],\"san\":[${v.san.joinToString(",") { q(it) }}]," +
+                            "\"captions\":[${v.captions.joinToString(",") { q(it) }}]}"
+                    out.appendLine(
+                        "{\"game\":${q(name)},\"side\":${q(side?.name)},\"ply\":${a.ply},\"san\":${q(a.san)},\"uci\":${q(a.uci)}," +
+                            "\"cls\":${q(a.classification.name)},\"fenBefore\":${q(a.fenBefore)},\"lines\":[$lines],\"video\":$videoJson}"
+                    )
+                }
+            }
+        }
+        File("build/commentary_audit/best_lines.jsonl").apply { parentFile.mkdirs() }.writeText(out.toString())
+        assertTrue("three games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33 + RealGameFixture.game01.pgn.moves.size))
     }
 }

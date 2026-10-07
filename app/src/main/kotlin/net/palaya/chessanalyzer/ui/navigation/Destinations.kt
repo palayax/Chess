@@ -16,10 +16,14 @@ sealed class Destination(val route: String) {
      * The ply argument exists because the Game Report's key moments and tactic entries are only
      * useful if tapping one takes you to the position it is talking about. Without it they all
      * opened the review at the start of the game, which looked like a working link but was not.
+     * `line=true` opens it in that ply's best-line mode (V2: the Summary's "Show the best line").
      */
-    data object Review : Destination("review/{gameId}?ply={ply}") {
-        fun createRoute(gameId: String, ply: Int? = null) =
-            if (ply != null) "review/$gameId?ply=$ply" else "review/$gameId"
+    data object Review : Destination("review/{gameId}?ply={ply}&line={line}") {
+        fun createRoute(gameId: String, ply: Int? = null, bestLine: Boolean = false) = when {
+            ply != null && bestLine -> "review/$gameId?ply=$ply&line=true"
+            ply != null -> "review/$gameId?ply=$ply"
+            else -> "review/$gameId"
+        }
     }
     data object GameReport : Destination("game_report/{gameId}") {
         fun createRoute(gameId: String) = "game_report/$gameId"
@@ -61,6 +65,7 @@ sealed class Destination(val route: String) {
     companion object {
         const val ARG_GAME_ID = "gameId"
         const val ARG_PLY = "ply"
+        const val ARG_LINE = "line"
         const val ARG_TACTIC_TYPE = "tacticType"
     }
 }

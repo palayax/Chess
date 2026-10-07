@@ -235,13 +235,21 @@ data class MoveAnnotation(
  * [scoreCp] / [mateIn] are from the perspective of the side to move in that position (the
  * mover), exactly as in [EngineLineInput]; [mateIn] is set instead of [scoreCp] for a mate.
  * [san] is null only when [uci] is not legal in the position.
+ *
+ * [pvUci] is the engine's whole principal variation for this line, starting with [uci], and [depth]
+ * the depth the line was searched to (one depth for every line of a position, spec §8.2); both are
+ * what the Board's "Show the best line" plays (spec §6.2, V2). Defaulted trailing fields: a line
+ * built without them (tests, hand-made annotations) has an empty [pvUci] and depth 0, and is then
+ * shown as its first move only.
  */
 data class CandidateLine(
     val multiPv: Int,
     val uci: String,
     val san: String?,
     val scoreCp: Int?,
-    val mateIn: Int?
+    val mateIn: Int?,
+    val pvUci: List<String> = emptyList(),
+    val depth: Int = 0
 )
 
 // ---------------------------------------------------------------------------

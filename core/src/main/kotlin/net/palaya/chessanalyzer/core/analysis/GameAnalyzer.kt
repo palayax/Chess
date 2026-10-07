@@ -70,10 +70,15 @@ class GameAnalyzer(
                 val cp = WinProbability.cpOfLine(line)
                 if (WinProbability.sideToMoveOf(evalBefore.fen) == Color.WHITE) cp else -cp
             }
-            // Every cached MultiPV line, best first, mover-relative and untouched (spec §11).
+            // Every cached MultiPV line, best first, mover-relative and untouched (spec §11), with its
+            // whole PV and the one depth the position's lines were searched to (spec §6.2, §8.2).
             val candidateLines = evalBefore.lines.sortedBy { it.multiPv }.mapNotNull { line ->
                 line.pvUci.firstOrNull()?.let { uci ->
-                    CandidateLine(line.multiPv, uci, safeSan(pos, uci), line.scoreCp, line.mateIn)
+                    CandidateLine(
+                        line.multiPv, uci, safeSan(pos, uci), line.scoreCp, line.mateIn,
+                        pvUci = line.pvUci,
+                        depth = lineDepth(line.depth, evalBefore.depth)
+                    )
                 }
             }
             val bestMoveUci = bestLine?.pvUci?.firstOrNull()
@@ -215,6 +220,15 @@ class GameAnalyzer(
             pos = pos.makeMove(move)
         }
         return sanList
+    }
+
+    /**
+     * The depth a line can be trusted to: the smaller of its own label and the position's (spec §8.2
+     * makes them equal; an older cache could carry a lagging secondary line). 0 when neither is known.
+     */
+    private fun lineDepth(lineDepth: Int, positionDepth: Int): Int = when {
+        lineDepth > 0 && positionDepth > 0 -> minOf(lineDepth, positionDepth)
+        else -> maxOf(lineDepth, positionDepth, 0)
     }
 
     private fun safeSan(pos: Position, uci: String): String? =

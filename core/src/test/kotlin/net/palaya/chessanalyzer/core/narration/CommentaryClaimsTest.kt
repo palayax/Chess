@@ -1,5 +1,8 @@
 package net.palaya.chessanalyzer.core.narration
 
+import net.palaya.chessanalyzer.core.analysis.BestLineCaption
+import net.palaya.chessanalyzer.core.analysis.BestLines
+import net.palaya.chessanalyzer.core.analysis.CandidateLine
 import net.palaya.chessanalyzer.core.analysis.CommentaryGenerator
 import net.palaya.chessanalyzer.core.analysis.GameReport
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
@@ -267,4 +270,99 @@ class CommentaryClaimsTest {
             assertEquals("$name ply ${a.ply}", a.san.trimEnd('+', '#'), pos.moveToSan(pos.parseUci(a.uci)).trimEnd('+', '#'))
         }
     }
+
+    // -----------------------------------------------------------------------
+    // V2: the caption under a displayed engine line (ANALYSIS_SPEC 6.2)
+    // -----------------------------------------------------------------------
+
+    private fun bestLine(fen: String, pv: List<String>, cp: Int? = null, mate: Int? = null, depth: Int = 12) =
+        BestLines.build(fen, CandidateLine(1, pv.first(), null, cp, mate, pv, depth))!!
+
+    @Test
+    fun `a line caption gives the engine's score as the engine's, White-relative, and never says wins for it`() {
+        // Black to move, the engine rates Black's line +2.3 for Black: the app prints scores White-relative.
+        val fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 3 3"
+        val l = bestLine(fen, listOf("g8f6", "b1c3"), cp = 230)
+        assertEquals("The engine rates this line -2.3.", BestLineCaption.text(l, null))
+        assertEquals("The engine rates this line 0.0.", BestLineCaption.text(bestLine(fen, listOf("g8f6"), cp = 2), null))
+    }
+
+    @Test
+    fun `a mate is said as the engine's mate, for whoever mates, and checkmate only when the shown moves give it`() {
+        val fen = "6k1/5ppp/8/8/8/8/8/R5K1 w - - 0 1"
+        val mating = bestLine(fen, listOf("a1a8"), mate = 1)
+        assertEquals("The engine sees a forced mate in 1 for White. The line ends in checkmate.", BestLineCaption.text(mating, null))
+        assertEquals("The engine sees a forced mate in 1 for you. The line ends in checkmate.", BestLineCaption.text(mating, Color.WHITE))
+        assertEquals("The engine sees a forced mate in 1 for your opponent. The line ends in checkmate.", BestLineCaption.text(mating, Color.BLACK))
+        // The engine's mate in 3 whose shown plies stop before it: the mate is the engine's, not the board's.
+        val slow = bestLine(fen, listOf("a1a2"), mate = 3)
+        assertEquals("The engine sees a forced mate in 3 for White.", BestLineCaption.text(slow, null))
+        // Even the best line loses to mate: the mate belongs to the other side.
+        val lost = bestLine(fen, listOf("g1f1"), mate = -2)
+        assertEquals("The engine sees a forced mate in 2 for Black.", BestLineCaption.text(lost, null))
+    }
+
+    @Test
+    fun `material is claimed only when the line nets it after the take-back, and named by the 40 cp rule`() {
+        val free = bestLine("4k3/8/8/8/3n4/8/8/3QK3 w - - 0 1", listOf("d1d4", "e8f7"), cp = 900)
+        assertEquals("The engine rates this line +9.0. In this line White wins a piece.", BestLineCaption.text(free, null))
+        assertEquals("The engine rates this line +9.0. In this line you win a piece.", BestLineCaption.text(free, Color.WHITE))
+        assertEquals("The engine rates this line +9.0. In this line your opponent wins a piece.", BestLineCaption.text(free, Color.BLACK))
+        // The line stops right after Qxd4 and exd4 takes the queen back: no gain is claimed.
+        val takenBack = bestLine("4k3/8/8/4p3/3n4/8/8/3QK3 w - - 0 1", listOf("d1d4"), cp = -500)
+        assertEquals("The engine rates this line -5.0.", BestLineCaption.text(takenBack, null))
+        // A free rook is "a rook".
+        val rook = bestLine("4k3/8/8/8/3r4/8/8/3QK3 w - - 0 1", listOf("d1d4", "e8f7"), cp = 1200)
+        assertEquals("The engine rates this line +12.0. In this line White wins a rook.", BestLineCaption.text(rook, null))
+        // A rook for a bishop (+170) is "material", not "a pawn" or "a piece".
+        val exchange = bestLine("4k3/8/8/4p3/3r4/8/8/B3K3 w - - 0 1", listOf("a1d4", "e5d4"), cp = 150)
+        assertEquals(170, exchange.settledGainCp)
+        assertEquals("The engine rates this line +1.5. In this line White wins material.", BestLineCaption.text(exchange, null))
+    }
+
+    @Test
+    fun `every line caption of the recorded games plus game01 is proved by the recording and the board`() {
+        val fixtures = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
+        var checked = 0
+        var materialClaims = 0
+        for ((name, g) in fixtures) {
+            for (side in sides) {
+                for (a in g.report(side).annotations) {
+                    for (l in BestLines.linesFor(a)) {
+                        val text = BestLineCaption.text(l, side)
+                        checked++
+                        // 1. the engine's number, exactly as recorded, White-relative
+                        val recorded = g.evals[a.ply - 1].lines.single { it.multiPv == l.multiPv }
+                        val mate = recorded.mateIn
+                        val first = text.substringBefore(". ").let { if (it == text) it else "$it." }
+                        if (mate != null) {
+                            assertTrue("$name ${a.ply}: $text", first.startsWith("The engine sees a forced mate in ${kotlin.math.abs(mate)} for "))
+                        } else {
+                            val white = if (Position.fromFen(a.fenBefore).sideToMove == Color.WHITE) recorded.scoreCp!! else -recorded.scoreCp!!
+                            assertEquals("$name ${a.ply}", "The engine rates this line ${net.palaya.chessanalyzer.core.analysis.EvalFormat.score(white)}.", first)
+                        }
+                        // 2. checkmate exactly when the shown moves end in it
+                        var pos = Position.fromFen(l.startFen)
+                        for (u in l.ucis) pos = pos.makeMove(pos.parseUci(u))
+                        assertEquals("$name ${a.ply}: $text", pos.isCheckmate(), text.contains("ends in checkmate"))
+                        // 3. "wins" only for a settled gain of at least a pawn, named only when it is that piece
+                        val claimsGain = text.contains("In this line")
+                        if (claimsGain) materialClaims++
+                        assertEquals("$name ${a.ply}: $text", !pos.isCheckmate() && l.settledGainCp >= 100, claimsGain)
+                        for ((word, value) in listOf("a queen" to 900, "a rook" to 500, "a piece" to 325, "a pawn" to 100)) {
+                            if (text.contains("wins $word") || text.contains("win $word")) {
+                                assertTrue("$name ${a.ply}: $text (${l.settledGainCp})", kotlin.math.abs(l.settledGainCp - value) <= 40)
+                            }
+                        }
+                        // 4. who it is about: colours with no side, "you" / "your opponent" otherwise
+                        if (side == null) assertFalse(text, text.contains("you")) else assertFalse(text, text.contains("White") || text.contains("Black"))
+                        // 5. never the classification's name, never a hedge
+                        for (word in listOf("Blunder", "Mistake", "Inaccuracy", "probably", "might")) assertFalse(text, text.contains(word))
+                    }
+                }
+            }
+        }
+        assertTrue("$checked captions, $materialClaims material claims", checked > 300 && materialClaims > 0)
+    }
 }
+

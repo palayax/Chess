@@ -48,6 +48,37 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import net.palaya.chessanalyzer.R
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.withStyle
+import net.palaya.chessanalyzer.core.analysis.BestLine
+import net.palaya.chessanalyzer.core.analysis.BestLineCaption
+import net.palaya.chessanalyzer.core.narration.VideoPace
+import net.palaya.chessanalyzer.data.mapper.toCoreColor
+import net.palaya.chessanalyzer.ui.a11y.asHeading
+import net.palaya.chessanalyzer.ui.components.LineBoard
+import net.palaya.chessanalyzer.ui.components.LinePlaybackEffect
+import net.palaya.chessanalyzer.ui.components.LineStepper
+import net.palaya.chessanalyzer.ui.components.rememberLinePlayback
+import net.palaya.chessanalyzer.ui.model.bestLineOffered
+import net.palaya.chessanalyzer.ui.model.bestLinesFor
+import net.palaya.chessanalyzer.ui.model.lineSideToMove
+import net.palaya.chessanalyzer.ui.model.lineStepMove
+import net.palaya.chessanalyzer.ui.theme.MoveNotationStyle
+import net.palaya.chessanalyzer.core.chess.Color as CoreColor
 import net.palaya.chessanalyzer.core.chess.Position
 import net.palaya.chessanalyzer.data.mapper.toUiSquare
 import net.palaya.chessanalyzer.data.mapper.uciToUiSquarePair
@@ -112,11 +143,17 @@ fun ReviewScreen(
     /**
      * The plies of the report's key moments (any order). With [initialPly] set (the board was opened
      * from a key moment) and a later one in this list, the comment card offers "Next key moment".
+     * A key moment also offers "Show the best line" (V2), whatever its class.
      */
     keyMomentPlies: List<Int> = emptyList(),
+    /** Open straight into the best-line mode of [initialPly] (the Summary's "Show the best line"). */
+    openBestLine: Boolean = false,
+    /** One move every this long while a line plays: the video's line rate (Settings, Video, Pace). */
+    playStepMs: Long = VideoPace.DEFAULT.lineMoveMinMs,
 ) {
     var currentPly by remember(game.id, initialPly) {
-        mutableIntStateOf(initialPly?.coerceIn(0, (game.moves.size - 1).coerceAtLeast(0)) ?: 0)
+        // Plies run 1..N: the last move (a key moment on the final move, its best line) can be opened too.
+        mutableIntStateOf(initialPly?.coerceIn(0, (game.moves.maxOfOrNull { it.ply } ?: 0)) ?: 0)
     }
     // The manual flip is layered on the colour-derived default and not persisted: a new visit
     // (or a new answer to "Which side were you?") starts from the default again.
@@ -125,6 +162,19 @@ fun ReviewScreen(
     val lastPly = game.moves.maxOfOrNull { it.ply } ?: 0
 
     val currentMove = game.moves.firstOrNull { it.ply == currentPly }
+
+    // V2, "Show the best line" (ANALYSIS_SPEC 6.2): the engine's line from the position BEFORE the move,
+    // played on this board with the shared line player. The mode belongs to one ply: stepping the game
+    // elsewhere (or "Back to the game") leaves it.
+    val lines = remember(currentMove?.core) { bestLinesFor(currentMove) }
+    val lineOffered = currentMove != null && bestLineOffered(currentMove, keyMomentPlies, lines)
+    var lineMode by remember(game.id, initialPly) {
+        mutableStateOf(if (openBestLine && initialPly != null) BestLineMode(ply = currentPly, index = 0) else null)
+    }
+    val activeLine: BestLine? = lineMode?.takeIf { it.ply == currentPly }?.let { lines.getOrNull(it.index) }
+    val playback = rememberLinePlayback(activeLine, activeLine?.startFen.orEmpty(), activeLine?.ucis.orEmpty())
+    LinePlaybackEffect(playback, playStepMs)
+    BackHandler(enabled = activeLine != null) { lineMode = null }
     val nextKeyPly: Int? = if (initialPly != null) nextKeyMomentPly(keyMomentPlies, currentPly) else null
     val boardState = currentMove?.boardAfter ?: BoardState.startingPosition()
     val evalCp = currentMove?.evalCp ?: 0
@@ -193,21 +243,26 @@ fun ReviewScreen(
         val boardRow: @Composable (Dp) -> Unit = { boardSize ->
             Row(modifier = Modifier.height(boardSize)) {
                 EvalBar(
-                    evalCentipawns = evalCp,
-                    mateIn = mateIn,
+                    // In line mode the bar shows the engine's score for the line (White-relative, §9.4).
+                    evalCentipawns = if (activeLine != null) activeLine.whiteCp ?: 0 else evalCp,
+                    mateIn = if (activeLine != null) activeLine.whiteMateIn else mateIn,
                     width = EVAL_BAR_WIDTH,
                     orientationFlipped = orientation == net.palaya.chessanalyzer.ui.board.BoardOrientation.BLACK_DOWN,
                 )
                 Spacer(modifier = Modifier.width(EVAL_BAR_GAP))
-                ChessBoard(
-                    board = boardState,
-                    orientation = orientation,
-                    lastMove = lastMove,
-                    checkedKingSquare = checkedKingSquare,
-                    arrows = arrows,
-                    badge = badge,
-                    modifier = Modifier.size(boardSize),
-                )
+                if (activeLine != null) {
+                    LineBoard(state = playback, orientation = orientation, modifier = Modifier.size(boardSize))
+                } else {
+                    ChessBoard(
+                        board = boardState,
+                        orientation = orientation,
+                        lastMove = lastMove,
+                        checkedKingSquare = checkedKingSquare,
+                        arrows = arrows,
+                        badge = badge,
+                        modifier = Modifier.size(boardSize),
+                    )
+                }
             }
         }
         val chips: @Composable () -> Unit = {
@@ -251,8 +306,48 @@ fun ReviewScreen(
                         // "Next key moment" only when the board was opened from one (a ply was
                         // asked for) and there is a later one; at the last it is gone.
                         onNextKeyMoment = nextKeyPly?.let { target -> { currentPly = target } },
+                        onShowBestLine = if (lineOffered) {
+                            { lineMode = BestLineMode(ply = move.ply, index = 0) }
+                        } else null,
                     )
                 } ?: StartPositionCard()
+            }
+        }
+        // Line mode: the line chooser (when the engine has near-equal alternatives), the line stepper and
+        // the line's card, in place of the game's chips, transport and comment card.
+        val lineControls: @Composable () -> Unit = {
+            val line = activeLine
+            val move = currentMove
+            if (line != null && move != null) {
+                if (lines.size > 1) {
+                    LineChoices(
+                        lines = lines,
+                        selected = lineMode?.index ?: 0,
+                        onSelect = { lineMode = BestLineMode(ply = move.ply, index = it) },
+                    )
+                }
+                LineModeStepper(line = line, state = playback)
+            }
+        }
+        val lineCard: @Composable (Modifier) -> Unit = { areaModifier ->
+            val line = activeLine
+            val move = currentMove
+            Column(
+                modifier = areaModifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = BOARD_SIDE_PADDING, vertical = 8.dp),
+            ) {
+                if (line != null && move != null) {
+                    BestLineCard(
+                        line = line,
+                        index = lineMode?.index ?: 0,
+                        playedMove = move,
+                        step = playback.step,
+                        viewer = userColor,
+                        onBackToGame = { lineMode = null },
+                    )
+                }
             }
         }
 
@@ -275,9 +370,14 @@ fun ReviewScreen(
                         boardRow(boardSize)
                     }
                     Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        chips()
-                        transport()
-                        card(Modifier.weight(1f))
+                        if (activeLine != null) {
+                            lineControls()
+                            lineCard(Modifier.weight(1f))
+                        } else {
+                            chips()
+                            transport()
+                            card(Modifier.weight(1f))
+                        }
                     }
                 }
             } else {
@@ -295,11 +395,180 @@ fun ReviewScreen(
                     ) {
                         boardRow(boardSize)
                     }
-                    chips()
-                    transport()
-                    card(Modifier.weight(1f))
+                    if (activeLine != null) {
+                        lineControls()
+                        lineCard(Modifier.weight(1f))
+                    } else {
+                        chips()
+                        transport()
+                        card(Modifier.weight(1f))
+                    }
                 }
             }
+        }
+    }
+}
+
+/** Which line of which ply the Board is playing (V2): [index] 0 is the best line, 1 and 2 the alternatives. */
+private data class BestLineMode(val ply: Int, val index: Int)
+
+/** "Best", "Line 2", ... as the chooser and the card name a line. */
+@Composable
+private fun lineName(index: Int, multiPv: Int): String =
+    if (index == 0) stringResource(R.string.line_choice_best) else stringResource(R.string.line_choice_number, multiPv)
+
+/**
+ * The lines the engine rates within the margin of the best (ANALYSIS_SPEC 6.2), one chip each: its first
+ * move and its score. Like chess.com's analysis board, which lists the engine's top lines with their
+ * scores and lets you step through any of them. Notation, so the row is left to right in every language.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun LineChoices(lines: List<BestLine>, selected: Int, onSelect: (Int) -> Unit) {
+    val selectedWord = stringResource(R.string.cd_line_selected)
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        androidx.compose.foundation.layout.FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = BOARD_SIDE_PADDING, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            lines.forEachIndexed { i, line ->
+                val name = lineName(i, line.multiPv)
+                val first = line.steps.first()
+                val description = stringResource(R.string.cd_line_choice, name, first.san, line.scoreText) +
+                    if (i == selected) ", $selectedWord" else ""
+                // One TalkBack stop per line: a sentence, a tab role and its selected state, and the same
+                // action a tap has. The chip's own semantics (a checkbox with only the label) are replaced.
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier.clearAndSetSemantics {
+                        contentDescription = description
+                        role = Role.Tab
+                        this.selected = i == selected
+                        onClick { onSelect(i); true }
+                    },
+                ) {
+                    FilterChip(
+                        selected = i == selected,
+                        onClick = { onSelect(i) },
+                        label = { Text("$name · ${first.san} ${line.scoreText}") },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The line mode's stepper: the shared [LineStepper] with the move just played ("18… Nf5") and who is to
+ * move in the position on the board, Back / Next / Play-pause.
+ */
+@Composable
+private fun LineModeStepper(line: BestLine, state: net.palaya.chessanalyzer.ui.components.LinePlaybackState) {
+    val step = state.step
+    val move = lineStepMove(line.startFen, step, line.sans)
+    val caption = if (move == null) {
+        stringResource(R.string.line_start)
+    } else {
+        stringResource(if (move.isWhite) R.string.simulation_move_white else R.string.simulation_move_black, move.number, move.san)
+    }
+    val toMove = lineSideToMove(state.positions, step)?.let { side ->
+        stringResource(R.string.panel_to_move, stringResource(if (side == CoreColor.WHITE) R.string.side_white else R.string.side_black))
+    }
+    LineStepper(
+        state = state,
+        caption = caption,
+        captionIsNotation = move != null,
+        counter = stringResource(R.string.simulation_step_counter, step, state.totalPlies),
+        showCounter = true,
+        secondLine = toMove,
+        previousDescription = stringResource(R.string.line_previous),
+        nextDescription = stringResource(R.string.line_next),
+        modifier = Modifier.padding(horizontal = 4.dp),
+    )
+}
+
+/**
+ * The line's card: which line it is and what it replaces, the line in move-number notation with the
+ * current move marked, the verified caption (ANALYSIS_SPEC 6.2: the engine's score as the engine's, and
+ * only what the board proves), the depth it was searched to, and "Back to the game".
+ */
+@Composable
+private fun BestLineCard(
+    line: BestLine,
+    index: Int,
+    playedMove: MoveRecord,
+    step: Int,
+    viewer: PieceColor?,
+    onBackToGame: () -> Unit,
+) {
+    val played = stringResource(
+        if (playedMove.moverColor == PieceColor.WHITE) R.string.simulation_move_white else R.string.simulation_move_black,
+        playedMove.moveNumber,
+        playedMove.san,
+    )
+    // A key moment that was itself the engine's choice (a brilliancy) has no "instead of": its line goes on from it.
+    val title = when {
+        line.ucis.first() == playedMove.uci -> stringResource(R.string.line_title_played, played)
+        index == 0 -> stringResource(R.string.line_title_best, played)
+        else -> stringResource(R.string.line_title_alternative, line.multiPv, played)
+    }
+    val caption = remember(line, viewer) { BestLineCaption.text(line, viewer?.toCoreColor()) }
+    val notation = remember(line, step) { lineNotation(line, step) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.asHeading(),
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = notation,
+                style = MoveNotationStyle.copy(textDirection = TextDirection.Ltr),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.line_depth, line.depth),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onBackToGame, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.line_back_to_game))
+            }
+        }
+    }
+}
+
+/** The line as a scoresheet writes it, the move on the board in bold and green. */
+private fun lineNotation(line: BestLine, step: Int): AnnotatedString = buildAnnotatedString {
+    append("\u200E")
+    line.steps.forEachIndexed { i, s ->
+        if (i > 0) append(' ')
+        // A no-break space keeps a move number on the line of its move at any font size.
+        val token = when {
+            s.color == CoreColor.WHITE -> "${s.moveNumber}.\u00A0${s.san}"
+            i == 0 -> "${s.moveNumber}…\u00A0${s.san}"
+            else -> s.san
+        }
+        if (i == step - 1) {
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = GreenPrimary)) { append(token) }
+        } else {
+            append(token)
         }
     }
 }

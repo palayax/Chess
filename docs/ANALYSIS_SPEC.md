@@ -339,6 +339,62 @@ A walkthrough is read as fact, so each sentence is something the board proves:
   (`PayoffKind.LINE_ENDS`) instead of those two sentences, and "for nothing" is gone from
   "You come out of it a rook up".
 
+### 6.2 The best line on the Board (V2)
+
+Added in Round 14 for the owner's "the alternate best tactics is not simulated and only appear with color
+arrow". Before V2 the engine's better move was an arrow on the Board, a sentence on the Summary, and an
+arrow in the video; only a move with a detected missed motif (§5.4) had a walkthrough (§6), so a mistake
+whose best line won nothing a detector named, every inaccuracy, and every key moment that was not a miss
+showed no sequence at all. `MoveAnnotation.candidateLines` held only each line's first move; V2 adds its
+whole PV and its depth (`CandidateLine.pvUci`, `CandidateLine.depth`, from the position's one depth, §8.2).
+
+**What is shown (`core.analysis.BestLines`, `BestLine`).**
+- From the position BEFORE the move, the PV of MultiPV line 1, replayed with the core move generator; it
+  stops at the first move that is not legal, and a line whose first move is illegal is no line.
+- **At most `min(PV length, depth / 2, 8)` plies, and nothing after a checkmate.** Stockfish's PV is longer
+  than its search depth (on the five recorded games, the best line before every move that lost at least 5
+  win-percent was 8 to 29 plies at depth 12 to 20, longer than the depth in 38 of 41 cases): its tail comes
+  from extensions and the quiescence search. A move at ply k was chosen with about `depth - k` plies of
+  search below it, so `depth / 2` keeps every shown move backed by at least half the search: 6 plies at
+  Quick (12), 7 at Standard (14), 8 at Deep (18). 8 is the walkthrough's cap (§6), so the two agree. An
+  unknown depth (0) shows the first move only. "Up to the point the tactic resolves" was measured and
+  rejected: the material in those PVs kept changing until ply 12 in the median case (last capture between
+  ply 0 and 25), so "resolved" is no stable point inside what the depth supports.
+- **Lines 2 and 3** are offered beside it when the engine rates them within `ALTERNATIVE_MARGIN` = 2.0
+  win-percent of line 1 (the best-or-near-best bound of §2 and §11, `PracticeSelector.ACCEPT_LOSS`), cut by
+  the same rule, and never when they start with the move actually played.
+- **Which moves offer it:** every INACCURACY, MISTAKE, MISS and BLUNDER, and every key moment the Summary
+  lists (whatever its class), when the annotation has a line. A key moment whose move WAS the engine's
+  choice shows "The engine's line from 8. h3" instead of "Best line instead of ...".
+
+**The caption (`BestLineCaption`, rules of §6.1 and §7.2; checked in `CommentaryClaimsTest` and by
+`scripts/audit_commentary.py lines`).**
+1. The engine's number, said as the engine's: "The engine rates this line +2.3." (White-relative, §9.4), or,
+   for an engine mate, "The engine sees a forced mate in 3 for White." (the winner is the mover for a
+   positive mate, the other side for a negative one). A score is never called a win.
+2. What the shown plies prove on the board: "The line ends in checkmate." when its last move mates;
+   otherwise, when the material the mover has netted, settled (`ExchangeEvaluator.settledGain`: the
+   opponent's best take-back charged when it is their move), is at least 100 cp, "In this line White wins a
+   piece." named by the 40 cp rule of §6.1, "material" between two piece values. Nothing for a line that
+   nets nothing or gives material up.
+3. Who: "you" / "your opponent" for a chosen side, colours otherwise (§7 rule 4).
+
+**The Board's line mode (`ReviewScreen`).** "Show the best line" on the comment card (and, from a Summary
+key moment that has no walkthrough, "Show the best line" opens the Board straight into it). The board plays
+the line on the same screen with the shared line player (`ui.components.LinePlayer`, also the Walkthrough's):
+Back / Next / Play-pause (Play at the video's line rate, Settings, Video, Pace), the move just played named
+with its number ("12... Qg6") and who is to move, the move just played highlighted and the next one as a
+green arrow, a "2 / 7" counter, the eval bar on the line's score, the line in move-number notation with the
+current move marked, the caption, "Engine depth 14", chips for the alternatives, and "Back to the game"
+(the system back does the same). Stepping the game leaves the mode.
+
+**Reference (chess.com, pattern only).** Game Review's "Show" plays the engine line from the position of
+the mistake and "Best" reveals the better move (docs/CHESSCOM_REFERENCE_ALIGNMENT.md, S1/S3/S7/S14); the
+analysis board lists the engine's top lines with their scores and steps through any of them move by move.
+Taken: play the line from the position before the move on the same board, step it forward and back or let
+it play, show the top lines with their evaluation, keep the notation with move numbers, a way back to the
+game. Our own words, layout and art.
+
 ---
 
 ## 7. Commentary generation
@@ -1034,6 +1090,37 @@ are exactly what they were, and only gain a pause.
 **Recap and time left.** Unchanged: the recap card is still after the last segment and outside both numbers;
 the export's "N of M" and "about N min left" count segments and measure synthesis time, and the pace adds no
 segment and no speech.
+
+**The best line in the video (V2).** A key moment on a MISTAKE, MISS or BLUNDER whose narration names the
+better move over a still board (`ScriptBuilder.betterMoveBeats`: the error beat told at DWELL or FULL length
+without a detour, and a brief beat on one of the report's key moments, the five costliest errors) plays the
+engine's best line on the board **after its speech** (`ScriptSegment.bestLine`, `SegmentBestLine`), instead
+of leaving the better move as an arrow: the same moves the Board shows (`BestLines.bestFor`), at most
+`BestLines.VIDEO_MAX_PLIES` = 4 (the DWELL variation length of §9.7), one every `lineMoveMinMs`, each sliding in
+400 ms and resting with its caption ("Best line — 18... Nf5 19. Qd2"), the final position held
+`lineFinalHoldMs`, drawn as an excursion (tinted border, the chip "Engine's best line", no verdict; the eval
+bar keeps the beat's eval). An inaccuracy keeps its arrow: it is BRIEF, "never a walk of the missed line"
+(§9.7). A missed tactic with a detour already walks its line with narration (§9.7 FULL / DWELL).
+
+- **Decided: the line extends the segment by pace time, inside the cap.** Narration stays the source of
+  timing: the line starts when the speech ends (`SegmentFrameBuilder` takes the timeline's own speech
+  length, so the player and the MP4 start it at the same instant) and lives in the segment's hold
+  (`holdAfterMs` = the line's time + any other hold), so no timeline consumer needs anything new and the
+  exporter's audio is silence there. It is counted in `VideoScript.pacingMs`, never in the story, so the
+  §9.7 budget, the words, the cached narration, the recap card and the "N of M" / "about N min left" export
+  figures are unchanged (no new segment, no new speech).
+- **Which moments and how many plies (`ScriptBuilder.bestLinePlan`)**, decided once, at the slowest pace
+  (Relaxed), so every pace plays the same moves: the room under the 15 percent cap that the V3 pace time
+  leaves at Relaxed is shared out most important first (tier, then loss, then the earlier move); each moment
+  gets up to 4 plies while its Relaxed time fits, and as many as fit (at least one) when four do not; a
+  moment for which not even one ply fits keeps its arrow. So the lines never scale the V3 pauses and holds
+  down, and a game's pace time stays under its cap at every pace.
+- **Measured (host recordings, 169 wpm, `BestLineVideoTest`, `core/build/pace/v2_best_lines.txt`):** the
+  Opera Game 1 moment (9...b5, 4 plies), the Immortal Game 2 (11...cxb5, 16...Bc5, 4 plies each), game01 3
+  (24.Bh3 and 7...e4 4 plies, 13...Bc6 1 ply: the room ran out), the scholar's mate 1 (3...Nf6, 1 ply),
+  Byrne-Fischer none (its arrow-only moments are inaccuracies). The pace time at Relaxed / Normal / Brisk
+  rose by 9.5 / 7.0 / 4.9 s (Opera), 19.0 / 14.0 / 9.8 s (Immortal), 22.5 / 16.5 / 11.4 s (game01); every
+  game stays under its cap (game01 Relaxed 86.5 of 87.3 s).
 
 **Reference (chess.com Game Review, pattern only).** Stepping through a review shows a key move on its own:
 the board sits on the position, the move is made, its classification appears with it, and the coach's

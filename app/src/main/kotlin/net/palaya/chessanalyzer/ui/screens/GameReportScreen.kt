@@ -117,6 +117,8 @@ fun GameReportScreen(
     onKeyMomentClick: ((Int) -> Unit)? = null,
     /** Open the walkthrough of the missed (or found) tactic at this ply. */
     onShowMeClick: ((Int) -> Unit)? = null,
+    /** Open the Board at this ply in its best-line mode (V2); offered on a key moment with no walkthrough. */
+    onShowBestLine: ((Int) -> Unit)? = null,
     /** Same shape/intent as [onKeyMomentClick]: jump the Review screen to this ply. */
     onTacticClick: ((Int) -> Unit)? = null,
     /** Open the textbook example of a pattern (ANALYSIS_SPEC §10). */
@@ -176,6 +178,7 @@ fun GameReportScreen(
                 moments = moments,
                 onMomentClick = onKeyMomentClick,
                 onShowMeClick = onShowMeClick,
+                onShowBestLine = onShowBestLine,
                 practicePlies = practicePlies,
                 onTryIt = onTryIt,
             )
@@ -432,6 +435,7 @@ private fun LazyListScope.keyMomentsSection(
     onShowMeClick: ((Int) -> Unit)?,
     practicePlies: Set<Int>,
     onTryIt: ((Int) -> Unit)?,
+    onShowBestLine: ((Int) -> Unit)? = null,
 ) {
     val userKnown = report.userColor != null
     item(key = "moments-title") {
@@ -445,7 +449,7 @@ private fun LazyListScope.keyMomentsSection(
         item(key = "moments-none") { TacticsEmptyRow(message = stringResource(R.string.summary_no_key_moments)) }
     }
     items(moments.primary, key = { "moment-${it.ply}" }) { moment ->
-        KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt)
+        KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt, onShowBestLine)
     }
     if (moments.opponent.isNotEmpty()) {
         item(key = "moments-opponent-title") {
@@ -457,7 +461,7 @@ private fun LazyListScope.keyMomentsSection(
             )
         }
         items(moments.opponent, key = { "moment-${it.ply}" }) { moment ->
-            KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt)
+            KeyMomentCard(moment, report, onMomentClick, onShowMeClick, practicePlies, onTryIt, onShowBestLine)
         }
     }
 }
@@ -944,11 +948,14 @@ private fun KeyMomentCard(
     onShowMe: ((Int) -> Unit)?,
     practicePlies: Set<Int>,
     onTryIt: ((Int) -> Unit)?,
+    onShowBestLine: ((Int) -> Unit)? = null,
 ) {
     // "what I missed" is only true of the user's own mistakes; a found tactic or the opponent's
     // moment is a plain "Show me".
     val ownMistake = report.userColor == moment.moverColor && moment.classification != MoveClassification.BRILLIANT
     val canShowMe = onShowMe != null && moment.ply in report.plysWithSimulation
+    // V2: a moment with no walkthrough plays the engine's line on the Board instead of leaving it unseen.
+    val canShowLine = !canShowMe && onShowBestLine != null && moment.ply in report.plysWithBestLine
     // "Try it" opens Practise at this move, only when the move is a practice position.
     val tryIt = onTryIt != null && canTryIt(moment.ply, practicePlies)
     Card(
@@ -985,7 +992,7 @@ private fun KeyMomentCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (canShowMe || tryIt) {
+            if (canShowMe || canShowLine || tryIt) {
                 // A flow row, so at a large font the two buttons wrap instead of clipping.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (canShowMe) {
@@ -994,6 +1001,14 @@ private fun KeyMomentCard(
                             modifier = Modifier.heightIn(min = 48.dp),
                         ) {
                             Text(stringResource(if (ownMistake) R.string.review_show_me_missed else R.string.review_show_me))
+                        }
+                    }
+                    if (canShowLine) {
+                        FilledTonalButton(
+                            onClick = { onShowBestLine?.invoke(moment.ply) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
+                            Text(stringResource(R.string.review_show_best_line))
                         }
                     }
                     if (tryIt) {

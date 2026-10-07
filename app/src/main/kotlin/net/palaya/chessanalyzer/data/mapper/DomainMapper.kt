@@ -248,6 +248,7 @@ fun CoreGameReport.toUiReport(
         notMe = notMe,
         openingName = openingName,
         plysWithSimulation = annotations.filter { it.simulation != null }.map { it.ply }.toSet(),
+        plysWithBestLine = annotations.filter { net.palaya.chessanalyzer.core.analysis.BestLines.bestFor(it) != null }.map { it.ply }.toSet(),
         // Written from the same side facts the report carries, so the side chooser re-maps it too.
         summarySentence = GameSummarySentence.text(this, userColor?.toCoreColor(), notMe, strings),
     )

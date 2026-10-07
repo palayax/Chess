@@ -3,6 +3,7 @@
 
     python scripts/audit_commentary.py after core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
+    python scripts/audit_commentary.py lines core/build/commentary_audit/best_lines.jsonl
 
 For every sentence of every annotation text, and every intro / step / payoff of every walkthrough, the
 claim it makes is re-derived from the recorded position and the recorded engine data with python-chess
@@ -11,6 +12,14 @@ claim it makes is re-derived from the recorded position and the recorded engine 
     S  supported         the position or the engine's own numbers prove it
     F  harmless flavour  true, and asserts nothing beyond the classification it follows
     W  WRONG             false, attributed to the wrong move or side, or not provable from the data
+
+``lines`` (V2, ANALYSIS_SPEC 6.2) audits every engine line the Board's "Show the best line" can display and
+every line the narrated video plays, for the two recorded games plus game01 (written by core's test
+``CommentaryAuditDumpTest.dumpBestLines``): each move is replayed and must be legal, its SAN must be
+python-chess's, the line must be a prefix of the recorded engine PV cut by the rule (depth / 2, at most 8,
+and nothing after a checkmate), alternatives must be within 2 win-percent and not the move played, and each
+sentence of the caption is re-derived (the engine's score as recorded, checkmate from the board, a material
+gain settled with python-chess's own exchange evaluation and named by the 40 cp rule).
 
 The recordings (core/src/test/resources/pacing/*.analysis.json) are the engine data. ``after`` reads the
 JSON lines written by core's test ``CommentaryAuditDumpTest``; ``before`` reads the text dump of the
@@ -30,6 +39,7 @@ NAME = {chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop", ches
 GAME_FILES = {
     "immortal": ROOT + "/core/src/test/resources/pacing/immortal.analysis.json",
     "chesscom": ROOT + "/core/src/test/resources/pacing/chesscom_style_game.analysis.json",
+    "game01": ROOT + "/core/src/test/resources/pacing/game01.analysis.json",
 }
 GAIN_WORDS = {"a queen": 900, "a rook": 500, "a piece": 325, "a pawn": 100}
 _analysis = {}
@@ -858,8 +868,198 @@ def audit_sim_before(rec):
 # Driver
 # ---------------------------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------------------------
+# V2: the displayed engine lines (ANALYSIS_SPEC 6.2)
+# ---------------------------------------------------------------------------------------------
+
+def score_text(cp):
+    """EvalFormat.score for centipawns: one decimal, explicit sign, Java's half-up rounding."""
+    rounded = math.floor(cp / 100.0 * 10 + 0.5) / 10.0
+    if rounded == 0:
+        return "0.0"
+    return ("+" if rounded > 0 else "") + "%.1f" % rounded
+
+
+def balance(board, color):
+    return sum((VALUE[p.piece_type] if p.piece_type != chess.KING else 0) * (1 if p.color == color else -1)
+               for p in board.piece_map().values())
+
+
+def settled_gain(start, end, mover):
+    """The material [mover] netted, after the opponent's best take-back when it is their move."""
+    net = balance(end, mover) - balance(start, mover)
+    if end.turn == mover:
+        return net
+    takes = [see(end, m) for m in end.legal_moves if end.is_capture(m)]
+    return net - max(0, max(takes) if takes else 0)
+
+
+def gain_words(cp):
+    for word, value in (("a queen", 900), ("a rook", 500), ("a piece", 325), ("a pawn", 100)):
+        if abs(cp - value) <= 40:
+            return word
+    return None
+
+
+def who(color, side):
+    if side is None:
+        return "White" if color == chess.WHITE else "Black"
+    return "you" if (color == chess.WHITE) == (side == "WHITE") else "your opponent"
+
+
+def numbered(board, sans):
+    """'18... Nf5 19. Qd2 Nd4' from the start position's own move counter (the video caption's numbering)."""
+    out, number, white = [], board.fullmove_number, board.turn == chess.WHITE
+    for i, san in enumerate(sans):
+        if white:
+            out.append("%d. %s" % (number, san))
+        elif i == 0:
+            out.append("%d... %s" % (number, san))
+        else:
+            out.append(san)
+        if not white:
+            number += 1
+        white = not white
+    return " ".join(out)
+
+
+def audit_line_record(rec):
+    """Every check on one move's displayed lines and video line; returns [(what, verdict, note)]."""
+    out = []
+    ev = analysis(rec["game"])[rec["ply"] - 1]
+    recorded = {l["multiPv"]: l for l in ev["lines"]}
+    depth = ev["depth"]
+    start = chess.Board(rec["fenBefore"])
+    mover = start.turn
+    lines = rec["lines"]
+    if not lines:
+        return [("lines", "W", "no line for a move the engine analysed")]
+    if lines[0]["multiPv"] != 1:
+        out.append(("best first", "W", "the first line is not MultiPV 1"))
+    best_wp = None
+    for l in lines:
+        tag = "line %d" % l["multiPv"]
+        r = recorded.get(l["multiPv"])
+        if r is None:
+            out.append((tag, "W", "not a recorded line"))
+            continue
+        if chess.Board(l["startFen"]).board_fen() != start.board_fen() or chess.Board(l["startFen"]).turn != mover:
+            out.append((tag, "W", "starts from another position"))
+        if l["depth"] != depth:
+            out.append((tag, "W", "depth %d, recorded %d" % (l["depth"], depth)))
+        pv = r["pvUci"]
+        if l["uci"] != pv[:len(l["uci"])]:
+            out.append((tag, "W", "not a prefix of the recorded PV"))
+        b = start.copy()
+        legal = True
+        if len(l["uci"]) != len(l["san"]):
+            out.append((tag, "W", "%d moves but %d SANs" % (len(l["uci"]), len(l["san"]))))
+        for u, san in zip(l["uci"], l["san"]):
+            m = chess.Move.from_uci(u)
+            if m not in b.legal_moves:
+                out.append((tag, "W", "%s is illegal" % u))
+                legal = False
+                break
+            if b.san(m) != san:
+                out.append((tag, "W", "SAN %s, python-chess says %s" % (san, b.san(m))))
+            b.push(m)
+        if not legal:
+            continue
+        out.append((tag + " legal", "S", "%d plies" % len(l["uci"])))
+        cap = min(len(pv), max(1, depth // 2) if depth > 0 else 1, 8)
+        if len(l["uci"]) > cap or (len(l["uci"]) < cap and not b.is_checkmate()):
+            out.append((tag + " length", "W", "%d plies, the rule gives %d" % (len(l["uci"]), cap)))
+        else:
+            out.append((tag + " length", "S", "min(%d, %d/2, 8)" % (len(pv), depth)))
+        wp = line_wp(r)
+        if l["multiPv"] == 1:
+            best_wp = wp
+        else:
+            if best_wp is None or best_wp - wp > 2.0:
+                out.append((tag + " margin", "W", "%.2f win-%% below the best" % ((best_wp or 0) - wp)))
+            elif l["uci"][0] == rec["uci"]:
+                out.append((tag + " margin", "W", "the alternative is the move played"))
+            else:
+                out.append((tag + " margin", "S", "%.2f below" % (best_wp - wp)))
+        # The caption, sentence by sentence.
+        caption = l["caption"]
+        sentences = [x.strip() for x in re.split(r"(?<=\.)\s+", caption) if x.strip()]
+        expected = []
+        if r.get("mateIn") is not None and r["mateIn"] != 0:
+            winner = mover if r["mateIn"] > 0 else (not mover)
+            expected.append("The engine sees a forced mate in %d for %s." % (abs(r["mateIn"]), who(winner, rec["side"])))
+        else:
+            cp = r["scoreCp"] if mover == chess.WHITE else -r["scoreCp"]
+            expected.append("The engine rates this line %s." % score_text(cp))
+        if b.is_checkmate():
+            expected.append("The line ends in checkmate.")
+        else:
+            gain = settled_gain(start, b, mover)
+            if gain >= 100:
+                subject = who(mover, rec["side"])
+                expected.append("In this line %s %s %s." % (subject, "win" if subject == "you" else "wins", gain_words(gain) or "material"))
+        if sentences == expected:
+            for x in sentences:
+                out.append((tag + " caption", "S", x))
+        else:
+            out.append((tag + " caption", "W", "%r, expected %r" % (caption, " ".join(expected))))
+    v = rec.get("video")
+    if v is not None:
+        best = lines[0]
+        if chess.Board(v["fen"]).board_fen() != start.board_fen():
+            out.append(("video", "W", "starts from another position"))
+        elif not (1 <= len(v["uci"]) <= 4) or v["uci"] != best["uci"][:len(v["uci"])]:
+            out.append(("video", "W", "not the first 1-4 plies of the Board's best line"))
+        else:
+            b = start.copy()
+            ok = True
+            for k, u in enumerate(v["uci"]):
+                m = chess.Move.from_uci(u)
+                if m not in b.legal_moves or b.san(m) != v["san"][k]:
+                    ok = False
+                    break
+                b.push(m)
+                want = "Best line — " + numbered(start, v["san"][:k + 1])
+                if v["captions"][k] != want:
+                    out.append(("video caption", "W", "%r, expected %r" % (v["captions"][k], want)))
+            out.append(("video", "S" if ok else "W", "%d plies" % len(v["uci"])))
+        if rec["cls"] not in ("MISTAKE", "MISS", "BLUNDER"):
+            out.append(("video", "W", "a line played on a %s" % rec["cls"]))
+    return out
+
+
+def main_lines(path):
+    recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    counts = Counter()
+    wrong = []
+    per_game = defaultdict(Counter)
+    for r in recs:
+        for what, verdict, note in audit_line_record(r):
+            counts[verdict] += 1
+            per_game[r["game"]][verdict] += 1
+            if verdict == "W":
+                wrong.append((r["game"], r["side"], r["ply"], r["san"], what, note))
+    lines = sum(len(r["lines"]) for r in recs)
+    alts = sum(1 for r in recs for l in r["lines"] if l["multiPv"] > 1)
+    video = sum(1 for r in recs if r.get("video"))
+    print("### Displayed engine lines (ANALYSIS_SPEC 6.2)\n")
+    print("%d moves x sides, %d lines (%d alternatives), %d video lines. %d checks: %d supported, %d WRONG.\n" % (
+        len(recs), lines, alts, video, sum(counts.values()), counts["S"], counts["W"]))
+    print("| Game | Checks | Supported | WRONG |")
+    print("|---|---|---|---|")
+    for g, c in sorted(per_game.items()):
+        print("| %s | %d | %d | %d |" % (g, sum(c.values()), c["S"], c["W"]))
+    print("\n### Every WRONG check\n")
+    for g, side, ply, san, what, note in wrong:
+        print("- %s (%s) ply %d %s [%s]: %s" % (g, side, ply, san, what, note))
+    if not wrong:
+        print("(none)")
+
+
 def main():
     mode, path = sys.argv[1], sys.argv[2]
+    if mode == "lines":
+        return main_lines(path)
     if mode == "after":
         recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
         text_audit, sim_audit = audit_text_after, audit_sim_after

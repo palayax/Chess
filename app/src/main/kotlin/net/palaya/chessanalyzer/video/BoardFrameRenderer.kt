@@ -138,6 +138,8 @@ object BoardFrameRenderer {
         val excursionDefault: String,
         /** The words of the recap end card (R6b); defaulted so hand-built labels keep compiling. */
         val recap: RecapLabels = RecapLabels.ENGLISH,
+        /** The chip on the board while the engine's best line plays after a key moment (V2). */
+        val bestLine: String = "Engine's best line",
     ) {
         companion object {
             val ENGLISH = PanelLabels(
@@ -171,6 +173,7 @@ object BoardFrameRenderer {
                 segmentKind = ::humanizeKind,
                 excursionDefault = context.getString(R.string.panel_excursion_default),
                 recap = recapLabelsFrom(context),
+                bestLine = context.getString(R.string.panel_best_line),
             )
         }
     }

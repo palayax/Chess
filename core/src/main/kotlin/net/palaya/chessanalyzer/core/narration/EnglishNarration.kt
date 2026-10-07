@@ -53,6 +53,7 @@ object EnglishNarration : NarrationStrings {
             is Sentence.CaptionMove -> one(moveCaption(sentence.moveNumber, sentence.color, sentence.san) + (sentence.glyph?.let { " $it" } ?: ""))
             is Sentence.CaptionMissed -> one(sentence.bestSan?.let { "Missed: $it (played ${sentence.playedSan})" } ?: "What was missed")
             is Sentence.CaptionMissedLine -> one("Missed line — ${sentence.sans.joinToString(" ")}")
+            is Sentence.CaptionBestLine -> one("Best line — " + numberedLine(sentence.firstMoveNumber, sentence.firstColor, sentence.sans))
             is Sentence.CaptionBackToGame -> one("Back to the game — ${moveCaption(sentence.moveNumber, sentence.color, sentence.san)}")
             is Sentence.CaptionPuzzle -> one("${side(sentence.side)} to play — can you find it?")
             is Sentence.CaptionTurningPoint -> one("Turning point — move ${sentence.moveNumber} ${sentence.san} (${sentence.lossPercent}% swing)")
@@ -673,6 +674,23 @@ object EnglishNarration : NarrationStrings {
 
     private fun moveCaption(moveNumber: Int, color: Color, san: String): String =
         if (color == Color.WHITE) "$moveNumber. $san" else "$moveNumber... $san"
+
+    /** "18... Nf5 19. Qd2 Nd4": a number before every White move, and before a first move by Black. */
+    private fun numberedLine(firstMoveNumber: Int, firstColor: Color, sans: List<String>): String {
+        val parts = ArrayList<String>()
+        var number = firstMoveNumber
+        var color = firstColor
+        for ((i, san) in sans.withIndex()) {
+            parts += when {
+                color == Color.WHITE -> "$number. $san"
+                i == 0 -> "$number... $san"
+                else -> san
+            }
+            if (color == Color.BLACK) number++
+            color = color.opposite()
+        }
+        return parts.joinToString(" ")
+    }
 
     private fun side(color: Color): String = if (color == Color.WHITE) "White" else "Black"
 

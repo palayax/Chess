@@ -107,6 +107,10 @@ enum class SegmentKind {
  *   the game moves the story skipped are played first, then the position before the move is held
  *   still with the moving piece's square and its destination lit, and only then does the move (and
  *   the narration) start. Null for every other beat. See [SegmentLeadIn].
+ * @param bestLine the engine's line played silently AFTER the speech (ANALYSIS_SPEC 9.8, V2), on a key
+ *   moment whose narration names the better move. Its time is part of [holdAfterMs] (it is the first
+ *   [SegmentBestLine.durationMs] of the hold), so a timeline needs nothing new to lay it out; a frame
+ *   consumer draws it from the end of the speech. Null for every other beat.
  */
 data class ScriptSegment(
     val index: Int,
@@ -145,10 +149,34 @@ data class ScriptSegment(
      * lets every consumer show the spec's verdict and keep the kind for what it actually means.
      */
     val classification: MoveClassification? = null,
-    val leadIn: SegmentLeadIn? = null
+    val leadIn: SegmentLeadIn? = null,
+    val bestLine: SegmentBestLine? = null
 ) {
     /** How long the silent lead-in lasts before the speech (and the segment's own board) starts; 0 for none. */
     val leadInMs: Long get() = leadIn?.durationMs ?: 0L
+}
+
+/**
+ * The engine's better line, played on the board after a key moment's speech has named the better move
+ * (ANALYSIS_SPEC 9.8, V2), instead of leaving the better move as an arrow only. Silent, and laid inside
+ * the segment's [ScriptSegment.holdAfterMs] (pace time, outside the story budget):
+ *
+ *  1. from the end of the speech, one move every [stepMs] from [fen], each sliding in
+ *     [ScriptTiming.MOVE_ANIMATION_MS] and then resting, with its own caption ([captions], the line so far);
+ *  2. the line's final position held [finalHoldMs].
+ *
+ * At most `BestLines.VIDEO_MAX_PLIES` plies, and never more than the Board shows for the same line
+ * (`BestLines.maxPliesFor` its depth), so the video and the Board cannot disagree on a move.
+ */
+data class SegmentBestLine(
+    val fen: String,
+    val uci: List<String>,
+    val san: List<String>,
+    val captions: List<String>,
+    val stepMs: Long,
+    val finalHoldMs: Long
+) {
+    val durationMs: Long get() = uci.size * stepMs + finalHoldMs
 }
 
 /**

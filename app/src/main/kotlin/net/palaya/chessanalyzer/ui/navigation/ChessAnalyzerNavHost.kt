@@ -283,10 +283,13 @@ fun ChessAnalyzerNavHost(
                 navArgument(Destination.ARG_GAME_ID) { type = NavType.StringType },
                 // Optional: -1 means "open at the start", any other value opens at that ply.
                 navArgument(Destination.ARG_PLY) { type = NavType.IntType; defaultValue = -1 },
+                // Optional: true opens the ply's best-line mode (V2).
+                navArgument(Destination.ARG_LINE) { type = NavType.BoolType; defaultValue = false },
             ),
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
             val requestedPly = backStackEntry.arguments?.getInt(Destination.ARG_PLY) ?: -1
+            val openBestLine = backStackEntry.arguments?.getBoolean(Destination.ARG_LINE) ?: false
             val game = viewModel.games[gameId]
             if (game != null) {
                 ReviewScreen(
@@ -296,6 +299,9 @@ fun ChessAnalyzerNavHost(
                     userColor = viewModel.reports[gameId]?.userColor,
                     // The moments the Summary listed, so "Next key moment" visits exactly those.
                     keyMomentPlies = viewModel.reports[gameId]?.keyMomentPlies.orEmpty(),
+                    openBestLine = openBestLine,
+                    // A line plays at the video's line rate (Settings, Video, Pace).
+                    playStepMs = settings.videoPace.lineMoveMinMs,
                     onShowMeClick = { move ->
                         if (move.core?.simulation != null) {
                             navController.navigate(Destination.Simulation.createRoute(gameId, move.ply))
@@ -343,6 +349,9 @@ fun ChessAnalyzerNavHost(
                     },
                     onShowMeClick = { ply ->
                         navController.navigate(Destination.Simulation.createRoute(gameId, ply))
+                    },
+                    onShowBestLine = { ply ->
+                        navController.navigate(Destination.Review.createRoute(gameId, ply, bestLine = true))
                     },
                     onSideChosen = { viewModel.setUserSideForGame(gameId, it) },
                     onTacticClick = { ply ->

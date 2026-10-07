@@ -358,7 +358,10 @@ class VideoPlayerController(
         }
         val elapsed = positionMs - timed.startMs
         val chapterLabel = SegmentFrameBuilder.chapterLabelFor(script, timed.segment.index)
-        val instruction = SegmentFrameBuilder.build(script, timed.segment, elapsed, BoardOrientation.WHITE_DOWN, panelLabels)
+        // The timeline's speech length, as the exporter passes it: a best line (V2) starts at the same instant in both.
+        val instruction = SegmentFrameBuilder.build(
+            script, timed.segment, elapsed, BoardOrientation.WHITE_DOWN, panelLabels, speechMs = timed.speechDurationMs,
+        )
         _uiState.update {
             it.copy(
                 segmentIndex = timed.segment.index,

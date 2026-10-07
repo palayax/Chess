@@ -114,6 +114,15 @@ analysis for that side would have written), `MotifClaimsTest` (clearance, deflec
     ./gradlew :core:test --tests '*CommentaryAuditDumpTest*'
     python scripts/audit_commentary.py after  core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
+    python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
+
+The `lines` mode (V2, ANALYSIS_SPEC §6.2) audits every engine line the Board's "Show the best line" can display
+and every line the video plays, for the Immortal Game, the Opera Game and game01 and all three sides: each move
+legal and its SAN python-chess's, a prefix of the recorded PV cut by `min(PV, depth / 2, 8)` (shorter only at
+mate), alternatives within 2 win-% and never the move played, and every caption sentence re-derived (the
+engine's score and mate, checkmate from the board, the settled material gain by python-chess's own exchange
+evaluation and the 40 cp names). Result on 2026-10-07: 432 move records, 678 lines, 18 video lines, 2478
+checks, 0 WRONG.
 
 (Needs `python-chess`; `scripts/record_analysis.py` also needs a Stockfish binary and is only used to record
 the analyses the tests replay.)

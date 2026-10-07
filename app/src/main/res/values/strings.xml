@@ -62,6 +62,26 @@
     <!-- Review screen -->
     <string name="review_title">Board</string>
     <string name="review_better_was">Better was %1$s</string>
+    <!-- V2: the Board's best-line mode (ANALYSIS_SPEC 6.2). -->
+    <string name="review_show_best_line">Show the best line</string>
+    <string name="line_back_to_game">Back to the game</string>
+    <string name="line_play">Play the line</string>
+    <string name="line_pause">Pause the line</string>
+    <string name="line_previous">Previous move in the line</string>
+    <string name="line_next">Next move in the line</string>
+    <string name="line_start">Start of the line</string>
+    <!-- The line's heading: "Best line instead of 18… Bxg1". %1$s is the move as notation. -->
+    <string name="line_title_best">Best line instead of %1$s</string>
+    <!-- When the played move was the engine's own choice (a key moment such as a brilliancy): "The engine's line from 8. h3". -->
+    <string name="line_title_played">The engine\'s line from %1$s</string>
+    <!-- "Instead of 18… Bxg1: line 2" (the number last, so it is not read as a count of something). -->
+    <string name="line_title_alternative">Instead of %2$s: line %1$d</string>
+    <string name="line_choice_best">Best</string>
+    <string name="line_choice_number">Line %1$d</string>
+    <!-- TalkBack, one line chip: "Best: Nf5, rated +2.3". -->
+    <string name="cd_line_choice">%1$s: %2$s, rated %3$s</string>
+    <string name="line_depth">Engine depth %1$d</string>
+    <string name="cd_line_selected">selected</string>
     <string name="review_show_me">Show me</string>
     <!-- Jumps the Board to the next key moment (B2). The arrow is a mirrored quote mark, so it points the reading direction. -->
     <string name="review_next_key_moment">Next key moment ›</string>
@@ -448,6 +468,7 @@
     <string name="panel_to_move">%1$s to move</string>
     <string name="panel_you_marker">(you)</string>
     <string name="panel_excursion_default">What you could aim for</string>
+    <string name="panel_best_line">Engine\'s best line</string>
     <string name="side_white">White</string>
     <string name="side_black">Black</string>
     <!-- Recap end card of the exported video (R6b); burned into frames, so these go through RecapLabels. -->

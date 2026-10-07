@@ -197,6 +197,9 @@ conflict.
   4 GB RAM, 8 GB data; created in D1, cold boot under 2 min with WHPX). The API 36(.1)
   `google_apis_playstore` image never came online here; use `google_apis`. Run the instrumented suites on
   both: API 35+ behaviour (edge to edge, the mediaProcessing FGS type) only shows on `chess36`.
+- **Start chess36 with `-gpu swangle_indirect`** for any screenshot or UI driving (V2): with the default host GPU
+  (`gpu mode host`, the NVIDIA card) the instrumented tests pass but `screencap` returns an all-black frame and the
+  first boot after it shows "System UI isn't responding" (tap Wait).
 - Edge-to-edge checks on a device: `cmd overlay enable-exclusive --category
   com.android.internal.systemui.navbar.threebutton` (3-button bar, the strictest case) and `cmd overlay
   enable com.android.internal.display.cutout.emulation.tall` (a cutout, on the side in landscape). Restore

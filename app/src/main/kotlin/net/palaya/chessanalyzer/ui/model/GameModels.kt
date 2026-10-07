@@ -264,6 +264,11 @@ data class GameReport(
      */
     val plysWithSimulation: Set<Int> = emptySet(),
     /**
+     * Plies whose annotation has an engine line to play (V2, ANALYSIS_SPEC 6.2), so a Summary key moment
+     * without a walkthrough can offer "Show the best line" instead.
+     */
+    val plysWithBestLine: Set<Int> = emptySet(),
+    /**
      * One sentence on how the game unfolded ("You were fine until move 11, then a blunder decided
      * it."), written by `core.narration.GameSummarySentence` from the report alone and re-written
      * whenever the side chooser re-maps the report, so it says "you" / "your opponent" like the

@@ -1,5 +1,6 @@
 package net.palaya.chessanalyzer.core.narration
 
+import net.palaya.chessanalyzer.core.analysis.BestLines
 import net.palaya.chessanalyzer.core.analysis.ExchangeEvaluator
 import net.palaya.chessanalyzer.core.analysis.GameReport
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
@@ -212,6 +213,14 @@ private class ScriptBuilder(
 
     private val phrases = PhrasePicker(seedOf(report))
     private val segments = ArrayList<ScriptSegment>()
+
+    /**
+     * The key-moment beats whose narration names the better move while the board only annotates the
+     * position: an error told at DWELL or FULL length without a detour, the turning point that was an
+     * inaccuracy, and a brief beat on one of the report's key moments ([keyMomentPlies], the five
+     * costliest errors). [paced] plays the engine's line on them after the speech (ANALYSIS_SPEC 9.8, V2).
+     */
+    private val betterMoveBeats = HashSet<Int>()
     private val chapters = ArrayList<ScriptChapter>()
     private var pendingChapter: String? = null
 
@@ -656,18 +665,64 @@ private class ScriptBuilder(
      *    another key move starting from it (its own pause shows that position).
      *  - Every move of a played-out line (a detour's hypothetical moves) is on screen for at least
      *    [VideoPace.lineMoveMinMs], and the line's final position for [VideoPace.lineFinalHoldMs] more.
+     *  - A key moment on a MISTAKE, MISS or BLUNDER whose narration names the better move over a still
+     *    board plays the engine's best line after its speech (V2, [SegmentBestLine], [bestLinePlan]): at
+     *    most [BestLines.VIDEO_MAX_PLIES] plies at [VideoPace.lineMoveMinMs] each, the final position held
+     *    [VideoPace.lineFinalHoldMs], all of it inside the segment's hold and inside the room the rest of
+     *    the pace time leaves under the cap at the slowest pace.
      */
     fun paced(script: VideoScript): VideoScript {
         val times = PaceTimes.of(options.pace)
-        val full = paced(script, times)
+        val cap = VideoScriptGenerator.pacingCapMs((annotations.size + 1) / 2)
+        // V2: which key moments play their best line, and how many plies each, is decided once, at the
+        // slowest pace, from the room the V3 pace time leaves under the cap. So every pace plays the same
+        // moves, and the lines never push the V3 pauses and holds down (spec 9.8).
+        val headroom = cap - paced(script, PaceTimes.of(VideoPace.RELAXED), emptyMap()).pacingMs
+        val plan = bestLinePlan(script, headroom)
+        val full = paced(script, times, plan)
         // The pace sits outside the story budget, but not without limit (spec 9.8): a game with an
         // unusual number of key moves has every pace time scaled down until it fits the cap.
-        val cap = VideoScriptGenerator.pacingCapMs((annotations.size + 1) / 2)
         if (full.pacingMs <= cap) return full
-        return paced(script, times.scaled(cap.toDouble() / full.pacingMs))
+        return paced(script, times.scaled(cap.toDouble() / full.pacingMs), plan)
     }
 
-    private fun paced(script: VideoScript, pace: PaceTimes): VideoScript {
+    /**
+     * The key moments that play their best line after the speech, and how many plies each (V2, spec 9.8):
+     * the beats that name the better move over a still board ([betterMoveBeats]) on a MISTAKE, MISS or
+     * BLUNDER (an inaccuracy is BRIEF, "never a walk of the missed line", spec 9.7), most important first
+     * (tier, then loss, then the earlier move). Each gets up to [BestLines.VIDEO_MAX_PLIES] plies while the
+     * line's time at [VideoPace.RELAXED] fits in [headroomMs], and as many as fit (at least one) when four
+     * do not; a moment for which not even one ply fits keeps its arrow. Keyed by segment index.
+     */
+    private fun bestLinePlan(script: VideoScript, headroomMs: Long): Map<Int, Int> {
+        if (headroomMs <= 0) return emptyMap()
+        val relaxed = PaceTimes.of(VideoPace.RELAXED)
+        val candidates = script.segments
+            .filter { it.index in betterMoveBeats && it.board is BoardDirective.Annotate }
+            .mapNotNull { seg ->
+                val a = annotations.getOrNull((seg.ply ?: return@mapNotNull null) - 1) ?: return@mapNotNull null
+                if (!isErrorClass(a)) return@mapNotNull null
+                if (boardKey((seg.board as BoardDirective.Annotate).fen) != boardKey(a.fenBefore)) return@mapNotNull null
+                val line = BestLines.bestFor(a) ?: return@mapNotNull null
+                Triple(seg.index, a, line.steps.size)
+            }
+            .sortedWith(
+                compareByDescending<Triple<Int, MoveAnnotation, Int>> { tiers[it.second.ply] ?: PacingTier.SKIP }
+                    .thenByDescending { it.second.loss }
+                    .thenBy { it.second.ply }
+            )
+        val plan = LinkedHashMap<Int, Int>()
+        var left = headroomMs
+        for ((index, _, available) in candidates) {
+            val most = minOf(BestLines.VIDEO_MAX_PLIES, available)
+            val plies = (most downTo 1).firstOrNull { k -> k * relaxed.lineMoveMinMs + relaxed.lineFinalHoldMs <= left } ?: continue
+            plan[index] = plies
+            left -= plies * relaxed.lineMoveMinMs + relaxed.lineFinalHoldMs
+        }
+        return plan
+    }
+
+    private fun paced(script: VideoScript, pace: PaceTimes, linePlan: Map<Int, Int>): VideoScript {
         val segs = script.segments
         val out = ArrayList<ScriptSegment>(segs.size)
         var pacing = 0L
@@ -717,6 +772,12 @@ private class ScriptBuilder(
                 // The line's final position (its payoff beat): held a little longer.
                 seg = seg.copy(holdAfterMs = seg.holdAfterMs + pace.lineFinalHoldMs)
                 pacing += pace.lineFinalHoldMs
+            } else if (d is BoardDirective.Annotate && linePlan.containsKey(s.index)) {
+                // V2: the better move the narration named is played out after the speech, not left as an arrow.
+                bestLineTail(s, d, pace, linePlan.getValue(s.index))?.let { line ->
+                    seg = seg.copy(bestLine = line, holdAfterMs = seg.holdAfterMs + line.durationMs)
+                    pacing += line.durationMs
+                }
             }
             out.add(seg)
         }
@@ -724,6 +785,33 @@ private class ScriptBuilder(
             segments = out,
             totalEstimatedMs = out.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs },
             pacingMs = pacing
+        )
+    }
+
+    /**
+     * The engine's best line for the key moment [s] is about, as the video plays it after the speech
+     * (ANALYSIS_SPEC 9.8, V2): the same line the Board's line mode shows ([BestLines.bestFor], so the
+     * same legal moves and the same depth rule), cut to [plies] (at most [BestLines.VIDEO_MAX_PLIES], from
+     * [bestLinePlan]), one move every [PaceTimes.lineMoveMinMs] and the final position held
+     * [PaceTimes.lineFinalHoldMs]. Null when the annotation has no line or the line does not start from
+     * the position the beat shows.
+     */
+    private fun bestLineTail(s: ScriptSegment, d: BoardDirective.Annotate, pace: PaceTimes, plies: Int): SegmentBestLine? {
+        val a = annotations.getOrNull((s.ply ?: return null) - 1) ?: return null
+        if (boardKey(d.fen) != boardKey(a.fenBefore)) return null
+        val line = BestLines.bestFor(a) ?: return null
+        val steps = line.steps.take(minOf(plies, BestLines.VIDEO_MAX_PLIES))
+        if (steps.isEmpty()) return null
+        val first = steps.first()
+        return SegmentBestLine(
+            fen = line.startFen,
+            uci = steps.map { it.uci },
+            san = steps.map { it.san },
+            captions = steps.indices.map { k ->
+                say(Sentence.CaptionBestLine(first.moveNumber, first.color, steps.take(k + 1).map { it.san }))
+            },
+            stepMs = pace.lineMoveMinMs,
+            finalHoldMs = pace.lineFinalHoldMs
         )
     }
 
@@ -1050,7 +1138,8 @@ private class ScriptBuilder(
     private fun briefMistakeBeat(a: MoveAnnotation, leadIn: String) {
         val sb = StringBuilder(leadIn)
         sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
-        sb.append(betterMoveSentence(a) ?: say(Sentence.InaccuracyNote))
+        val better = betterMoveSentence(a)
+        sb.append(better ?: say(Sentence.InaccuracyNote))
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
@@ -1061,6 +1150,8 @@ private class ScriptBuilder(
             eval = evalBefore(a.ply),
             moveNumber = a.moveNumber
         )
+        // A brief beat plays the line only when it is one of the report's key moments (V2).
+        if (better != null && a.ply in keyMomentPlies) betterMoveBeats.add(segments.last().index)
     }
 
     /** The finish deserves its own beat rather than being narrated as another quiet move. */
@@ -1168,7 +1259,8 @@ private class ScriptBuilder(
         sb.append(say(Sentence.ErrorOpener(a.classification))).append(' ')
         sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
         sb.append(consequence(a))
-        betterMoveSentence(a)?.let { sb.append(' ').append(it) }
+        val better = betterMoveSentence(a)
+        better?.let { sb.append(' ').append(it) }
 
         add(
             kind = SegmentKind.BLUNDER,
@@ -1180,6 +1272,7 @@ private class ScriptBuilder(
             eval = evalBefore(a.ply),
             moveNumber = a.moveNumber
         )
+        if (better != null) betterMoveBeats.add(segments.last().index)
     }
 
     private fun threatBeat(a: MoveAnnotation, leadIn: String) {
@@ -1210,7 +1303,8 @@ private class ScriptBuilder(
         val sb = StringBuilder(leadIn)
         sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
         sb.append(say(Sentence.InaccuracyNote))
-        betterMoveSentence(a)?.let { sb.append(' ').append(it) }
+        val better = betterMoveSentence(a)
+        better?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
@@ -1221,6 +1315,7 @@ private class ScriptBuilder(
             eval = evalBefore(a.ply),
             moveNumber = a.moveNumber
         )
+        if (better != null) betterMoveBeats.add(segments.last().index)
     }
 
     /**

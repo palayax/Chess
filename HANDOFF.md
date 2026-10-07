@@ -45,10 +45,29 @@ declarations with two short videos (§3), the Data safety form (§5: no data col
 
 ---
 
+## V2 DONE (2026-10-07): best-line simulation
+
+RUN_LOG "V2". Nothing committed. **Next: G1** (famous games).
+
+- **Board:** every INACCURACY / MISTAKE / MISS / BLUNDER and every Summary key moment offers **"Show the best line"**:
+  the engine's line from the position before the move, played on the same board with Back / Next / Play-pause,
+  "12... Qg6" + who is to move + "3 / 7", the next move as an arrow, the eval bar on the line's score, the
+  notation, a verified caption ("The engine rates this line +2.3." / "...forced mate in 3 for White." / "In
+  this line White wins a piece." only when settled), "Engine depth 14", chips for lines 2-3 within 2 win-%,
+  "Back to the game" (system back too). A Summary key moment without a walkthrough offers the same button.
+- **Rule (ANALYSIS_SPEC §6.2):** `min(PV length, depth / 2, 8)` plies, stop at mate; `CandidateLine` now carries
+  `pvUci` + `depth`. The Walkthrough and the line mode share `ui/components/LinePlayer.kt`.
+- **Video (§9.8):** on a MISTAKE/MISS/BLUNDER key moment whose narration names the better move over a still
+  board, the line (up to 4 plies) plays silently after the speech, inside the segment's hold, as pace time
+  within the 15 % cap (chosen at Relaxed so every pace plays the same moves; inaccuracies keep the arrow).
+- **Audit:** `python scripts/audit_commentary.py lines core/build/commentary_audit/best_lines.jsonl` (new mode).
+- Counts / evidence: RUN_LOG "V2".
+
+---
+
 ## V1 + V3 DONE (2026-10-07): narrator voice picker, video pace
 
-RUN_LOG "V1 + V3". Nothing committed. **Next: V2** (best-line simulation; reuse V3's `SegmentLeadIn` approach and
-`VideoPace.lineMoveMinMs` for its move rate).
+RUN_LOG "V1 + V3". Nothing committed. V2 is done (section above).
 
 - **V1, Settings, Video, "Narrator voice":** all 11 Kokoro speakers (`KokoroVoices.SPEAKERS`; `voices.bin` = 11 x
   523,264 B), labelled in our words ("Bella · American, female"), each with an on-device "Play sample"
