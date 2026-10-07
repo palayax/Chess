@@ -298,29 +298,45 @@ A net upgrade usually needs an app update anyway: Stockfish changes its architec
 and the app refuses (never offers, never downloads) a net whose `compat.archHash`/`version` differ from the
 engine's. The manifest path is for a same-architecture net and for the voice.
 
-### 4c. The GitHub repository and the model release (owner)
+### 4c. The GitHub repository and the model release (done 2026-10-07)
 
 The app downloads from GitHub Releases of the project's public repository, which is also where the GPLv3
-source offer points. The URL is compiled in (`app/build.gradle.kts`, `defaultModelBaseUrl`), so the repo must
-exist, with the files, before the app is released.
+source offer points. The URL is compiled in (`app/build.gradle.kts`, `defaultModelBaseUrl`).
 
-1. **Create the public repo `palayax/Chess`** on GitHub (or pick another name and tell the developers:
-   it is one line in `app/build.gradle.kts` (`defaultModelBaseUrl`), the default `--repo` in
-   `scripts/publish_models.sh`, the URL in `docs/PRIVACY_POLICY.md`, and this document; rebuild after the
-   change). The Claude app token cannot create repos; create it in the GitHub web UI or with your own `gh`.
-2. **Push the source** (GPLv3 obligation). Check first that nothing secret is staged: `keystore/`,
-   `keystore.properties`, `*.pem`, `local.properties`, `vendor/models/*` (except `MODELS.lock` and
-   `manifest_public_key.der`), `dist/` and `tools/` are gitignored; `git status --ignored` lists them. Then set
-   the About screen's source link (`about_license_source_url` in `strings.xml`) and the listing
-   already point at https://github.com/palayax/Chess (set 2026-10-07).
-3. **Install and log in to `gh`** (`gh auth login`, with an account that can create releases in the repo).
-4. **Publish the models**: `scripts/fetch_models.sh`, then
-   `scripts/publish_models.sh models-2026.10 --min-version-code 2` (§4b). This creates the immutable
-   `models-2026.10` release (the net and the voice `.tar.gz`) and the rolling `models` release with the
-   signed `models.json`.
-5. **Verify from outside**: on a phone or emulator with the release APK, Setup > Download must reach
-   "All set", and Settings > Check for updates must say "You're up to date." (this is the last open check of
-   the D-track, blocked until the repo exists).
+**State on 2026-10-07:**
+
+- Repo **https://github.com/palayax/Chess**, public, default branch `main`.
+  - Source pushed after a secret scan of the whole history (only fake test keys).
+  - `LICENSE` (GPL-3.0) and `SECURITY.md` added.
+- Models published by `scripts/publish_models.sh models-2026.10 --min-version-code 2`:
+  - Release `models-2026.10` holds `nn-1a298aa575a0.nnue` and `kokoro-int8-en-v0_19.tar.gz`.
+  - Release `models` holds `models.json` and `models.json.sig`.
+  - Both files were downloaded anonymously and match `MODELS.lock` (size and SHA-256), and the manifest
+    signature verifies with `manifest_public_key.der`.
+- Privacy policy on GitHub Pages, served from the `gh-pages` branch (only `index.html`, `privacy/index.html`
+  and `.nojekyll`; HTTPS enforced): **https://palayax.github.io/Chess/privacy/**.
+  - Regenerate the page from `docs/PRIVACY_POLICY.md` whenever that file changes.
+
+**Repository settings** (applied through the API and read back on 2026-10-07):
+
+| Area | Setting |
+|---|---|
+| Features | Issues on; Projects, Wiki, Discussions off. Squash merge only; head branches deleted after merge. Description, homepage (the Pages site) and topics set |
+| Security | Secret scanning and **push protection** on. Dependabot alerts and Dependabot security updates on. Private vulnerability reporting on (`SECURITY.md` points to it). Non-provider patterns and validity checks need GitHub Secret Protection and stay off |
+| Actions | Only GitHub-owned actions are allowed (the Pages build uses them). `GITHUB_TOKEN` is read-only by default and cannot approve pull requests. Workflows from all outside contributors need approval. There are no workflows in the repo |
+| Ruleset "Protect main and gh-pages" | Applies to the default branch and `gh-pages`: no deletion, no force-push. No bypass actors |
+| Ruleset "Immutable model release tags" | Applies to `refs/tags/models-*`: no deletion, no move (update), no force-push. No bypass actors. The rolling tag `models` is deliberately NOT covered: `publish_models.sh` re-uploads `models.json` there |
+
+A ruleset protects tags, not release assets: an admin could still delete or replace an asset in the web UI.
+That cannot hurt users, only break downloads:
+- first-run files are pinned by SHA-256 in the app;
+- updates need the manifest signature from `keystore/models-signing.pem`.
+
+GitHub's "immutable releases" setting was not turned on, because it would also freeze the rolling `models`
+release that carries `models.json`.
+
+**Next model release.** Use a new tag (`models-YYYY.MM.n`); binaries under a tag never change. Update
+`release.tag` in `MODELS.lock` only for an app build that should download the new files on first run.
 
 ---
 
