@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.core.analysis.EngineLineInput
 import net.palaya.chessanalyzer.core.analysis.PositionEval
+import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,8 +14,9 @@ import org.json.JSONObject
 /**
  * File-backed persistence for imported games and their finished analysis — deliberately not
  * Room (per the integration brief): one small JSON document per game under `filesDir/games/`,
- * plus one JSON document per *engine evaluation* under `filesDir/eval_cache/` keyed by a hash
- * of (PGN text, depth, MultiPV).
+ * plus one JSON document per *engine evaluation* under `filesDir/eval_cache/<net 12-hex>/` keyed by a
+ * hash of (PGN text, depth, MultiPV, search budget). Since D2e each net has its own folder
+ * ([EvalCacheLayout]): [netPrefix] names the active net's, and a net update purges the others.
  *
  * The evaluation cache — not a cache of the derived [net.palaya.chessanalyzer.core.analysis.GameReport]
  * — is what actually makes re-opening a game instant: [PositionEval] is expensive to produce
@@ -23,10 +25,30 @@ import org.json.JSONObject
  * (pure, synchronous, no I/O) but has a much larger/more nested shape to hand-serialize. Caching
  * the cheaper-to-serialize, more-expensive-to-recompute artifact is the better trade.
  */
-class GameRepository(filesDir: File) {
+class GameRepository(
+    filesDir: File,
+    /**
+     * The 12 hex digits of the active net's name (`NetStore.activeIdentity()`), read at every cache call.
+     * The default is the compiled net's, for tests that make a repository on their own.
+     */
+    private val netPrefix: () -> String = { NetStore.prefixOf(NetStore.NET_FILENAME)!! },
+) {
 
     private val gamesDir = File(filesDir, "games").apply { mkdirs() }
-    private val evalCacheDir = File(filesDir, "eval_cache").apply { mkdirs() }
+
+    /** `filesDir/eval_cache/` with one folder per net. */
+    val evalCache = EvalCacheLayout(File(filesDir, EvalCacheLayout.DIR_NAME).apply { mkdirs() })
+
+    /** The active net's prefix now: the eval-cache folder an analysis started now reads and writes. */
+    fun currentNetPrefix(): String = netPrefix()
+
+    private fun evalCacheDir(prefix: String): File = evalCache.dirFor(prefix).apply { mkdirs() }
+
+    /** First launch of a D2e build: the flat cache moves into the active net's folder. */
+    fun migrateFlatEvalCache(): EvalCacheLayout.Result = evalCache.migrateFlat(netPrefix())
+
+    /** After a net update commits: other nets' folders go (design §4.2). */
+    fun purgeEvalCachesExcept(keepNetPrefix: String): EvalCacheLayout.Result = evalCache.purgeExcept(keepNetPrefix)
 
     data class StoredGame(
         val id: String,
@@ -111,16 +133,23 @@ class GameRepository(filesDir: File) {
     // Engine-evaluation cache
     // -----------------------------------------------------------------
 
-    /** Cache key over the inputs that actually change the analysis: game text + depth + MultiPV. */
-    fun cacheKey(pgnText: String, depth: Int, multiPv: Int): String {
+    /**
+     * Cache key over the inputs that actually change the analysis: game text + depth + MultiPV +
+     * the per-position search budget ([budget], e.g. `SearchBudget.cacheKeyPart`; F1). With the
+     * budget in the key a result is reused only under identical limits, so results from before F1
+     * (no budget) are not reused, and a changed budget re-analyses rather than mixing limits.
+     * [budget] null gives the pre-F1 key.
+     */
+    fun cacheKey(pgnText: String, depth: Int, multiPv: Int, budget: String? = null): String {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update(pgnText.toByteArray(Charsets.UTF_8))
         digest.update(":$depth:$multiPv".toByteArray(Charsets.UTF_8))
+        if (budget != null) digest.update(":$budget".toByteArray(Charsets.UTF_8))
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
-    suspend fun loadEvalCache(key: String): List<PositionEval>? = withContext(Dispatchers.IO) {
-        val file = File(evalCacheDir, "$key.json")
+    suspend fun loadEvalCache(key: String, prefix: String = netPrefix()): List<PositionEval>? = withContext(Dispatchers.IO) {
+        val file = File(evalCacheDir(prefix), "$key.json")
         if (!file.exists()) return@withContext null
         try {
             val array = JSONArray(file.readText())
@@ -130,10 +159,10 @@ class GameRepository(filesDir: File) {
         }
     }
 
-    suspend fun saveEvalCache(key: String, evals: List<PositionEval>) = withContext(Dispatchers.IO) {
+    suspend fun saveEvalCache(key: String, evals: List<PositionEval>, prefix: String = netPrefix()) = withContext(Dispatchers.IO) {
         val array = JSONArray()
         evals.forEach { array.put(positionEvalToJson(it)) }
-        File(evalCacheDir, "$key.json").writeText(array.toString())
+        File(evalCacheDir(prefix), "$key.json").writeText(array.toString())
     }
 
     // ---- Partial (resumable) eval cache -------------------------------------------------------
@@ -143,10 +172,10 @@ class GameRepository(filesDir: File) {
     // up where it stopped. The key already encodes the PGN, depth and MultiPV, so a prefix under a
     // matching key was computed under identical settings; the caller still re-checks FEN alignment.
 
-    private fun partialFile(key: String) = File(evalCacheDir, "$key.partial.json")
+    private fun partialFile(key: String, prefix: String) = File(evalCacheDir(prefix), "$key.partial.json")
 
-    suspend fun loadPartialEvalCache(key: String): List<PositionEval>? = withContext(Dispatchers.IO) {
-        val file = partialFile(key)
+    suspend fun loadPartialEvalCache(key: String, prefix: String = netPrefix()): List<PositionEval>? = withContext(Dispatchers.IO) {
+        val file = partialFile(key, prefix)
         if (!file.exists()) return@withContext null
         try {
             val array = JSONArray(file.readText())
@@ -159,28 +188,29 @@ class GameRepository(filesDir: File) {
         }
     }
 
-    suspend fun savePartialEvalCache(key: String, evals: List<PositionEval>) = withContext(Dispatchers.IO) {
+    suspend fun savePartialEvalCache(key: String, evals: List<PositionEval>, prefix: String = netPrefix()) = withContext(Dispatchers.IO) {
         val array = JSONArray()
         evals.forEach { array.put(positionEvalToJson(it)) }
         // Write to a temp file then rename, so a kill mid-write cannot leave a half-written file
         // that looks complete.
-        val tmp = File(evalCacheDir, "$key.partial.tmp")
+        val tmp = File(evalCacheDir(prefix), "$key.partial.tmp")
         tmp.writeText(array.toString())
-        val target = partialFile(key)
+        val target = partialFile(key, prefix)
         target.delete()
         tmp.renameTo(target)
         Unit
     }
 
-    suspend fun clearPartialEvalCache(key: String) = withContext(Dispatchers.IO) {
-        partialFile(key).delete()
-        File(evalCacheDir, "$key.partial.tmp").delete()
+    suspend fun clearPartialEvalCache(key: String, prefix: String = netPrefix()) = withContext(Dispatchers.IO) {
+        partialFile(key, prefix).delete()
+        File(evalCacheDir(prefix), "$key.partial.tmp").delete()
         Unit
     }
 
     private fun positionEvalToJson(eval: PositionEval): JSONObject = JSONObject().apply {
         put("fen", eval.fen)
         put("depth", eval.depth)
+        eval.requestedDepth?.let { put("requestedDepth", it) }
         val lines = JSONArray()
         eval.lines.forEach { line ->
             lines.put(
@@ -208,6 +238,11 @@ class GameRepository(filesDir: File) {
                 pvUci = (0 until l.getJSONArray("pvUci").length()).map { j -> l.getJSONArray("pvUci").getString(j) },
             )
         }
-        return PositionEval(fen = json.getString("fen"), lines = lines, depth = json.getInt("depth"))
+        return PositionEval(
+            fen = json.getString("fen"),
+            lines = lines,
+            depth = json.getInt("depth"),
+            requestedDepth = if (json.has("requestedDepth")) json.getInt("requestedDepth") else null,
+        )
     }
 }

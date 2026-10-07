@@ -36,16 +36,28 @@
     <string name="progress_downloading_engine">Starting…</string>
     <string name="progress_analyzing_moves">Move %1$d of %2$d</string>
     <string name="progress_cancel">Cancel</string>
-    <string name="progress_first_run_setup">Setting up the engine (one time)…</string>
+    <!-- F1 time bar. %1$s = elapsed time as a clock ("2:05"), LRM-led so the digits keep their order in RTL. -->
+    <string name="progress_elapsed">&#8206;%1$s elapsed</string>
+    <!-- Measured time left for the whole analysis (F1); shown from two minutes up, below that the next string. -->
+    <plurals name="progress_minutes_left">
+        <item quantity="one">&#8206;About %1$d min left</item>
+        <item quantity="other">&#8206;About %1$d min left</item>
+    </plurals>
+    <string name="progress_less_than_minute">Less than a minute left</string>
+    <!-- Shown when one position takes longer than about 3 s. %1$d = depth reached, %2$d = depth asked for. -->
+    <string name="progress_thinking_deeper">Thinking deeper on this move… depth %1$d of %2$d</string>
 
     <!-- Analysis failed (shown inside the progress screen, never as a modal) -->
     <string name="analysis_failed_hint">Check the moves and try again.</string>
     <string name="analysis_failed_engine">The engine couldn\'t start. Restart the app and try again.</string>
     <string name="analysis_failed_lost">The game text was lost. Open the game again.</string>
-    <string name="analysis_failed_setup_storage">Palaya Chess needs about 260 MB of free space to finish setting up. Free up some space and try again.</string>
-    <string name="analysis_failed_setup_damaged">The app\'s built-in engine files are damaged. Reinstall Palaya Chess.</string>
+    <!-- D2b: the engine's data has not been downloaded yet (or failed its check). D2c adds the "Set up" button. -->
+    <string name="analysis_failed_setup_required">Finish setting up first. Your game is kept and will be reviewed once the chess engine\'s data is in.</string>
+    <string name="analysis_set_up">Set up</string>
     <string name="analysis_failed_generic">Something went wrong while analyzing. Try again.</string>
     <string name="analysis_try_again">Try again</string>
+    <!-- Error screen: shares the diagnostic log (F1). -->
+    <string name="analysis_share_details">Share details</string>
 
     <!-- Review screen -->
     <string name="review_title">Board</string>
@@ -193,6 +205,11 @@
     <string name="summary_details">Details</string>
     <string name="summary_details_expand">Show details</string>
     <string name="summary_details_collapse">Hide details</string>
+    <!-- F1: positions whose search the node/time budget stopped early (ANALYSIS_SPEC 8.1). Quiet, in Details. -->
+    <plurals name="summary_capped_positions">
+        <item quantity="one">To save time, %1$d position was searched less deeply than the rest.</item>
+        <item quantity="other">To save time, %1$d positions were searched less deeply than the rest.</item>
+    </plurals>
     <string name="report_group_good_moves">Good moves (Best, Excellent, Good)</string>
     <string name="report_group_book_forced">Book / Forced</string>
     <string name="report_table_show_all">Show all %1$d</string>
@@ -224,7 +241,45 @@
     <string name="settings_narration_storage_label">Saved narration audio: %1$s</string>
     <string name="settings_narration_storage_clear">Clear</string>
     <string name="settings_narration_storage_empty">Nothing saved yet</string>
+    <!-- V1 + V3: the Video section (narrator voice, pace). -->
+    <string name="settings_video_header">Video</string>
+    <string name="settings_voice_row">Narrator voice</string>
+    <!-- The narrator row's second line while the phone's voice is chosen (Advanced). -->
+    <string name="settings_voice_row_device">The phone\'s built-in voice</string>
+    <!-- The narrator row's second line before setup has downloaded the voice. %1$s = the chosen voice's label. -->
+    <string name="settings_voice_row_not_installed">%1$s · after setup</string>
+    <!-- A voice's label: "Bella · American, female". %1$s = the name, %2$s = accent, %3$s = gender. -->
+    <string name="voice_label">%1$s · %2$s, %3$s</string>
+    <string name="voice_accent_american">American</string>
+    <string name="voice_accent_british">British</string>
+    <string name="voice_gender_female">female</string>
+    <string name="voice_gender_male">male</string>
+    <!-- The one voice that is a mix of two others (Kokoro's "af"). -->
+    <string name="voice_name_blend">Blend</string>
+    <string name="voice_default_tag">Default</string>
+    <string name="voice_picker_title">Narrator voice</string>
+    <string name="voice_picker_help">Tap a voice to use it for the narrated review and saved videos. Play a sample to hear it first.</string>
+    <string name="voice_picker_not_installed">These voices are available after setup has downloaded the narration voice. Until then the review uses the phone\'s voice.</string>
+    <string name="voice_picker_device_on">You\'re using the phone\'s built-in voice (Advanced). The voice you pick here is used when you switch that off.</string>
+    <string name="voice_sample_play">Play sample</string>
+    <string name="voice_sample_stop">Stop</string>
+    <string name="voice_sample_preparing">Preparing…</string>
+    <string name="voice_sample_failed">Couldn\'t play the sample.</string>
+    <!-- TalkBack for the sample button: %1$s = the voice's label. -->
+    <string name="cd_voice_sample_play">Play a sample of %1$s</string>
+    <string name="cd_voice_sample_stop">Stop the sample of %1$s</string>
+    <string name="voice_picker_done">Done</string>
+    <string name="settings_pace">Pace</string>
+    <string name="settings_pace_relaxed">Relaxed</string>
+    <string name="settings_pace_normal">Normal</string>
+    <string name="settings_pace_brisk">Brisk</string>
+    <string name="settings_pace_help">How long the video pauses before key moves and how fast it plays sequences. The narration speed doesn\'t change.</string>
     <string name="settings_about_open">About Palaya Chess</string>
+    <!-- F1: the on-device diagnostic log. -->
+    <string name="settings_share_log">Share diagnostic log</string>
+    <string name="settings_share_log_help">Helps us find out what went wrong. The log stays on this phone unless you share it.</string>
+    <string name="diagnostic_share_chooser">Share diagnostic log</string>
+    <string name="diagnostic_share_failed">Couldn\'t prepare the log for sharing.</string>
 
     <!-- About screen -->
     <string name="about_title">About</string>
@@ -241,12 +296,12 @@
 
     <string name="about_licenses_header">Licenses &amp; attribution</string>
     <string name="about_license_stockfish_title">Chess engine</string>
-    <string name="about_license_stockfish_body">Palaya Chess uses the chess engine %1$s. Because Stockfish is licensed under the GNU General Public License v3 (GPLv3), Palaya Chess is also distributed under GPLv3, and the corresponding source code is available on request. The evaluation network it uses was trained on data provided by the Leela Chess Zero project, which is made available under the Open Database License (ODbL).</string>
+    <string name="about_license_stockfish_body">Palaya Chess uses the chess engine %1$s. Because Stockfish is licensed under the GNU General Public License v3 (GPLv3), Palaya Chess is also distributed under GPLv3, and the corresponding source code is available on request. The evaluation network it uses (downloaded once, when you set up the app) was trained on data provided by the Leela Chess Zero project, which is made available under the Open Database License (ODbL).</string>
     <string name="about_license_stockfish_link">stockfishchess.org</string>
     <string name="about_license_stockfish_view">View full GPLv3 license text</string>
     <!-- PLACEHOLDER: owner has not provided the public source repository URL yet.
          Replace this single string with the real URL when available. -->
-    <string name="about_license_source_url">SOURCE_REPO_URL</string>
+    <string name="about_license_source_url">https://github.com/palayax/Chess</string>
     <string name="about_license_source_label">Source code</string>
 
     <string name="about_license_openings_title">Opening book</string>
@@ -264,7 +319,7 @@
     <string name="about_license_pieces_body_fallback">Board and piece artwork are original to this app.</string>
 
     <string name="about_license_neural_title">On-device neural narration</string>
-    <string name="about_license_neural_body">The narration voice runs entirely on your device via sherpa-onnx (Apache 2.0). Its Kokoro-82M voice model (Apache 2.0) and espeak-ng pronunciation data (from the espeak-ng project, GPL version 3 or later) are included in the app, and nothing is ever sent anywhere.</string>
+    <string name="about_license_neural_body">The narration voice runs entirely on your device via sherpa-onnx (Apache 2.0). Its Kokoro-82M voice model (Apache 2.0) and espeak-ng pronunciation data (from the espeak-ng project, GPL version 3 or later) are downloaded once, when you set up the app. After that the voice works offline, and no text or audio is ever sent anywhere.</string>
     <string name="about_license_neural_view">View full attribution</string>
 
     <string name="about_disclaimer">Palaya Chess is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess. It only reads PGN game files exported from those services.</string>
@@ -437,4 +492,106 @@
     <string name="tactic_desperado">Desperado</string>
     <string name="tactic_battery">Battery</string>
     <string name="tactic_fortress">Fortress</string>
+    <!-- First-run setup (D2c, docs/MODEL_DOWNLOAD_DESIGN.md §1.2-§1.5). Sizes are filled in from the build's pins
+         (decimal MB, rounded up: never understated). Our own words; chess.com is a pattern reference only. -->
+    <string name="setup_title">Set up Palaya Chess</string>
+    <string name="setup_headline">Review games on your phone</string>
+    <string name="setup_intro_body">Palaya Chess needs two files before your first review: the chess engine\'s data (about %1$s) and the narration voice (about %2$s). It\'s a one-time download of about %3$s. Wi-Fi is best.</string>
+    <string name="setup_voice_only_body">The chess engine\'s data is installed, so you can review games already. The narration voice (about %1$s) is still to come; until then, videos are narrated with the phone\'s own voice.</string>
+    <string name="setup_game_waiting">Your game is kept and will be reviewed as soon as the chess engine\'s data is in.</string>
+    <string name="setup_net_only_body">The narration voice is installed. The chess engine\'s data (about %1$s) is still needed before the next review.</string>
+    <string name="setup_download">Download (about %1$s)</string>
+    <string name="setup_download_voice">Download the voice (about %1$s)</string>
+    <string name="setup_not_now">Not now</string>
+    <string name="setup_background">Continue in the background</string>
+    <string name="setup_resume">Resume</string>
+    <string name="setup_try_again">Try again</string>
+    <string name="setup_pause">Pause</string>
+    <string name="setup_cancel">Cancel</string>
+    <string name="setup_continue">Continue</string>
+    <string name="setup_file_net">Chess engine data</string>
+    <string name="setup_file_voice">Narration voice</string>
+    <string name="setup_file_done">Done</string>
+    <string name="setup_file_progress">%1$s of %2$s</string>
+    <string name="setup_file_about">About %1$s</string>
+    <string name="setup_status_connecting">Connecting…</string>
+    <string name="setup_status_downloading">Downloading… %1$s of %2$s</string>
+    <string name="setup_status_downloading_spoken">Downloading</string>
+    <string name="setup_status_percent">%1$d%%</string>
+    <string name="setup_status_retrying">Retrying… (%1$d of %2$d)</string>
+    <string name="setup_status_retrying_short">Retrying…</string>
+    <string name="setup_status_checking">Checking the file…</string>
+    <string name="setup_status_unpacking">Unpacking the voice…</string>
+    <string name="setup_status_paused">Paused. Your progress is saved.</string>
+    <string name="setup_status_paused_at">Paused at %1$d%%. Your progress is saved.</string>
+    <string name="setup_status_connection_dropped">The connection dropped. Your progress is saved; resume when you\'re back online.</string>
+    <string name="setup_status_server_unavailable">The download server isn\'t answering right now. Try again in a few minutes.</string>
+    <string name="setup_status_not_found">The engine files aren\'t on the server. Update Palaya Chess, or try again later.</string>
+    <string name="setup_status_damaged">The download didn\'t match the expected file, twice in a row. Check your connection and try again.</string>
+    <string name="setup_status_low_storage">Palaya Chess needs about %1$s of free space to set up (%2$s once it\'s done). Free up some space and try again.</string>
+    <string name="setup_status_no_internet">No internet connection. Connect to Wi-Fi and try again.</string>
+    <string name="setup_status_failed">Setup couldn\'t finish. Try again.</string>
+    <string name="setup_status_done">All set. Palaya Chess works offline from now on.</string>
+    <string name="setup_metered_title">You\'re on mobile data</string>
+    <string name="setup_metered_body">This download is about %1$s. Download now, or wait until you\'re on Wi-Fi.</string>
+    <string name="setup_metered_confirm">Download anyway</string>
+    <string name="setup_home_card_title">Finish setting up</string>
+    <string name="setup_home_card_body">About %1$s left to download.</string>
+    <string name="setup_home_card_action">Continue</string>
+    <string name="setup_channel_progress">Setup download</string>
+    <string name="setup_channel_progress_desc">Progress of the one-time download of the chess engine\'s data and the narration voice</string>
+    <string name="setup_channel_done">Setup finished</string>
+    <string name="setup_channel_done_desc">When the one-time download is done, paused or stopped</string>
+    <string name="setup_notification_title">Setting up Palaya Chess</string>
+    <string name="setup_notification_progress">%1$s of %2$s</string>
+    <string name="setup_notification_ready">Palaya Chess is ready</string>
+    <string name="setup_notification_ready_text">Everything is downloaded. The app works offline now.</string>
+    <string name="setup_notification_paused">Setup paused</string>
+    <string name="setup_notification_stopped">Setup stopped</string>
+    <string name="setup_notification_cancelled">Setup cancelled</string>
+    <string name="setup_notification_low_storage">Not enough free space. Free up some space and try again.</string>
+    <string name="video_voice_not_installed">Narrated with the phone\'s voice until setup is finished.</string>
+    <string name="video_finish_setup">Finish setup</string>
+    <!-- D2e: Settings › Check for updates and its sheet (docs/MODEL_DOWNLOAD_DESIGN.md §1.8). Our own words. -->
+    <string name="update_row_title">Check for updates</string>
+    <string name="update_row_supporting">Engine data and voice. Last checked: %1$s</string>
+    <string name="update_last_checked_never">never</string>
+    <string name="update_row_checking">Checking…</string>
+    <string name="update_row_installing">Installing an update…</string>
+    <string name="update_blocked_analysis">Finish or cancel the current analysis first.</string>
+    <string name="update_blocked_export">Finish or cancel the video export first.</string>
+    <string name="update_blocked_setup">Finish setting up first.</string>
+    <string name="update_sheet_title">Updates</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_up_to_date">You\'re up to date.</string>
+    <string name="update_available">Update available</string>
+    <string name="update_no_internet">No internet connection. Connect and try again.</string>
+    <string name="update_server_unavailable">The update server isn\'t answering right now. Try again in a few minutes.</string>
+    <string name="update_not_found">There\'s no update information on the server yet. Try again later.</string>
+    <string name="update_signature_invalid">The update information couldn\'t be verified, so nothing was downloaded.</string>
+    <string name="update_manifest_invalid">The update information couldn\'t be read, so nothing was downloaded.</string>
+    <string name="update_kind_net">Chess engine data</string>
+    <string name="update_kind_voice">Narration voice</string>
+    <string name="update_offer">%1$s %2$s · about %3$s</string>
+    <string name="update_download_install">Download and install</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_check_again">Check again</string>
+    <string name="update_close">Close</string>
+    <string name="update_connecting">Connecting…</string>
+    <string name="update_downloading">Downloading… %1$s of %2$s</string>
+    <string name="update_downloading_spoken">Downloading</string>
+    <string name="update_retrying">Retrying… (%1$d of %2$d)</string>
+    <string name="update_verifying">Checking the file…</string>
+    <string name="update_unpacking">Unpacking the voice…</string>
+    <string name="update_trying">Trying the new version…</string>
+    <string name="update_installed">Installed.</string>
+    <string name="update_installed_net">Installed. Games you reopen will be re-analysed with the new engine data.</string>
+    <string name="update_rolled_back">The update couldn\'t be used, so the previous version was restored.</string>
+    <string name="update_connection_dropped">The connection dropped. Try again to continue where it stopped.</string>
+    <string name="update_file_not_found">The update file isn\'t on the server any more. Check again later.</string>
+    <string name="update_damaged">The download didn\'t match the expected file. Nothing was changed.</string>
+    <string name="update_low_storage">Not enough free space for this update. Free up some space and try again.</string>
+    <string name="update_incompatible">This update doesn\'t fit this version of Palaya Chess. Nothing was changed.</string>
+    <string name="update_failed">The update couldn\'t be installed. Nothing was changed.</string>
+    <string name="update_metered_body">This update is about %1$s. Download now, or wait until you\'re on Wi-Fi.</string>
 </resources>

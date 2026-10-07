@@ -261,9 +261,20 @@ class VideoExportService : Service() {
         stopForegroundAndSelf()
     }
 
+    /** The diagnostic log (F1): export start, end and failure. */
+    private fun diagnostic(message: String, error: Throwable? = null) {
+        val log = (application as? net.palaya.chessanalyzer.ChessAnalyzerApplication)?.diagnostics?.log ?: return
+        val tag = net.palaya.chessanalyzer.diagnostics.AppDiagnostics.TAG_VIDEO
+        if (error != null) log.error(tag, message, error) else log.log(tag, message)
+    }
+
     private fun runExport(request: Request) {
         val exporter = VideoExporter(applicationContext)
         activeExporter = exporter
+        diagnostic(
+            "export start: ${request.script.segments.size} segments, " +
+                "voice ${request.provider?.javaClass?.simpleName ?: "device"}, fgs type ${ExportForegroundServiceType.current()}",
+        )
 
         // Mirror non-terminal progress into the companion StateFlow and the notification. Terminal
         // states are published by the export job itself so this collector can never race ahead of
@@ -322,12 +333,18 @@ class VideoExportService : Service() {
                     // service's scope may already be cancelled here (stopSelf -> onDestroy), which is
                     // why this check comes before the exception type.
                     timedOut -> VideoExporter.State.Failed(getString(R.string.video_export_time_limit))
+                        .also { diagnostic("export stopped: foreground-service time limit", e) }
                     e is VideoExportCancelledException -> VideoExporter.State.Cancelled
+                        .also { diagnostic("export cancelled") }
                     else -> {
                         Log.e(TAG, "export failed", e)
+                        diagnostic("export failed", e)
                         VideoExporter.State.Failed(e.message ?: e.javaClass.simpleName)
                     }
                 }
+            }
+            if (terminal is VideoExporter.State.Completed) {
+                diagnostic("export done: ${terminal.fileSizeBytes} bytes, ${terminal.durationMs} ms of video, saved to Movies ${terminal.mediaStoreUri != null}")
             }
 
             withContext(NonCancellable) {

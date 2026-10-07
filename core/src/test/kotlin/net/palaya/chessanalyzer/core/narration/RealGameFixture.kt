@@ -57,8 +57,14 @@ object RealGameFixture {
     /** Byrne-Fischer 1956, 41 moves ending in mate (depth 12, MultiPV 3, `scripts/record_analysis.py`). */
     val byrneFischer: Game by lazy { load("byrne_fischer") }
 
-    private fun load(name: String): Game {
-        val pgn = PgnParser.parse(locate("fixtures/$name.pgn").readText()).single()
+    /**
+     * `games/game01.txt`, the owner's 33-move game (0-1, mate), recorded at depth 12, MultiPV 3 for V3
+     * (`scripts/record_analysis.py games/game01.txt .../game01.analysis.json`).
+     */
+    val game01: Game by lazy { load("game01", pgnPath = "games/game01.txt") }
+
+    private fun load(name: String, pgnPath: String = "fixtures/$name.pgn"): Game {
+        val pgn = PgnParser.parse(locate(pgnPath).readText()).single()
         val text = RealGameFixture::class.java.getResourceAsStream("/pacing/$name.analysis.json")!!
             .readBytes().toString(Charsets.UTF_8)
 

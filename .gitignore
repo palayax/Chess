@@ -7,10 +7,16 @@ keystore.properties
 .idea/
 *.iml
 vendor/Stockfish/
-# Bundled model files (~257 MB): fetched by scripts/fetch_models.sh, pinned by vendor/models/MODELS.lock.
-# MODELS.lock itself IS committed (see the negation below).
+# Model files (~257 MB, downloaded by the app on first run since D2a): fetched for development, tests
+# and publishing by scripts/fetch_models.sh, pinned by vendor/models/MODELS.lock. MODELS.lock IS
+# committed, and so will be the manifest's public signing key (D2e); see the negations below.
 vendor/models/*
 !vendor/models/MODELS.lock
+!vendor/models/manifest_public_key.der
+
+# Private keys, e.g. keystore/models-signing.pem (signs the model manifest, D2e). Never commit; back up
+# with the release keystore.
+*.pem
 .cxx/
 **/.cxx/
 

@@ -131,10 +131,10 @@ class PacingLongGameTest {
         val report = dramatic()
         val s = VideoScriptGenerator(null).generate(report, game, NarrationOptions())
         assertEquals(82, report.annotations.size)
-        assertTrue("ran ${s.totalEstimatedMs / 1000}s", s.totalEstimatedMs <= 720_000)
+        assertTrue("ran ${s.storyMs / 1000}s", s.storyMs <= 720_000)
         assertTrue(
-            "ran ${s.totalEstimatedMs / 1000}s against a ${budgetMs(82) / 1000}s budget",
-            s.totalEstimatedMs <= budgetMs(82)
+            "ran ${s.storyMs / 1000}s against a ${budgetMs(82) / 1000}s budget",
+            s.storyMs <= budgetMs(82)
         )
         // The plan is a pick, not a blackout: the story is still told.
         assertTrue("only ${s.segments.size} beats", s.segments.size >= 12)

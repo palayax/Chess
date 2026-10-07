@@ -73,8 +73,8 @@ class PacingTiersTest {
     fun `a twenty-three move game stays inside its budget, far below twenty-three minutes`() {
         val (report, s) = script(RealGameFixture.immortal)
         assertTrue(
-            "ran ${s.totalEstimatedMs / 1000}s against a ${budgetMs(report.annotations.size) / 1000}s budget",
-            s.totalEstimatedMs <= budgetMs(report.annotations.size)
+            "ran ${s.storyMs / 1000}s against a ${budgetMs(report.annotations.size) / 1000}s budget",
+            s.storyMs <= budgetMs(report.annotations.size)
         )
         assertTrue("was 160 beats before the rework; got ${s.segments.size}", s.segments.size <= 80)
     }
@@ -83,7 +83,7 @@ class PacingTiersTest {
     fun `no real game ever exceeds twelve minutes`() {
         for ((name, g) in games) {
             val (_, s) = script(g)
-            assertTrue("$name: ${s.totalEstimatedMs / 1000}s", s.totalEstimatedMs <= 720_000)
+            assertTrue("$name: ${s.storyMs / 1000}s", s.storyMs <= 720_000)
         }
     }
 
@@ -450,7 +450,7 @@ class PacingTiersTest {
         val s = VideoScriptGenerator(Color.WHITE).generate(trimmed, game, NarrationOptions())
         val budget = budgetMs(12)
         assertEquals(106_000L, budget)
-        assertTrue("ran ${s.totalEstimatedMs / 1000}s vs budget ${budget / 1000}s", s.totalEstimatedMs <= budget)
+        assertTrue("ran ${s.storyMs / 1000}s vs budget ${budget / 1000}s", s.storyMs <= budget)
         val puzzles = s.segments.filter { it.kind == SegmentKind.PUZZLE_PROMPT }.mapNotNull { it.ply }
         assertTrue("a puzzle other than the turning point's survived: $puzzles", puzzles.all { it == 8 })
         assertTrue("the turning point is still told", s.segments.any { it.ply == 8 })

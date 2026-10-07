@@ -18,6 +18,9 @@ enum class AnalysisStrength(val depth: Int) {
     STANDARD(14),
     DEEP(18);
 
+    /** The per-position search limits for this strength (ANALYSIS_SPEC §8.1). */
+    val budget: SearchBudget get() = SearchBudget.forStrength(this)
+
     companion object {
         /** The preset whose depth is exactly [depth], or null when the stored value is "Custom". */
         fun fromDepth(depth: Int): AnalysisStrength? = entries.firstOrNull { it.depth == depth }
@@ -61,12 +64,7 @@ fun providerForVoiceSwitch(useDeviceVoice: Boolean): NarrationProviderChoice =
 /** The switch's position for the stored provider: on only for the phone's own voice. */
 fun voiceSwitchIsOn(provider: NarrationProviderChoice): Boolean = provider == NarrationProviderChoice.DEVICE
 
-/** One megabyte as the settings row counts it: 1024 * 1024 bytes. */
-private const val BYTES_PER_MB = 1024.0 * 1024.0
-
-/** "12.4 MB", LRM-wrapped, Locale.ROOT. */
-fun formatStorageMegabytes(totalBytes: Long): String =
-    "$LRM" + String.format(Locale.ROOT, "%.1f MB", totalBytes.coerceAtLeast(0L) / BYTES_PER_MB) + "$LRM"
+// formatStorageMegabytes moved to SetupLogic.kt (D2c, design §1.2): one place for every size the app prints.
 
 /**
  * State of the "Advanced" expander. A plain holder rather than raw `rememberSaveable { Boolean }`

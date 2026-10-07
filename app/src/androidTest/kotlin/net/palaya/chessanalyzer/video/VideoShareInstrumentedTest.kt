@@ -72,9 +72,12 @@ class VideoShareInstrumentedTest {
             .getPackageInfo(context.packageName, android.content.pm.PackageManager.GET_PERMISSIONS)
             .requestedPermissions.orEmpty().toList()
         buildVideoShareIntent(context, file, fallbackUri = null)!!
-        // Same list as before: building and starting the intent adds nothing to ask for.
-        assertTrue("no storage or network permission is requested: $requested", requested.none {
-            it.endsWith("READ_EXTERNAL_STORAGE") || it.endsWith("WRITE_EXTERNAL_STORAGE") || it.endsWith("INTERNET")
+        // Same list as before: building and starting the intent adds nothing to ask for. No storage
+        // permission: the file goes out through our FileProvider. (INTERNET is held since D2b for the
+        // one-time model download, not for sharing; NetworkPermissionTest pins the exact set and
+        // NoNetworkAfterSetupTest proves nothing uses it after setup.)
+        assertTrue("no storage permission is requested: $requested", requested.none {
+            it.endsWith("READ_EXTERNAL_STORAGE") || it.endsWith("WRITE_EXTERNAL_STORAGE") || it.endsWith("MANAGE_EXTERNAL_STORAGE")
         })
     }
 

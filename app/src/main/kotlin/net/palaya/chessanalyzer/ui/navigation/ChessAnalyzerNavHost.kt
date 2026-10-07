@@ -1,6 +1,8 @@
 package net.palaya.chessanalyzer.ui.navigation
 
+import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +12,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import net.palaya.chessanalyzer.ui.theme.tacticTypeName
 import net.palaya.chessanalyzer.R
 import androidx.compose.ui.res.stringResource
@@ -19,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,11 +48,20 @@ import net.palaya.chessanalyzer.ui.screens.ImportScreen
 import net.palaya.chessanalyzer.ui.screens.PracticeScreen
 import net.palaya.chessanalyzer.ui.screens.ReviewScreen
 import net.palaya.chessanalyzer.ui.screens.SettingsScreen
+import net.palaya.chessanalyzer.ui.screens.UpdateSheet
+import net.palaya.chessanalyzer.ui.model.updateRowLine
+import net.palaya.chessanalyzer.ui.model.updateSheetView
+import net.palaya.chessanalyzer.ui.viewmodel.UpdatesViewModel
 import net.palaya.chessanalyzer.ui.screens.TacticSimulationScreen
 import net.palaya.chessanalyzer.ui.screens.VideoScreen
 import kotlinx.coroutines.launch
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.ui.viewmodel.AnalysisViewModel
+import net.palaya.chessanalyzer.ui.viewmodel.SetupViewModel
+import net.palaya.chessanalyzer.data.models.ModelDownloadService
+import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
+import net.palaya.chessanalyzer.ui.model.homeSetupCard
+import net.palaya.chessanalyzer.ui.screens.SetupScreen
 import net.palaya.chessanalyzer.util.readTextFromUri
 
 /**
@@ -64,9 +77,20 @@ fun ChessAnalyzerNavHost(
     navController: NavHostController = rememberNavController(),
     pendingImportPgn: String? = null,
     onPendingImportConsumed: () -> Unit = {},
+    /** D2c: a tap on the setup download's notification asks for the Setup screen. */
+    openSetupRequested: Boolean = false,
+    onOpenSetupConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val viewModel: AnalysisViewModel = viewModel()
+    val setupViewModel: SetupViewModel = viewModel()
+    val setupDisk by setupViewModel.disk.collectAsState()
+    val setupRunning by ModelDownloadService.running.collectAsState()
+    val setupProgress by ModelDownloadService.progress.collectAsState()
+    val gameWaitingForSetup by viewModel.gameWaitingForSetup.collectAsState()
+    // D2c: while the engine net is missing, Setup is the first screen (design §1.1). Decided once per
+    // Activity: the NavHost's start destination must not change under it.
+    val startRoute = remember { if (setupViewModel.netReady()) Destination.Import.route else Destination.Setup.route }
     val settings by viewModel.settings.collectAsState()
     val narrationVoiceSettings by viewModel.narrationVoiceSettings.collectAsState()
     val recentGames by viewModel.recentGames.collectAsState()
@@ -76,8 +100,35 @@ fun ChessAnalyzerNavHost(
     val homeSnackbarHost = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    fun currentRoute(): String? = navController.currentBackStackEntry?.destination?.route
+
+    /** Home as the only screen on the back stack (Setup may be the graph's start destination). */
+    fun goHome() {
+        navController.navigate(Destination.Import.route) {
+            popUpTo(navController.graph.id) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
+    fun goToSetup() {
+        if (currentRoute() != Destination.Setup.route) {
+            navController.navigate(Destination.Setup.route) { launchSingleTop = true }
+        }
+    }
+
+    /** "Not now", "Continue in the background", "Continue": back where Setup was opened from, else Home. */
+    fun leaveSetup() {
+        if (navController.previousBackStackEntry != null) navController.popBackStack() else goHome()
+    }
+
     fun startAnalysis(pgnText: String) {
         val id = viewModel.newGameId()
+        if (!setupViewModel.netReady()) {
+            // D2c: no engine data yet. The game waits on disk and is analysed once setup has the net in.
+            viewModel.holdGameForSetup(id, pgnText)
+            goToSetup()
+            return
+        }
         viewModel.registerPendingImport(id, pgnText)
         navController.navigate(Destination.AnalysisProgress.createRoute(id))
     }
@@ -90,9 +141,59 @@ fun ChessAnalyzerNavHost(
         }
     }
 
+    // F1: an analysis the system killed while the app was in the background resumes by itself.
+    // When Android restored the Analysing screen, that screen resumes it; when the app starts fresh
+    // at Home instead (task removed, or the state was not kept), it is reopened here, once.
+    // D2c: then, whenever the engine net is in (at launch, or the moment setup installs it), a game that
+    // was shared before setup is analysed, if the user is on Setup or Home (never over another screen).
+    val netReady = setupDisk.netInstalled
+    LaunchedEffect(netReady) {
+        if (pendingImportPgn.isNullOrBlank()) {
+            val gameId = viewModel.resumableAnalysisOnLaunch()
+            if (gameId != null) {
+                if (currentRoute() == Destination.Import.route) {
+                    navController.navigate(Destination.AnalysisProgress.createRoute(gameId))
+                }
+                return@LaunchedEffect
+            }
+        }
+        if (!netReady || !setupViewModel.netReady()) return@LaunchedEffect
+        val route = currentRoute()
+        if (route != Destination.Setup.route && route != Destination.Import.route) return@LaunchedEffect
+        val waitingId = viewModel.takeGameWaitingForSetup() ?: return@LaunchedEffect
+        if (route == Destination.Setup.route) goHome()
+        navController.navigate(Destination.AnalysisProgress.createRoute(waitingId))
+    }
+
+    LaunchedEffect(openSetupRequested) {
+        if (openSetupRequested) {
+            goToSetup()
+            onOpenSetupConsumed()
+        }
+    }
+
+    // F1: the diagnostic log, shared from Settings and from the analysis error screen.
+    fun shareDiagnosticLog() {
+        val intent = viewModel.diagnosticShareIntent(context)
+        val started = intent != null && try {
+            val chooser = Intent.createChooser(intent, context.getString(R.string.diagnostic_share_chooser)).apply {
+                // The app takes text shares itself (a PGN); the log must not be offered back to it.
+                putExtra(
+                    Intent.EXTRA_EXCLUDE_COMPONENTS,
+                    arrayOf(android.content.ComponentName(context, net.palaya.chessanalyzer.MainActivity::class.java)),
+                )
+            }
+            context.startActivity(chooser)
+            true
+        } catch (e: Exception) {
+            false
+        }
+        if (!started) Toast.makeText(context, R.string.diagnostic_share_failed, Toast.LENGTH_LONG).show()
+    }
+
     NavHost(
         navController = navController,
-        startDestination = Destination.Import.route,
+        startDestination = startRoute,
         modifier = modifier,
     ) {
         composable(Destination.Import.route) {
@@ -117,6 +218,17 @@ fun ChessAnalyzerNavHost(
                 pastedPgn = pasteDraft,
                 onPastedPgnChange = { viewModel.setPasteDraft(it) },
                 snackbarHostState = homeSnackbarHost,
+                setupCard = homeSetupCard(setupDisk, setupViewModel.sizes, setupRunning, setupProgress, gameWaitingForSetup),
+                onSetupCardClick = { goToSetup() },
+            )
+        }
+
+        composable(Destination.Setup.route) {
+            SetupScreen(
+                viewModel = setupViewModel,
+                gameWaiting = gameWaitingForSetup,
+                onLeave = { leaveSetup() },
+                onContinue = { leaveSetup() },
             )
         }
 
@@ -153,6 +265,15 @@ fun ChessAnalyzerNavHost(
                 error = error,
                 onRetry = { viewModel.runAnalysis(gameId, openSummary) },
                 onBack = leave,
+                onShareDetails = { shareDiagnosticLog() },
+                // D2c: the game already waits on disk (AnalysisViewModel moved it there); Setup replaces this screen.
+                onSetUp = {
+                    viewModel.clearError()
+                    navController.navigate(Destination.Setup.route) {
+                        popUpTo(Destination.AnalysisProgress.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -311,11 +432,18 @@ fun ChessAnalyzerNavHost(
                     CircularProgressIndicator()
                 }
             } else if (script != null) {
-                val narrationProvider = remember(narrationVoiceSettings) { viewModel.buildNarrationProvider() }
+                // Rebuilt when the voice arrives (D2c: setup may finish while this screen is open).
+                val voiceInstalled = setupDisk.voiceInstalled
+                val narrationProvider = remember(narrationVoiceSettings, voiceInstalled) { viewModel.buildNarrationProvider() }
                 VideoScreen(
                     script = script,
                     onBack = { navController.popBackStack() },
                     narrationProvider = narrationProvider,
+                    onFinishSetup = if (narrationVoiceSettings.provider == NarrationProviderChoice.NEURAL && !voiceInstalled) {
+                        { goToSetup() }
+                    } else {
+                        null
+                    },
                 )
             } else {
                 // Analysis for this game isn't in memory (e.g. after process death) — nothing to
@@ -366,7 +494,20 @@ fun ChessAnalyzerNavHost(
         }
 
         composable(Destination.Settings.route) {
+            // D2e: "Check for updates". The view model is this screen's; the work is the application's.
+            val updatesViewModel: UpdatesViewModel = viewModel()
+            val updateState by updatesViewModel.state.collectAsState()
+            val lastUpdateCheckMs by updatesViewModel.lastCheckedMs.collectAsState()
+            val updateBlock by updatesViewModel.block.collectAsState()
+            val checkBlock by updatesViewModel.checkBlock.collectAsState()
+            val updatePrecheck by updatesViewModel.precheckError.collectAsState()
+            val meteredOffer by updatesViewModel.meteredOffer.collectAsState()
+            val rolledBackNotice by updatesViewModel.rollbackNotice.collectAsState()
+            var updateSheetOpen by rememberSaveable { mutableStateOf(false) }
             val narrationStorageBytes by viewModel.narrationStorageBytes.collectAsState()
+            val voiceSampleState by viewModel.voiceSamples.state.collectAsState()
+            // Leaving Settings stops a sample still playing and frees the voice engine it loaded.
+            DisposableEffect(Unit) { onDispose { viewModel.releaseVoiceSamples() } }
             // Cheap file-size scan; re-run every time this screen is (re)entered so the number
             // shown is never stale after a "Prepare narration"/export elsewhere populated the cache.
             LaunchedEffect(Unit) {
@@ -381,7 +522,38 @@ fun ChessAnalyzerNavHost(
                 onNarrationProviderChange = { viewModel.setNarrationProvider(it) },
                 narrationStorageBytes = narrationStorageBytes,
                 onClearNarrationStorage = { viewModel.clearNarrationStorage() },
+                onShareDiagnosticLog = { shareDiagnosticLog() },
+                updateRowLine = updateRowLine(updateState, checkBlock),
+                lastUpdateCheckMs = lastUpdateCheckMs,
+                updateBlock = checkBlock,
+                updateRolledBackNotice = rolledBackNotice,
+                onCheckForUpdates = {
+                    updatesViewModel.dismissRollbackNotice()
+                    updatesViewModel.onRowTapped()
+                    updateSheetOpen = true
+                },
+                // V1: the narrator voice picker and its samples.
+                voiceInstalled = setupDisk.voiceInstalled,
+                onNarratorSpeakerChange = { viewModel.setNarratorSpeaker(it) },
+                voiceSampleState = voiceSampleState,
+                onPlayVoiceSample = { viewModel.playVoiceSample(it) },
+                onStopVoiceSample = { viewModel.stopVoiceSample() },
+                onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
             )
+            if (updateSheetOpen) {
+                UpdateSheet(
+                    view = updateSheetView(updateState, updateBlock),
+                    block = updateBlock,
+                    precheckError = updatePrecheck,
+                    meteredOffer = meteredOffer,
+                    onInstall = { updatesViewModel.requestInstall(it) },
+                    onConfirmMetered = { updatesViewModel.confirmMetered() },
+                    onDismissMetered = { updatesViewModel.dismissMetered() },
+                    onCancel = { updatesViewModel.cancelInstall() },
+                    onCheckAgain = { updatesViewModel.checkAgain() },
+                    onDismiss = { updateSheetOpen = false },
+                )
+            }
         }
 
         composable(Destination.About.route) {

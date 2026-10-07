@@ -82,7 +82,7 @@ class PacingTinyGameTest {
             val (report, s) = script(g)
             val budget = VideoScriptGenerator.budgetMs((report.annotations.size + 1) / 2)
             assertEquals(name, moves, (report.annotations.size + 1) / 2)
-            assertTrue("$name ($moves moves) ran ${s.totalEstimatedMs / 1000.0}s against ${budget / 1000.0}s", s.totalEstimatedMs <= budget)
+            assertTrue("$name ($moves moves) ran ${s.storyMs / 1000.0}s against ${budget / 1000.0}s", s.storyMs <= budget)
             minutes[moves] = s.totalEstimatedMs / 60_000.0
         }
         // 17 moves about five minutes, the Immortal Game seven to eight, forty moves at most about twelve.
@@ -97,7 +97,7 @@ class PacingTinyGameTest {
     fun `a quiet short game comes out under its budget, nothing is added to fill it`() {
         val (report, s) = script(RealGameFixture.byrneFischer.firstPlies(16))
         val budget = VideoScriptGenerator.budgetMs((report.annotations.size + 1) / 2)
-        assertTrue("${s.totalEstimatedMs} vs $budget", s.totalEstimatedMs < budget - 20_000L)
+        assertTrue("${s.storyMs} vs $budget", s.storyMs < budget - 20_000L)
         // The structure is whole: nothing was trimmed because nothing had to be.
         assertTrue(s.segments.any { it.kind == SegmentKind.OPENING_SUMMARY })
         assertTrue(s.segments.count { it.kind == SegmentKind.OUTRO_LESSONS } >= 2)

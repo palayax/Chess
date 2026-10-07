@@ -1,5 +1,11 @@
 # On-device neural narration (sherpa-onnx + Kokoro)
 
+> **Superseded in part (D2, 2026-10-07).** Kept as the history of how the Kokoro voice was chosen and verified.
+> Where it says the model is bundled in the APK, unpacked on the first analysis, or that the app has no network
+> permission, that was true for 1.0 only. Since 1.1 the voice is downloaded once on the first-run Setup screen
+> (`kokoro-int8-en-v0_19.tar.gz` since D2f, checked against pins in `vendor/models/MODELS.lock`) and installed by
+> `video/VoiceStore.kt`; see `docs/MODEL_DOWNLOAD_DESIGN.md` and `docs/PUBLISHING.md` §7.
+
 The second [`NarrationVoiceProvider`](../app/src/main/kotlin/net/palaya/chessanalyzer/video/NarrationVoiceProvider.kt),
 alongside `DeviceTtsProvider` (Android's built-in TTS):
 `NeuralTtsProvider`, backed by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (k2-fsa,

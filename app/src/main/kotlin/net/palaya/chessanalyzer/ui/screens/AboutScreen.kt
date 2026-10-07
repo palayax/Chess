@@ -59,7 +59,7 @@ import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.a11y.asHeading
 import androidx.compose.ui.semantics.Role
 import net.palaya.chessanalyzer.data.GeneratedEngineVersion
-import net.palaya.chessanalyzer.engine.BundledNetProvider
+import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import java.io.BufferedReader
 import java.io.IOException
@@ -372,7 +372,7 @@ private fun AboutHeader(appVersion: String) {
         )
         Text(
             // The engine's network file, named by its own hash; moved here from Settings (U9).
-            text = stringResource(R.string.about_net_version, BundledNetProvider.NET_FILENAME),
+            text = stringResource(R.string.about_net_version, NetStore.NET_FILENAME),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,

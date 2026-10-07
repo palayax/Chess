@@ -1,0 +1,14 @@
+<!--
+  Notification small icon for ModelDownloadService (D2c): a flat white glyph on transparent, like the
+  export's. The Material "file_download" icon (Apache 2.0), from the same set as the Compose UI's icons.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z" />
+</vector>

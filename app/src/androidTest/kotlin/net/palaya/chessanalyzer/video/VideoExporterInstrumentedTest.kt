@@ -96,13 +96,41 @@ class VideoExporterInstrumentedTest {
             "elapsedMs=$elapsedMs durationMs=${completedState.durationMs} " +
                 "ratio=${"%.2f".format(ratio)} (>1 means slower than real time to encode)",
         )
-        assertTrue(
-            "output duration (${completedState.durationMs} ms) must not track wall-clock export " +
-                "time ($elapsedMs ms) — that is the signature of the wall-clock-pacing bug. " +
-                "They differ by ${"%.2f".format(ratio)}x, so PTS is script-driven.",
-            kotlin.math.abs(elapsedMs - completedState.durationMs) > completedState.durationMs * 0.1 ||
-                ratio in 0.9..1.1 && elapsedMs < 2_000,
-        )
+        //
+        // When the device happens to encode at about real time (seen on chess36 in D2d: 18.6 s to export
+        // a 19.4 s video), the two numbers agree by coincidence and this export proves nothing either
+        // way. That is inconclusive, not a failure: a second, much shorter script is exported, whose fixed
+        // encoder start-up cost puts its wall-clock time far from its own duration, and the same two
+        // checks (container duration = the script's timeline, and != the wall clock) must hold for it.
+        val conclusive = kotlin.math.abs(elapsedMs - completedState.durationMs) > completedState.durationMs * 0.1
+        if (!conclusive) {
+            val shortScript = TestScripts.shortScript()
+            val shortExporter = VideoExporter(context)
+            val shortStarted = System.currentTimeMillis()
+            val shortFile = shortExporter.export(shortScript, "instrumented_test_export_short")
+            val shortElapsed = System.currentTimeMillis() - shortStarted
+            val shortState = shortExporter.state.value as VideoExporter.State.Completed
+            val shortReported = MediaMetadataRetriever().run {
+                setDataSource(shortFile.absolutePath)
+                extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull().also { release() }
+            }
+            android.util.Log.i(
+                "VideoExportBench",
+                "inconclusive first export (ratio ${"%.2f".format(ratio)}); short script: elapsedMs=$shortElapsed " +
+                    "durationMs=${shortState.durationMs} reportedMs=$shortReported",
+            )
+            val shortTolerance = (shortState.durationMs * 0.05).toLong().coerceAtLeast(200L)
+            assertTrue(
+                "short export: reported duration $shortReported ms should be within ±5% of its timeline ${shortState.durationMs} ms",
+                shortReported != null && shortReported in (shortState.durationMs - shortTolerance)..(shortState.durationMs + shortTolerance),
+            )
+            assertTrue(
+                "output duration must not track wall-clock export time (the wall-clock-pacing bug): first export " +
+                    "${completedState.durationMs} ms in $elapsedMs ms, short export ${shortState.durationMs} ms in $shortElapsed ms",
+                kotlin.math.abs(shortElapsed - shortState.durationMs) > shortState.durationMs * 0.1,
+            )
+            shortFile.delete()
+        }
         // Sanity ceiling so a pathological encoding regression still trips the test.
         assertTrue(
             "export took ${ratio}x the video's own duration — unreasonably slow even for an emulator",

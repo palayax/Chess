@@ -15,8 +15,8 @@ import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 
 /**
  * On-device neural narration via sherpa-onnx (Apache 2.0, k2-fsa) — the strictly-better-than-
- * [DeviceTtsProvider] default, with its model bundled in the APK and extracted once (see
- * [BundledVoiceInstaller]): free, fully offline, no per-user API key, no redistribution licensing
+ * [DeviceTtsProvider] default, with its model downloaded once on first run and unpacked (see
+ * [VoiceStore]); afterwards free, fully offline, no per-user API key, no redistribution licensing
  * question. Slots into
  * [NarrationCoordinator] behind the same [NarrationVoiceProvider] interface as
  * [DeviceTtsProvider].
@@ -27,7 +27,7 @@ import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
  * exactly as usable here as a faster one would be.
  *
  * [modelDir] must already be a verified, fully-extracted model directory (see
- * [BundledVoiceInstaller.ensureInstalled]/[BundledVoiceInstaller.isInstalled]) — this class only
+ * [VoiceStore.installFromTar]/[VoiceStore.isInstalled]) — this class only
  * loads and runs it, it never installs anything. [prepare] returns false (never throws) when the
  * directory or its expected files are missing, which sends [NarrationCoordinator] straight to its
  * mandatory device-voice fallback with no silent gap.
@@ -37,12 +37,18 @@ class NeuralTtsProvider(
     private val modelDir: File,
     /**
      * Which of the model's speakers to use — defaults to the tier's deliberate choice (see
-     * [NeuralVoiceTier.speakerId]). Overridable so the voice-sample sweep that produced
-     * `docs/voice_samples/` can render every Kokoro speaker without touching production defaults.
+     * [NeuralVoiceTier.speakerId]). The app passes the user's "Narrator voice" (V1,
+     * `NarrationVoiceSettings.speakerId`); the update trial (D2e, [NeuralVoiceTrial]) keeps the default.
      */
     private val speakerId: Int = tier.speakerId,
     /** sherpa-onnx `length_scale` — higher is slower. See [NeuralVoiceTier.lengthScale]. */
     private val lengthScale: Float = tier.lengthScale,
+    /**
+     * Which voice files these are: `VoiceStore.installedVersionId()` (the first 12 hex of the installed
+     * tar's SHA-256), part of [cacheFingerprint] since D2e so audio from one voice can never be served for
+     * another after an update. Null (tests, a directory that is not the installed voice) reads "unknown".
+     */
+    private val voiceVersionId: String? = null,
 ) : NarrationVoiceProvider {
 
     override val displayName: String = "Natural voice (${tier.label})"
@@ -50,10 +56,11 @@ class NeuralTtsProvider(
     /**
      * Cache-key fingerprint. The tier alone is not enough: the same text through the same tier at
      * a different speaker id or `length_scale` is *different audio*, so leaving those out would
-     * serve stale clips from [NarrationStore] after the default voice or pacing is retuned.
+     * serve stale clips from [NarrationStore] after the default voice or pacing is retuned. The voice
+     * files' id ([voiceVersionId]) is in it too (D2e): an updated voice never reuses the old voice's WAVs.
      */
     val cacheFingerprint: String get() =
-        "${tier.name}/sid$speakerId/ls${"%.2f".format(java.util.Locale.ROOT, lengthScale)}"
+        "${tier.name}@${voiceVersionId ?: "unknown"}/sid$speakerId/ls${"%.2f".format(java.util.Locale.ROOT, lengthScale)}"
 
     /** Speakers the loaded model reports — 11 for Kokoro v0.19. -1 until [prepare]. */
     val speakerCount: Int get() = tts?.numSpeakers() ?: -1
@@ -70,7 +77,7 @@ class NeuralTtsProvider(
             val existing = tts
             if (existing != null) return@withLock true
             if (prepareFailed) return@withLock false
-            if (!BundledVoiceInstaller.requiredFilesFor(tier).all { File(modelDir, it).isFile }) {
+            if (!VoiceStore.requiredFilesFor(tier).all { File(modelDir, it).isFile }) {
                 prepareFailed = true
                 return@withLock false
             }
@@ -110,14 +117,24 @@ class NeuralTtsProvider(
         }
     }
 
-    override suspend fun synthesize(text: String, outFile: File): SynthesisResult = withContext(Dispatchers.IO) {
+    override suspend fun synthesize(text: String, outFile: File): SynthesisResult = synthesizeAs(speakerId, text, outFile)
+
+    /**
+     * [synthesize] with another of the loaded model's speakers. The model holds all eleven, so the voice
+     * picker's "Play sample" (V1, [VoiceSamplePlayer]) loads Kokoro once and renders any speaker with it.
+     * A sid outside the loaded model fails instead of returning sherpa-onnx's silence.
+     */
+    suspend fun synthesizeAs(sid: Int, text: String, outFile: File): SynthesisResult = withContext(Dispatchers.IO) {
         if (text.isBlank()) return@withContext SynthesisResult.Failure("empty narration")
         val engine = tts ?: return@withContext SynthesisResult.Failure("neural voice model not loaded")
+        if (sid !in 0 until engine.numSpeakers().coerceAtLeast(1)) {
+            return@withContext SynthesisResult.Failure("speaker $sid is not in the loaded model")
+        }
         try {
             // speed is left at 1.0: pacing is controlled by the model config's length_scale (see
             // [NeuralVoiceTier.lengthScale]) so it is part of the loaded config — and therefore
             // part of [cacheFingerprint] — rather than a per-call argument the cache cannot see.
-            val audio = lock.withLock { engine.generate(text = text, sid = speakerId, speed = 1.0f) }
+            val audio = lock.withLock { engine.generate(text = text, sid = sid, speed = 1.0f) }
             if (audio.samples.isEmpty() || audio.sampleRate <= 0) {
                 return@withContext SynthesisResult.Failure("sherpa-onnx returned no audio")
             }
@@ -184,9 +201,9 @@ class NeuralTtsProvider(
                 NeuralVoiceTier.KOKORO -> OfflineTtsConfig(
                     model = OfflineTtsModelConfig(
                         kokoro = OfflineTtsKokoroModelConfig(
-                            model = "$dir/${BundledVoiceInstaller.KOKORO_MODEL_FILE}",
-                            voices = "$dir/${BundledVoiceInstaller.KOKORO_VOICES_FILE}",
-                            tokens = "$dir/${BundledVoiceInstaller.KOKORO_TOKENS_FILE}",
+                            model = "$dir/${VoiceStore.KOKORO_MODEL_FILE}",
+                            voices = "$dir/${VoiceStore.KOKORO_VOICES_FILE}",
+                            tokens = "$dir/${VoiceStore.KOKORO_TOKENS_FILE}",
                             dataDir = dataDir,
                             lengthScale = lengthScale,
                         ),

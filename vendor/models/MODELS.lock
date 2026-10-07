@@ -1,14 +1,37 @@
-# Pins for the models bundled into the APK (RUN_PLAN Round 13, docs/BUNDLED_MODELS_DESIGN.md).
-# Java-properties format: read by scripts/fetch_models.sh and (later) by the Gradle verifyBundledModels task.
+# Pins for the two model files the app downloads once on first run (docs/MODEL_DOWNLOAD_DESIGN.md, D2a; voice as .tar.gz since D2f).
+# Java-properties format: read by scripts/fetch_models.sh, scripts/publish_models.sh,
+# scripts/model_test_server.py and the Gradle generateModelPins task in :engine (net) and :app (voice, tag).
+# The build does NOT need the model files themselves: it compiles these pins into the app
+# (GeneratedNetPins / GeneratedModelPins); a fresh install downloads the files and checks them against
+# the pins. If the files are present under vendor/models/ the build also verifies them (developer safety).
+#
 # The NNUE net NAME is deliberately not here: its single source of truth is
-# vendor/Stockfish/src/evaluate.h EvalFileDefaultName (CLAUDE.md engine gotcha 5). Only its size is pinned.
+# vendor/Stockfish/src/evaluate.h EvalFileDefaultName (CLAUDE.md engine gotcha 5). Its first 12 hex
+# digits must be a prefix of net.sha256 (generateModelPins checks it).
 net.size=98511183
 net.url.base=https://tests.stockfishchess.org/api/nn/
+# Pinned by fetch_models.sh on its first successful run (full SHA-256 of the file, and the NNUE header:
+# bytes 0..3 = file version, bytes 4..7 = Stockfish's architecture hash, both little-endian uint32).
+# net.version must equal Version in vendor/Stockfish/src/nnue/nnue_common.h (generateModelPins checks it).
+net.sha256=1a298aa575a085434d29027978dc36867fe9c5bcea9376654b7a8eba1e52dfc2
+net.arch_hash=a85b2205
+net.version=0x6a448afa
 
 kokoro.archive.url=https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2
 kokoro.archive.sha256=c9f0dd393615805b0bab050c340834d5e684e732aec91c0e860cd30e982c08bd
 kokoro.archive.size=103248205
-# The plain .tar inside the archive is what ships in the APK. Pinned by fetch_models.sh on its first
-# successful run (it computes the hash of the bunzip2 output and writes it here).
+# The plain .tar inside the upstream archive. Pinned by fetch_models.sh on its first successful run (it
+# hashes the bunzip2 output and writes it here). The app checks the unpacked voice stream against these and
+# the installed voice's marker holds kokoro.tar.sha256 (so the voice a bundled build left on a phone is kept).
 kokoro.tar.sha256=7190c4801645bf31d10996477a04082019d9cf492ad3d5aeef7b1f7cf10a5dea
 kokoro.tar.size=158269440
+# What the app downloads and publish_models.sh uploads (D2f): that tar compressed with GNU `gzip -9 -n`
+# (no name, no time stamp, so the bytes are reproducible), kokoro-int8-en-v0_19.tar.gz. 102.5 MB instead
+# of 158.3 MB; java.util.zip inflates it while unpacking in about 1 s on the emulator. Pinned by
+# fetch_models.sh on its first run after the tar is verified, then checked.
+kokoro.targz.sha256=936044f1f7e3e9822e35ac3212ed555a958983b4c255b9aac7c3b9c9069619c6
+kokoro.targz.size=102543452
+
+# The GitHub release (immutable tag) that holds both files. First-run URL =
+# BuildConfig.MODEL_BASE_URL + release.tag + "/" + file name. Must match models-YYYY.MM[.n].
+release.tag=models-2026.10

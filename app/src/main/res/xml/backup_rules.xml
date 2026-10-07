@@ -8,16 +8,20 @@
    games) and the general settings DataStore. Paths are literal (no wildcards).
 -->
 <full-backup-content>
-    <!-- The Kokoro voice (~158 MB extracted) and its kokoro.extracting/ scratch directory: both live
-         under tts_models/ and are regenerated from the APK on the first analysis. -->
+    <!-- The Kokoro voice (~158 MB unpacked), its kokoro.extracting/ scratch directory and the download in
+         progress (kokoro.tar.part): all under tts_models/, all re-downloadable (VoiceStore.ROOT_DIR_NAME). -->
     <exclude domain="file" path="tts_models/" />
+    <!-- The downloaded Stockfish NNUE net (~98 MB) and its .part (NetStore.DIR_NAME, D2b). -->
+    <exclude domain="file" path="nets/" />
+    <!-- Model activation journal (D2e, docs/MODEL_DOWNLOAD_DESIGN.md §4.1): device-specific. -->
+    <exclude domain="file" path="models/" />
     <!-- Persistent narration audio cache (NarrationStore.DIR_NAME = "narration"): regenerable. -->
     <exclude domain="file" path="narration/" />
     <!-- Per-position engine evaluation cache: large, regenerable by re-analysing. -->
     <exclude domain="file" path="eval_cache/" />
-    <!-- Stockfish NNUE net (~98 MB, copied out of the APK) and its in-flight .part copy. It sits in filesDir root, NOT
-         under engine/. The name is a literal; ExcludedFromBackupRulesTest fails if it drifts
-         from BundledNetProvider.NET_FILENAME. -->
+    <!-- LEGACY (bundled builds, versionCode 1): the net and its .part sat in the filesDir root. NetStore.migrateLegacy
+         moves the net into nets/ on the first start of a download build; kept for one release so a backup taken
+         before that move cannot carry 98 MB. Literal names; BackupRulesTest fails if they drift from NetStore.NET_FILENAME. -->
     <exclude domain="file" path="nn-1a298aa575a0.nnue" />
     <exclude domain="file" path="nn-1a298aa575a0.nnue.part" />
     <!-- Narration-voice settings (provider/tier). Device-specific: tied to which models are on disk. -->
@@ -25,6 +29,16 @@
     <!-- Legacy key prefs from the removed Google Cloud voice; never let a stale key be restored. -->
     <exclude domain="sharedpref" path="narration_key_fallback_unencrypted.xml" />
     <exclude domain="sharedpref" path="narration_secrets.xml" />
+    <!-- The on-device diagnostic log (F1, DiagnosticLog.DIR_NAME): device-specific, only ever shared by the user. -->
+    <exclude domain="file" path="logs/" />
+    <!-- The analysis in flight (F1, PendingAnalysisStore.FILE_NAME): restored on another phone it would
+         start an analysis by itself. -->
+    <exclude domain="file" path="pending_analysis.json" />
+    <exclude domain="file" path="pending_analysis.json.tmp" />
+    <!-- D2c: a game shared before setup, waiting for the net (PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME):
+         restored elsewhere it would start an analysis by itself. -->
+    <exclude domain="file" path="setup_waiting_game.json" />
+    <exclude domain="file" path="setup_waiting_game.json.tmp" />
     <!-- Older engine layout. -->
     <exclude domain="file" path="engine/" />
     <exclude domain="sharedpref" path="engine_prefs.xml" />

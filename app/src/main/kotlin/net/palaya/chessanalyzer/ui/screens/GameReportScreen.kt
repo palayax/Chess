@@ -254,6 +254,18 @@ fun GameReportScreen(
                 }
 
                 tacticsSections(report = report, onTacticClick = onTacticClick, onLearnPattern = onLearnPattern)
+
+                // F1: the search budget stopped some positions early (ANALYSIS_SPEC §8.1). One quiet
+                // line at the end of Details: honest, but not a warning the user has to act on.
+                if (report.cappedPositions > 0) {
+                    item(key = "capped-positions") {
+                        Text(
+                            text = pluralStringResource(R.plurals.summary_capped_positions, report.cappedPositions, report.cappedPositions),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }

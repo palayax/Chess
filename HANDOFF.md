@@ -11,11 +11,233 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
+## OWNER TO-DO BEFORE GOOGLE PLAY (D2f, 2026-10-07) — only you can do these
+
+The app (1.1, versionCode 2) is built, signed and verified; it cannot go live until these are done. Details in
+`docs/PUBLISHING.md` (§4c for the GitHub steps, §6 for the release checklist).
+
+1. ~~Create the GitHub repo~~ **done 2026-10-07: `palayax/Chess`** (owner). The app, `publish_models.sh`, the
+   privacy policy, the listing and PUBLISHING now point at it. It must be **public**: the app downloads the models
+   from its Releases without signing in, and GPLv3 needs the source offered.
+2. **Push the source** (GPLv3 obligation). `keystore/`, `keystore.properties`, `*.pem`, `vendor/models/*` (except
+   `MODELS.lock` and `manifest_public_key.der`), `dist/` and `tools/` are gitignored; check `git status --ignored`
+   first. The About screen's source link and the listing already say https://github.com/palayax/Chess.
+3. **Publish the models**: `gh auth login`, `scripts/fetch_models.sh`, then
+   `scripts/publish_models.sh models-2026.10 --min-version-code 2`. It creates the immutable `models-2026.10`
+   release (the net, 98,511,183 B, and `kokoro-int8-en-v0_19.tar.gz`, 102,543,452 B) and the signed `models.json`
+   + `models.json.sig` on the rolling `models` tag. **Do this BEFORE the app is released**: until then a fresh
+   install's Download ends in "The engine files aren't on the server". Afterwards: release APK, fresh install,
+   Download reaches "All set", and Check for updates says "You're up to date."
+4. **Back up `keystore/` offline** (two places): `chessanalyzer-release.jks`, `keystore.properties` and
+   `models-signing.pem`. Losing the first two means no app updates for sideloaded users (Play can reset an upload
+   key); losing the `.pem` means no model updates until an app update ships a new key.
+5. **Host the privacy policy** (`docs/PRIVACY_POLICY.md`, ready, not published anywhere) on palaya.net and put the
+   URL in Play Console and the listing. Confirm the repo address in it first.
+6. ~~Decide the colours~~ **decided 2026-10-07: keep the current colours** (owner).
+7. **Choose the Play developer account type** (personal or organisation, e.g. Palaya Cyber Security LTD).
+8. **If it is a personal account:** Play requires a closed test with **at least 12 testers opted in for 14 days**
+   before you can apply for production. Recruit them early (an organisation account is exempt).
+
+Then, in Play Console: upload `dist/PalayaChess-1.1-release.aab`, choose Play App Signing deliberately (PUBLISHING
+§3: keep the existing key if sideloaded 1.0/1.1 users must update in place), fill in the foreground-service
+declarations with two short videos (§3), the Data safety form (§5: no data collected or shared), content rating
+(Everyone), and the listing (`docs/STORE_LISTING.md`).
+
+---
+
+## V1 + V3 DONE (2026-10-07): narrator voice picker, video pace
+
+RUN_LOG "V1 + V3". Nothing committed. **Next: V2** (best-line simulation; reuse V3's `SegmentLeadIn` approach and
+`VideoPace.lineMoveMinMs` for its move rate).
+
+- **V1, Settings, Video, "Narrator voice":** all 11 Kokoro speakers (`KokoroVoices.SPEAKERS`; `voices.bin` = 11 x
+  523,264 B), labelled in our words ("Bella · American, female"), each with an on-device "Play sample"
+  (`VoiceSamplePlayer`, cached, one at a time). Default unchanged (Bella, sid 1). Persisted as `kokoro_speaker_id`;
+  used by the player and the MP4; part of the narration cache key; the update trial keeps the default. Host-measured
+  samples of all eleven in `docs/voice_samples/v1/` (no clipping; male 102-144 Hz, female 154-203 Hz): **the owner
+  should listen** and confirm or change the default.
+- **V3, Settings, Video, "Pace": Relaxed (default) / Normal / Brisk** (ANALYSIS_SPEC §9.8). Measured problem: key
+  moves slid in at the first frame of their beat with no pause, and the replies between them were never shown
+  (the Immortal Game's 21...Kd8 and 22...Nxf6: 0 ms). Now every key move gets a silent lead-in (the skipped moves at
+  the sequence rate, then a 1.5 / 1.2 / 0.7 s pause with the move's squares lit) and a hold after. Same story and
+  audio at every pace; the §9.7 budget holds the story, the pace time (2.5-12 percent measured) sits on top, capped
+  at 15 percent of the budget.
+- **Counts / evidence:** see RUN_LOG "V1 + V3".
+
+---
+
+## D2f DONE (2026-10-07): 1.1 release, voice as .tar.gz, update from 1.0 proven, docs and policy
+
+RUN_LOG "D2f". Nothing committed. The small-installer track (D2a-D2f) is complete; the one check left is the
+release build against the real GitHub release, which waits for the owner (above).
+
+- **Version:** versionName **1.1**, versionCode **2** (1.0 / 1 = the bundled R7 build). `publish_models.sh
+  --min-version-code 2`.
+- **Voice is now downloaded as `kokoro-int8-en-v0_19.tar.gz`** (open question 2): `gzip -9 -n` makes it 102,543,452 B,
+  55.7 MB smaller than the 158,269,440 B tar; `GZIPInputStream` inflates it in 0.9-1.3 s on chess36 (bench), and the
+  app's whole unpack (inflate + extract + SHA-256) took 1.4 s there. Download: 201 MB instead of 257; peak free space
+  400 MB instead of 450. The tar's pins stay the identity (marker, migration, narration cache key); update manifests
+  carry `tarSha256`/`tarSize`; a stream that inflates past the tar's size is refused at once.
+- **Migration proven on chess36 (release builds, same key `ca4f7b42…0947`):** 1.0 installed, Opera Game analysed (net
+  copied to `files/`, voice unpacked, marker `7190c480…`); airplane mode on; `adb install -r` 1.1: opens on **Home**,
+  no Setup, the diagnostic log's only `[models]` lines are `migrateLegacy: moved nn-1a298aa575a0.nnue into nets/; voice
+  installed: true` and the eval-cache move; a new game analysed offline and a Kokoro-narrated MP4 exported offline
+  (113.1 s, mean -25.5 dB, max -6.8 dB, pulled). Screenshots `docs/screenshots/d2f_*`.
+- **Found and fixed: a library downloaded a font on the app's behalf.** androidx.emoji2's startup initializer made Play
+  services fetch "Noto Color Emoji Compat" (~3 MB, charged to the app's uid) on the first screen; caught by
+  `NoNetworkAfterSetupTest` (tx 30,966 B). Initializer removed in the manifest; pinned by two tests.
+- **AAPT trap found:** an asset named `*.gz` is gunzipped into the APK; the test seed is `tts/<name>.tar.gz.seed`.
+- **Release outputs (dist/):** `PalayaChess-1.1-arm64-release.apk` 35,866,501 B, `PalayaChess-1.1-universal-release.apk`
+  97,110,046 B, `PalayaChess-1.1-release.aab` 68,714,862 B; Play download per device (bundletool) arm64 14,473,967 B,
+  x86_64 15,911,159 B, armeabi-v7a 13,458,827 B. v2+v3 signed, 16 KB-aligned, six permissions, no cleartext config.
+  SHA-256s in RUN_LOG D2f.
+- **Docs:** `docs/PUBLISHING.md` (rewritten: facts, FGS declarations, Device and Network Abuse, Data safety, checklist,
+  GitHub steps), `docs/PRIVACY_POLICY.md` (new), `docs/STORE_LISTING.md` (rewritten), README, CLAUDE.md, this file;
+  superseded notes on `BUNDLED_MODELS_DESIGN.md` and `NEURAL_VOICE.md`; About and the voice licence text now say
+  "downloaded once".
+- **Counts (XML):** `:core` 490/0/0, `:engine` unit 32/0/0, `:app` unit 456/0/0; lint 0 errors / 69 warnings; `:app`
+  connected 161/0/0 on chess36 and on chess34, `:engine` connected 20/0/0 on both, all 0 skipped.
+
+---
+
+## D2e DONE (2026-10-07): "Check for updates", signed manifest, journaled activation, trial and rollback
+
+RUN_LOG "D2e". Nothing committed. Settings has a fifth row, **Check for updates**, which checks ONLY when tapped
+(exactly two requests: `models.json` and `models.json.sig`) and opens a result sheet: up to date / update available
+with its size / downloading / checking the file / unpacking / trying the new version / installed / rolled back /
+no internet / server unavailable / not found / signature invalid.
+
+- **Trust:** ECDSA P-256 signature over the exact manifest bytes, verified with the public key compiled in from
+  `vendor/models/manifest_public_key.der`; the private key is `keystore/models-signing.pem` (gitignored, never
+  printed; custody and the publish flow in `docs/PUBLISHING.md` §4b; `publish_models.sh --sign/--verify`).
+- **Compatibility:** a net only with this engine's NNUE version 0x6a448afa and arch hash 0xa85b2205, a voice only
+  with layout `kokoro-v0_19` and a sherpa-onnx range containing 1.13.8, version codes respected; re-checked
+  before any download, so a wrong-arch net is never offered and never downloaded (host test, instrumented test,
+  emulator server log).
+- **Activation:** `ModelActivator` + `filesDir/models/activation.json`; net = Kotlin header check, journaled swap,
+  depth-1 trial on THE engine (`EngineController.switchNet`/`trialLocked`, only `verifiedNetOrNull()`),
+  commit; voice = unpack to scratch, throwaway Kokoro synthesis with an RMS floor, journaled swap, commit,
+  `NarrationStore.clear()`. A failed trial rolls back at once; a process death mid-trial is rolled back by
+  `recoverOnStartup()` at the next start (proven on chess36 with a real `kill -9`), and Settings says so once.
+- **Caches:** `eval_cache/<net 12-hex>/` (flat cache migrated, other nets purged on activation, F1 budget kept in
+  the key); the narration cache key carries the voice id.
+- **Counts (XML):** `:core` 490/0/0, `:engine` unit 32/0/0, `:app` unit 443/0/0; lint 0 errors / 69 warnings;
+  `:app` connected 160/0/0 on chess36 and on chess34, `:engine` connected 20/0/0 on both, all 0 skipped;
+  `assembleRelease` OK.
+- **Emulator e2e (chess36):** voice "upgrade" = the same Kokoro tar with one note file appended (no other
+  compatible model exists): checked, installed (RMS 1877 trial), narration cache 118 -> 0, re-exported MP4 mean
+  -25.1 dB / max -6.0 dB; wrong-arch net never requested; tampered manifest refused; release build shows "no update
+  information on the server yet" against the provisional URL. Screenshots `docs/screenshots/d2e_*`.
+- **Next:** D2f is done (section above).
+
+---
+
+## D2d DONE (2026-10-07): instrumented tests green again, seed assets wired
+
+RUN_LOG "D2d". Nothing committed. **The instrumented suites pass again** on chess36 and chess34, with the models only
+in the TEST APKs: `vendor/models/engine-assets` + `app-assets` are the androidTest asset dirs of `:app` and `:engine`
+(stored uncompressed; `checkTestSeedAssets` fails the test build until `scripts/fetch_models.sh` has run). `unzip -l`
+shows no `.nnue`/`.tar` in `app-debug.apk` or in any release APK.
+
+- **Counts (XML, final code):** `:app` connected **153/0/0** on chess36 and on chess34, `:engine` connected **20/0/0** on
+  both, all 0 skipped; `:core` 490/0/0, `:engine` unit 27/0/0, `:app` unit 366/0/0; lint 0 errors / 69 warnings;
+  `assembleRelease` OK. A full `:app` run takes about 12-14 min per device; run the devices one after the other.
+- **New / ported tests:** `NetStoreInstrumentedTest` (:engine), `VoiceStoreInstrumentedTest`, `ModelSetupInstrumentedTest`
+  (the real 257 MB over an in-process `FaultHttpServer`), `ModelDownloaderInstrumentedTest` (the host fault matrix, now
+  shared from `app/src/sharedTest`), `SetupFlowInstrumentedTest` (the real `ModelDownloadService`: dataSync type from the
+  platform and dumpsys, pause/resume, cancel, Activity death, a stray intent), `NoNetworkAfterSetupTest`,
+  `NetworkSecurityConfigTest`, `SetupGateInstrumentedTest`.
+- **No network after setup, measured:** recording `ProxySelector` (proven live first) + uid `TrafficStats` over Home,
+  a full Standard analysis and a Kokoro-narrated export through `VideoExportService`: 0 calls, 0 B tx/rx on both devices.
+- **Fixed:** a crash (`ForegroundServiceDidNotStartInTimeException`) when Resume was tapped right after Pause
+  (`ModelDownloadService` stopped itself unconditionally); a stale "no INTERNET" assertion in `VideoShareInstrumentedTest`;
+  a coincidence-prone wall-clock check in `VideoExporterInstrumentedTest`. `benchmarkDepth18` now runs under the Deep budget.
+- **Test seam:** `ChessAnalyzerApplication.modelSetupForTesting` (tests only) points the service and the Setup gate at a
+  scratch dir.
+- **Next:** D2e is done (section above), then D2f.
+
+---
+
+## D2c DONE (2026-10-07): download service, Setup screen, Home card, "Set up" and Video notices
+
+RUN_LOG "D2c". Nothing committed. A fresh install now opens on **Setup**: both sizes are stated, Download is one tap, and
+the download runs in `ModelDownloadService` (FGS `dataSync`, started only by that tap, `START_NOT_STICKY`). It shows
+progress, Pause and Cancel in the notification, and the metered and low-space checks come before any request. "Not now"
+leads to the Home "Finish setting up" card. A game shared before setup is kept (`filesDir/setup_waiting_game.json`)
+and analysed as soon as the net is in, while the voice still downloads. Analysing `SETUP_REQUIRED` has **Set up**.
+Video says "Narrated with the phone's voice until setup is finished." while the voice is missing.
+
+- **Verified on chess36 and chess34** against `scripts/model_test_server.py`: every §1.3 state, plus the faults (server
+  killed, airplane mode, notification pause/resume, process killed then resumed from the part, cancel, wrong hash twice,
+  HTTP 500, low storage, notifications denied). Font 2.0, landscape and RTL (he) were checked. Offline proof with
+  game01: Standard analysis and a narrated Kokoro MP4 (mean -25.3 dB, max -5.3 dB, pulled), no network line from the
+  app's pid, no `[models]` log line after setup. Release (R8) on chess36 shows NOT_FOUND against the provisional
+  GitHub URL. Screenshots: `docs/screenshots/d2c_*` (60).
+- **Emulator trap:** unthrottled transfers through the emulator NAT can lose bytes (proven with `toybox nc`). The app
+  correctly reports "didn't match". Serve with `--fault slow:3m --fault-times 0` on emulators.
+- **Counts (XML):** `:core` 490/0/0, `:engine` unit 27/0/0, `:app` unit 366/0/0, all 0 skipped. Lint 0 errors / 69 warnings.
+- The instrumented suites were IN FLUX until D2d (done, section above).
+
+---
+
+## D2a + D2b DONE (2026-10-07): models out of the APK, downloader and setup logic (no UI yet)
+
+The small installer is half built (RUN_LOG "D2a + D2b", design `docs/MODEL_DOWNLOAD_DESIGN.md` §9). Nothing committed.
+**The app is in flux until D2c and D2d** (read this before running anything on a device):
+
+- **No models in any APK.** Release universal 96,967,686 B (was 353.8 MB), arm64 35,724,137 B, debug 114,010,909 B;
+  AAB 68,454,190 B, Play download arm64 14,368,523 B (bundletool). `assembleDebug` works from a tree without
+  `vendor/models/` files; the build needs only `vendor/models/MODELS.lock` (`generateModelPins`).
+- **No Setup screen yet (D2c).** A fresh install cannot download anything: an analysis ends with "Finish setting up
+  first." (`AnalysisService.Failure.SETUP_REQUIRED`). An update from a bundled build keeps working: `migrateLegacy`
+  moves the old net into `filesDir/nets/` at start and the voice marker is accepted as before (nothing downloaded).
+- **Instrumented suites fail until D2d** (seed assets not wired into the test APKs). Not run in D2b, by instruction.
+  Do not "fix" them by re-bundling the models.
+- **Network:** INTERNET + ACCESS_NETWORK_STATE in the manifest; `data/models/ModelDownloader.kt` is the only class that
+  opens a connection (`NetworkCallSitesTest`); https only, http only to 10.0.2.2/127.0.0.1/localhost in debug builds.
+- **Counts (XML):** `:core` 490/0/0, `:engine` unit 27/0/0, `:app` unit 341/0/0, all 0 skipped; lint 0 errors / 70 warnings.
+- **For D2c:** `app.modelSetup` (`needsNet/needsVoice/isComplete/state/bytesLeft/storageNeeded`, `suspend run(onProgress)`:
+  cancel the job = Pause, then `discardPartials()` = Cancel), `SetupProgress`/`SetupStatus`/`PauseReason`/`FailureReason`
+  for the §1.3 copy, `app.networkStatus.current()` for the metered/no-network checks, `Failure.SETUP_REQUIRED` for the
+  Analysing "Set up" button. Details in the RUN_LOG entry.
+- **Tools:** `scripts/model_test_server.py` (local release stand-in with faults) + `-PpalayaModelBaseUrl=http://10.0.2.2:8787/`
+  (debug only); `scripts/publish_models.sh` (only `--dry-run` was run: no repo, no key yet).
+- **Next:** D2c is done (section above); then D2d.
+
+---
+
+## F1 DONE (2026-10-06): Deep no longer hangs, a killed analysis resumes, diagnostic log
+
+The owner's bug ("Deep" on `games/game01.txt` took forever at move 23, then "could not analyse") is fixed
+(RUN_LOG "F1", ANALYSIS_SPEC §8). Nothing committed.
+
+- **Per-position budget** `go depth D nodes N movetime T` (`ui/model/SearchBudget.kt`): Quick 4 M / 30 s,
+  Standard 25 M / 150 s, Deep 45 M / 270 s, calibrated on 226 host positions (>= 95% still reach full depth).
+  Capped positions are flagged (`PositionEval.requestedDepth`/`isCapped`) and counted in one quiet Summary line.
+  The eval-cache key now includes the budget (old results are re-analysed once).
+- **Engine:** `StockfishEngine.analyze(..., nodes, onProgress)`; results use `ConsistentLines` (one depth for all
+  lines; the batch Stockfish prints at a node/time stop is discarded: it can carry the requested depth's label
+  with old numbers). CLAUDE.md engine gotcha 6.
+- **Resume:** `PendingAnalysisStore` (`filesDir/pending_analysis.json`) + a checkpoint every ply; proven with
+  `am kill` on chess34. No foreground service (none needed, none fits).
+- **Analysing screen:** elapsed time, node-based "About N min left", "Thinking deeper on this move… depth d of 18".
+- **Diagnostic log:** `filesDir/logs/` (~1 MiB, two files, excluded from backup), previous-process exit reasons,
+  crash handler, lifecycle; shared from Settings and from the error screen's "Share details".
+- **Counts (XML):** `:core` 490/0/0, `:engine` unit 10/0/0 (new), `:app` unit 273/0/0, `:app` instrumented
+  110/0/0 on chess34 and 110/0/0 on chess36, `:engine` instrumented 20/0/0 on chess34 and 20/0/0 (one benchmark timeout under parallel load first, see RUN_LOG) on chess36,
+  all 0 skipped; lint 0 errors / 70 warnings. Release (R8) build analysed game01 at Deep on chess34: reached the Summary, 4 positions capped, no crash.
+- **Unknown:** which message the owner actually saw. The next report from a phone should come with the
+  shared diagnostic log: its "previous process exit" lines say whether Android killed the app.
+- **Next:** D2a–D2f (RUN_PLAN Round 14 queue). D2a + D2b are done (section above).
+
+---
+
 ## D-TRACK: GOOGLE PLAY (2026-10-06) — read this first
 
 The owner will publish on Google Play. **D1 (build Play-ready) is done** (RUN_LOG "D1", RUN_PLAN "D-track");
-D0 (moving the two models to a first-run download) is a separate design, `docs/MODEL_DOWNLOAD_DESIGN.md`. The
-models are still in the APK.
+D0 (moving the two models to a first-run download) is a separate design, `docs/MODEL_DOWNLOAD_DESIGN.md`. Since D2a
+the models are NOT in the APK any more (see the D2a + D2b section at the top); the sizes and the "no network" facts
+below are D1's.
 
 - **Toolchain now:** AGP 8.9.3, Gradle 8.11.1, Kotlin 1.9.24 (unchanged), compileSdk/targetSdk **36**, NDK
   **28.2.13676358** in `:engine` and `:app`. Details and traps in `CLAUDE.md` (build gotchas).
@@ -37,6 +259,9 @@ models are still in the APK.
 ---
 
 ## FINAL STATE (R7, 2026-10-05)
+
+> **History (1.0).** This was the bundled, no-network 1.0 build. Since 1.1 (D2a-D2f) the models are downloaded on
+> first run and the app holds INTERNET; current state is the D2f section and the owner to-do list at the top.
 
 **The deliverable is done: a signed release APK that works completely offline, proven on a device.**
 
@@ -66,6 +291,9 @@ board colours, and a run on a physical phone by an agent (the owner tested one e
 ---
 
 ## ROUND 13 (read this before the older sections below)
+
+> **History.** The "bundled in the APK" and "no INTERNET" rules below were Round 13's; the owner replaced them on
+> 2026-10-06 with the small installer (D-track above).
 
 The owner tested the app on a real phone and found it **too complex**, so Round 13 is a simplification
 plus local-only hardening. **The sections further down describe the app as it stood after Round 11 and
@@ -137,15 +365,18 @@ Location: `C:\Claude\ChessAnalyzer`.
 ```bash
 cd /c/Claude/ChessAnalyzer
 scripts/fetch_stockfish.sh                # Stockfish source (not committed), first build only
-scripts/fetch_models.sh                   # the NNUE net + Kokoro voice into vendor/models/ (not committed); the build fails loudly without them
 ./gradlew :core:test                      # expect 490 tests, 0 skipped
-./gradlew :app:testDebugUnitTest          # expect 237 tests, 0 skipped (D1)
-./gradlew :app:assembleDebug              # expect exit 0; the APK is ~371 MB (debug) and both assets are Stored
-# emulator (cold boot takes 10+ min, sits "offline" the whole time — this is normal)
-"$ANDROID_HOME/emulator/emulator" -avd chess34 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
-./gradlew :app:connectedDebugAndroidTest  # expect 104 tests (D1), on chess34 and on chess36; CHECK skipped="0" in the XML. Pushes a ~371 MB APK, takes 20-40 minutes. Nothing to stage: the models are in the APK
-python scripts/verify_tactic_references.py fixtures/tactic_references.json   # expect exit 0, "28 verified, 0 rejected"
+./gradlew :engine:testDebugUnitTest       # expect 32 tests, 0 skipped
+./gradlew :app:testDebugUnitTest          # expect 455 tests, 0 skipped (D2f)
+./gradlew :app:lintDebug                  # expect 0 errors, 69 warnings
+./gradlew :app:assembleDebug              # expect exit 0 WITHOUT the model files; app-debug.apk ~114 MB, no .nnue/.tar/.tar.gz inside
+scripts/fetch_models.sh                   # the net + the voice .tar.gz into vendor/models/ (not committed): needed for the
+                                          # instrumented tests (seed assets of the TEST APK), the local test server and publishing
+# emulators (chess36 cold-boots in ~2 min with WHPX; chess34 can sit "offline" 10+ min under swiftshader — normal)
+"$ANDROID_HOME/emulator/emulator" -avd chess36 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect &
+./gradlew :app:connectedDebugAndroidTest  # expect 160 tests, 0 skipped, on chess36 and on chess34, one device at a time; ~13-15 min each
 ./gradlew :engine:connectedDebugAndroidTest   # expect 20 tests, 0 skipped
+python scripts/verify_tactic_references.py fixtures/tactic_references.json   # expect exit 0, "28 verified, 0 rejected"
 ```
 
 Test-count claims are worthless without `skipped="0"` — `assumeTrue` has silently voided a whole
@@ -167,8 +398,8 @@ PY
 | Module | What |
 |---|---|
 | `:core` | Pure Kotlin/JVM. Chess rules (perft-verified), PGN, analysis model, tactics, narration script. **No Android imports** — keep it that way. |
-| `:engine` | Stockfish 19 compiled via NDK/CMake → `libstockfish.so` + JNI UCI bridge + the bundled NNUE net (an asset, copied once to `filesDir`). |
-| `:app` | Compose UI, PGN intake, orchestration, narrated video (render/export/playback). |
+| `:engine` | Stockfish 19 compiled via NDK/CMake → `libstockfish.so` + JNI UCI bridge + `NetStore` (the NNUE net downloaded on first run into `filesDir/nets/`, verified before the engine may load it). |
+| `:app` | Compose UI, PGN intake, orchestration, narrated video (render/export/playback), first-run Setup download and Check for updates (`data/models/`). |
 
 `docs/ANALYSIS_SPEC.md` is the authoritative scoring/tactics spec. `core/.../analysis/Contract.kt`
 and `core/.../narration/NarrationContract.kt` are the shared type contracts and win over prose.
@@ -180,9 +411,8 @@ and `core/.../narration/NarrationContract.kt` are the shared type contracts and 
 - Chess core: perft exact (depth 5 on start + Position 3, depth 4 on the other three standard positions).
 - Stockfish running on Android: 9/9 instrumented, real searches, finds mate in 1.
 - Full pipeline: PGN → analysis → report, re-verified Round 5 against the **signed release APK**
-  from a clean install. (History: that build still downloaded the net. Since R4a the net is bundled and
-  the same path is exercised by `EndToEndAnalysisTest` with no seeding; no signed release APK has been
-  re-run since bundling, which is B5.)
+  from a clean install, again in R7 (bundled 1.0), D1, and in D2f on the 1.1 release APK after an update from
+  1.0 (RUN_LOG D2f). `EndToEndAnalysisTest` covers it with the net seeded from the test APK.
 - UI: import (file/paste/**share intent**), review with classified moves + commentary, game report
   with the **four tactic buckets**, missed-tactic simulation, settings, About.
 - Narrated video: script generation, in-app playback, **MP4 export** (H.264+AAC, verified playable).
@@ -197,9 +427,9 @@ and `core/.../narration/NarrationContract.kt` are the shared type contracts and 
   peak −4.5 dBFS, 26% near-silent 50 ms windows and a speech-shaped envelope. A sample is kept at
   `docs/screenshots/r5_neural_tts_sample.wav` — listen to it rather than taking this on faith.
 - **The neural voice is the default by construction (R4a).** `NarrationVoiceSettings.provider` defaults to
-  `NEURAL` and `ResolvedProvider` maps a missing or legacy `CLOUD` value to it. The voice is unpacked from the
-  APK during the first-run setup; there is nothing to auto-download. Settings has one switch to use the
-  phone's built-in voice instead.
+  `NEURAL` and `ResolvedProvider` maps a missing or legacy `CLOUD` value to it. Since 1.1 the voice is
+  downloaded once on the Setup screen (a `.tar.gz` since D2f); until it is in, the phone's voice narrates and
+  Video says so. Settings has one switch to use the phone's built-in voice instead.
 - **Kokoro verified (Round 6) and now the only voice tier.** The tier had never once produced audio;
   `sid` was hard-coded to 0 and `length_scale` was never set. Fixed, and proven the same way Piper
   was: WAV pulled off the device and measured on the host — **24000 Hz mono, 4.825 s, RMS 1758.4
@@ -251,42 +481,38 @@ and `core/.../narration/NarrationContract.kt` are the shared type contracts and 
    the two exported MP4s — but that is the synthetic test script, not a real review, so this item
    stays open.
 2. **Never run on physical hardware.** All timings are from a software-rendered emulator.
-3. `SOURCE_REPO_URL` is a visible placeholder in About — GPLv3 requires offering source.
-4. Two originally-planned tests never written: simulation flow and share-intent parsing. (The net-download test is moot: there is no download.)
+3. `SOURCE_REPO_URL` is a visible placeholder in About — GPLv3 requires offering source (owner to-do at the top).
+4. Two originally-planned tests never written: simulation flow and share-intent parsing. (The download has its own
+   suites since D2b-D2e.)
 5. **The "Narration ready" copy defect is already fixed in the tree** — `video_prepare_narration_done_body`
    now reads "reuse it instead of synthesizing it again", not "instead of calling the API again".
    Earlier handoffs listed this as outstanding; it is not. Whether the last *signed release APK*
    that was verified end-to-end carries the old or the new string has NOT been checked.
-6. **APK is ~365 MB by design** (371 MB debug), see below.
+6. **The release build has never downloaded from the real GitHub URL**: the repo and the `models-2026.10` release
+   do not exist yet (owner to-do at the top). Everything else about the download was run against local servers.
 
 ---
 
-## The APK is ~365 MB by design — read this before "optimising" it
+## History: the 365 MB APK (1.0, R7)
 
-The owner chose "a big APK is fine" in Round 13, so the app works fully offline from the first launch.
-Debug APK: **371,058,258 bytes** (measured, R4a). A release APK is estimated at about 365 MB (not yet built since bundling).
-What is in it:
-
-- the **NNUE net**, 98,511,183 bytes, a stored (uncompressed) asset in `:engine`;
-- the **Kokoro voice** as one plain `.tar`, 158,269,440 bytes, a stored asset in `:app` (the sherpa-onnx `tar.bz2` is decompressed at fetch time, so the phone does no bzip2 work);
-- ~89 MB of sherpa-onnx native libraries for three ABIs (the old 108 MB build's bulk), plus Stockfish and the app itself.
-
-`classes.dex` stays deflated; only `.nnue` and `.tar` are stored (`androidResources.noCompress`). Do not widen that to everything.
-On first launch the app copies the net and unpacks the voice into `filesDir` (about 257 MB more), so the
-install needs roughly 620 MB of steady storage and more at peak. The Play Store would **need Play Asset Delivery**
-for this (its base-module limit is far below this size); the deliverable here is a sideloaded APK, so none of
-that is done. Per-ABI splits would remove ~35-50 MB per device but are not the lever that matters any more.
+Version 1.0 (R7, `dist/PalayaChess-1.0-release.apk`, 364,733,235 B) carried the net and the Kokoro voice as stored
+assets so it worked offline from the first launch with no network permission (owner decision, Round 13). D2
+(owner decision 2026-10-06, `docs/MODEL_DOWNLOAD_DESIGN.md`) moved both out for Google Play: 1.1 is ~36 MB for
+arm64 and downloads 201 MB once, on a tap. Current sizes and facts: `docs/PUBLISHING.md` §0 and §3. Installing
+1.1 over 1.0 keeps the models 1.0 already set up (no download; proven in D2f).
 
 ---
 
 ## Live environment state
 
-- Emulator AVD `chess34` (API 34, x86_64). Cold boot 10+ min. May or may not be running.
-- Models are fetched once into the gitignored `vendor/models/` by `scripts/fetch_models.sh` and bundled by
-  the build; nothing is staged on the device any more (the old device-staging push scripts are deleted).
-- Release keystore at `keystore/chessanalyzer-release.jks`, creds in gitignored `keystore.properties`.
-  **Losing these means never updating the listing.**
-- The repo is under git (history starts at "Import the rest of the tree: Palaya Chess through Round 11"); Round 13 work is still uncommitted. `vendor/models/*` is gitignored except `MODELS.lock`.
+- Emulator AVDs `chess34` (API 34) and `chess36` (API 36), x86_64. May or may not be running.
+- Models are fetched into the gitignored `vendor/models/` by `scripts/fetch_models.sh`: `engine-assets/nnue/<net>`,
+  `app-assets/tts/kokoro-int8-en-v0_19.tar.gz` and, in `.cache/`, the upstream `.tar.bz2` and the plain tar it
+  was made from. The app build does not need them; the test APKs carry them as seed assets.
+- Release keystore at `keystore/chessanalyzer-release.jks`, creds in gitignored `keystore.properties`, and the
+  model-manifest signing key `keystore/models-signing.pem`. **Losing these means never updating the listing
+  (or the models).** Never read or print them.
+- The repo is under git (last commit `0479daf`, D1/D0); F1 and D2a-D2f are uncommitted. `vendor/models/*` is gitignored except `MODELS.lock` and `manifest_public_key.der`. There is no remote yet.
 
 ---
 
@@ -318,10 +544,9 @@ that is done. Per-ABI splits would remove ~35-50 MB per device but are not the l
 1. **Listen to `docs/voice_samples/`** and pick the narration voice. Everything else about the
    voice is measured; this is the one thing that cannot be. The recommendation is `af_bella`;
    `am_michael` is the male alternative. Changing it is one constant.
-2. B5: **done in R7** (signed release APK, offline cold-install proof, narrated MP4 measured).
-3. State the ~365 MB size on any download page; Play would need Play Asset Delivery.
-4. Commit the repo: `vendor/models/MODELS.lock` and `scripts/fetch_models.sh` are tracked, the models are not.
-5. The two missing tests; physical-device run.
-6. The export foreground service is `dataSync` because compileSdk is 34. If the project moves to
-   compileSdk/targetSdk 35+, switch it to the better-fitting `mediaProcessing` type and its
-   permission (`VideoExportService`'s class doc records why).
+2. The owner to-do list at the top of this file (repo, publish the models, policy, Play account).
+3. Then the release APK against the real GitHub release (fresh install + update check), the one D-track check
+   that is still blocked.
+4. Commit the work (F1, D2a-D2f are uncommitted).
+5. The two missing tests; a physical-device run (none yet by an agent).
+6. Round 14 queue after D2: V1, V3, V2, G1, C1, C2 (`RUN_PLAN.md`).

@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
     /** Backs the pending-import text shown to Compose; mutated directly from [onNewIntent]. */
     private val pendingImportPgnState = mutableStateOf<String?>(null)
 
+    /** Set by a tap on the setup download's notification (D2c): the nav host opens the Setup screen. */
+    private val openSetupState = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The app is always dark (ChessAnalyzerTheme(darkTheme = true)), so the system bars are told
@@ -50,10 +53,12 @@ class MainActivity : ComponentActivity() {
         // fresh analysis over whatever screen the user was on.
         if (savedInstanceState == null) {
             pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+            openSetupState.value = intent.getBooleanExtra(EXTRA_OPEN_SETUP, false)
         }
 
         setContent {
             var pendingImportPgn by pendingImportPgnState
+            var openSetup by openSetupState
 
             ChessAnalyzerTheme(darkTheme = true) {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -66,6 +71,8 @@ class MainActivity : ComponentActivity() {
                     ChessAnalyzerNavHost(
                         pendingImportPgn = pendingImportPgn,
                         onPendingImportConsumed = { pendingImportPgn = null },
+                        openSetupRequested = openSetup,
+                        onOpenSetupConsumed = { openSetup = false },
                         modifier = Modifier.windowInsetsPadding(
                             WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
                         ),
@@ -79,11 +86,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         // singleTask launch mode routes re-shares/re-opens here instead of a new instance.
         setIntent(intent)
-        pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+        if (intent.getBooleanExtra(EXTRA_OPEN_SETUP, false)) {
+            openSetupState.value = true
+        } else {
+            pendingImportPgnState.value = extractPgnFromIntent(intent, contentResolver)
+        }
     }
 
-    private companion object {
+    companion object {
+        /** Extra on the setup notification's tap intent: open the Setup screen (design §1.5). */
+        const val EXTRA_OPEN_SETUP = "open_setup"
+
         /** Same translucent dark scrim androidx.activity uses by default for a dark navigation bar. */
-        val NAV_BAR_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
+        private val NAV_BAR_SCRIM = Color.argb(0x80, 0x1b, 0x1b, 0x1b)
     }
 }

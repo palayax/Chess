@@ -12,6 +12,7 @@ sherpaOnnx = "1.13.8"
 commonsCompress = "1.26.2"
 datastore = "1.1.1"
 junit = "4.13.2"
+orgJson = "20240303"
 androidxTestJunit = "1.1.5"
 espresso = "3.5.1"
 # :desktop only (PC video producer). 1.6.3 is the last line built against Kotlin 1.9.x.
@@ -38,6 +39,7 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 sherpa-onnx = { module = "com.github.k2-fsa.sherpa-onnx:sherpa-onnx", version.ref = "sherpaOnnx" }
 commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commonsCompress" }
 junit = { module = "junit:junit", version.ref = "junit" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
 androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
 androidx-test-runner = { module = "androidx.test:runner", version = "1.5.2" }
 # ActivityScenario, used by VideoExportServiceInstrumentedTest to destroy a real Activity

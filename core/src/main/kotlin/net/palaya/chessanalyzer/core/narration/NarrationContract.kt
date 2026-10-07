@@ -101,7 +101,12 @@ enum class SegmentKind {
  * @param board what the board does during this segment.
  * @param estimatedSpeechMs a duration estimate used for layout before TTS runs; the real duration
  *   replaces it once the speech is synthesised.
- * @param holdAfterMs extra silent beat after speaking — used for PUZZLE_PROMPT pauses.
+ * @param holdAfterMs extra silent beat after speaking: the PUZZLE_PROMPT pause, the hold after a key
+ *   move, a played-out line's slower moves and final position (ANALYSIS_SPEC 9.8, [VideoPace]).
+ * @param leadIn the silent beat BEFORE the speech starts (ANALYSIS_SPEC 9.8, V3), on a key move only:
+ *   the game moves the story skipped are played first, then the position before the move is held
+ *   still with the moving piece's square and its destination lit, and only then does the move (and
+ *   the narration) start. Null for every other beat. See [SegmentLeadIn].
  */
 data class ScriptSegment(
     val index: Int,
@@ -139,8 +144,45 @@ data class ScriptSegment(
      * while the review move list called the same ply "Mistake". Carrying the classification here
      * lets every consumer show the spec's verdict and keep the kind for what it actually means.
      */
-    val classification: MoveClassification? = null
-)
+    val classification: MoveClassification? = null,
+    val leadIn: SegmentLeadIn? = null
+) {
+    /** How long the silent lead-in lasts before the speech (and the segment's own board) starts; 0 for none. */
+    val leadInMs: Long get() = leadIn?.durationMs ?: 0L
+}
+
+/**
+ * The silent beat before a key move (ANALYSIS_SPEC 9.8). Played in this order, before the segment's
+ * own [ScriptSegment.board] and its narration:
+ *
+ *  1. **approach**: the real game moves between the position the previous beat left on the board and
+ *     the position before this move ([approachUci], at most [MAX_APPROACH_PLIES]), one every
+ *     [stepMs], each sliding in [ScriptTiming.MOVE_ANIMATION_MS] and then resting, starting from
+ *     [fen]. Without it the board jumped: the replies the story skipped were never shown.
+ *  2. **pause**: the position before the move, still, for [pauseMs], with [highlightSquares] lit
+ *     (the moving piece's square and its destination).
+ *
+ * [eval] is what the eval bar shows meanwhile: the position before the key move.
+ */
+data class SegmentLeadIn(
+    val fen: String,
+    val approachUci: List<String> = emptyList(),
+    val approachSan: List<String> = emptyList(),
+    /** The on-screen caption for each approach move ("21... Kd8"), in the script's language. */
+    val approachCaptions: List<String> = emptyList(),
+    val stepMs: Long = 0L,
+    val pauseMs: Long = 0L,
+    val highlightSquares: List<String> = emptyList(),
+    val eval: SegmentEval? = null
+) {
+    val approachMs: Long get() = approachUci.size * stepMs
+    val durationMs: Long get() = approachMs + pauseMs
+
+    companion object {
+        /** One or two skipped plies are walked; three or more get a spoken "skip ahead" beat instead (§9.7). */
+        const val MAX_APPROACH_PLIES = 2
+    }
+}
 
 /** A chapter marker, for scrubbing in playback and for chapter markers in the exported file. */
 data class ScriptChapter(val title: String, val startSegmentIndex: Int)
@@ -181,7 +223,11 @@ data class SegmentEval(
 /**
  * A complete narrated review, ready to be played or rendered.
  *
- * @param totalEstimatedMs sum of segment durations plus holds — the projected video length.
+ * @param totalEstimatedMs sum of segment speech estimates plus lead-ins and holds — the projected video
+ *   length (the app's 250 ms gaps between segments come on top).
+ * @param pacingMs the part of [totalEstimatedMs] that is [VideoPace] time (lead-ins, the holds after key
+ *   moves, slower line moves, the line's final position). The length budget of ANALYSIS_SPEC 9.7 is held
+ *   by the rest, the story: `totalEstimatedMs - pacingMs` (spec 9.8).
  */
 data class VideoScript(
     val title: String,
@@ -204,8 +250,12 @@ data class VideoScript(
      * time-left figures are unchanged), and it is outside the pacing budget of ANALYSIS_SPEC 9.7
      * ([totalEstimatedMs] does not include it). Null when the report has no moves.
      */
-    val recap: VideoRecap? = null
-)
+    val recap: VideoRecap? = null,
+    val pacingMs: Long = 0L
+) {
+    /** What the length budget holds (ANALYSIS_SPEC 9.7/9.8): speech and the puzzle pauses, without the pace. */
+    val storyMs: Long get() = totalEstimatedMs - pacingMs
+}
 
 /**
  * The facts on the recap end card (see [VideoScript.recap]). Pure data: every word on the card is
@@ -366,7 +416,14 @@ data class NarrationOptions(
      *
      * ANALYSIS_SPEC §9 is the authoritative statement of this rule.
      */
-    val significanceThresholdCp: Int = DEFAULT_SIGNIFICANCE_THRESHOLD_CP
+    val significanceThresholdCp: Int = DEFAULT_SIGNIFICANCE_THRESHOLD_CP,
+    /**
+     * How slowly the board moves through the key moments (ANALYSIS_SPEC 9.8, V3): the silent pause
+     * before a key move, the hold after it, and the time per move of a played-out line. Never the
+     * speech itself. The default here is [VideoPace.NORMAL], the reference the spec's numbers are
+     * stated at; the app passes the user's setting, which starts on [VideoPace.DEFAULT].
+     */
+    val pace: VideoPace = VideoPace.NORMAL
 ) {
     companion object {
         /**

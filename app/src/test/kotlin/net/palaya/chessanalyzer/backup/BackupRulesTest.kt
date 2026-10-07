@@ -2,8 +2,10 @@ package net.palaya.chessanalyzer.backup
 
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
-import net.palaya.chessanalyzer.engine.BundledNetProvider
-import net.palaya.chessanalyzer.video.BundledVoiceInstaller
+import net.palaya.chessanalyzer.data.PendingAnalysisStore
+import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
+import net.palaya.chessanalyzer.engine.NetStore
+import net.palaya.chessanalyzer.video.VoiceStore
 import net.palaya.chessanalyzer.video.NarrationStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,14 +40,25 @@ class BackupRulesTest {
     }
 
     private val mustExclude = listOf(
-        Rule("file", BundledVoiceInstaller.ROOT_DIR_NAME + "/"),
+        Rule("file", VoiceStore.ROOT_DIR_NAME + "/"),
+        // D2b: the downloaded net and its .part live in nets/; models/ holds D2e's activation journal.
+        Rule("file", NetStore.DIR_NAME + "/"),
+        Rule("file", "models/"),
         Rule("file", NarrationStore.DIR_NAME + "/"),
         Rule("file", "eval_cache/"),
-        Rule("file", BundledNetProvider.NET_FILENAME),
-        Rule("file", BundledNetProvider.NET_FILENAME + BundledNetProvider.PART_SUFFIX),
+        // Legacy literals (bundled builds kept the net in the filesDir root): kept for one release.
+        Rule("file", NetStore.NET_FILENAME),
+        Rule("file", NetStore.NET_FILENAME + NetStore.PART_SUFFIX),
         Rule("file", "datastore/chess_analyzer_narration_settings.preferences_pb"),
         Rule("sharedpref", "narration_key_fallback_unencrypted.xml"),
         Rule("sharedpref", "narration_secrets.xml"),
+        // F1: the diagnostic log and the pending analysis request are device-specific.
+        Rule("file", DiagnosticLog.DIR_NAME + "/"),
+        Rule("file", PendingAnalysisStore.FILE_NAME),
+        Rule("file", PendingAnalysisStore.FILE_NAME + ".tmp"),
+        // D2c: a game shared before setup, waiting for the net (same reason: it would start by itself).
+        Rule("file", PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME),
+        Rule("file", PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME + ".tmp"),
     )
 
     @Test
@@ -67,28 +80,33 @@ class BackupRulesTest {
     }
 
     /**
-     * The voice installer stages an extraction in a scratch directory next to the installed model.
-     * Both must sit under a directory the rules exclude, or a killed first run could leave a
-     * ~158 MB half-extracted directory for Auto Backup to try to upload.
+     * The voice store stages an extraction in a scratch directory next to the installed model, and
+     * downloads the tar into a part file in the same directory. All must sit under a directory the
+     * rules exclude, or a killed first run could leave ~158 MB for Auto Backup to try to upload.
      */
     @Test
-    fun theVoiceInstallersScratchAndModelDirectoriesAreCoveredByTheTtsRule() {
-        assertEquals("tts_models", BundledVoiceInstaller.ROOT_DIR_NAME)
-        assertTrue(BundledVoiceInstaller.SCRATCH_DIR_NAME.isNotBlank())
-        assertTrue(BundledVoiceInstaller.MODEL_DIR_NAME.isNotBlank())
+    fun theVoiceStoresScratchModelAndPartFilesAreCoveredByTheTtsRule() {
+        assertEquals("tts_models", VoiceStore.ROOT_DIR_NAME)
+        assertTrue(VoiceStore.SCRATCH_DIR_NAME.isNotBlank())
+        assertTrue(VoiceStore.MODEL_DIR_NAME.isNotBlank())
+        assertFalse("the part file must be a plain name inside tts_models/", VoiceStore.PART_FILE_NAME.contains('/'))
         for (rules in listOf(
             excludesUnder("backup_rules.xml", null),
             excludesUnder("data_extraction_rules.xml", "cloud-backup"),
             excludesUnder("data_extraction_rules.xml", "device-transfer"),
         )) {
             // Directory rules are prefixes: "tts_models/" covers everything beneath it.
-            assertTrue(Rule("file", BundledVoiceInstaller.ROOT_DIR_NAME + "/") in rules)
+            assertTrue(Rule("file", VoiceStore.ROOT_DIR_NAME + "/") in rules)
         }
     }
 
     @Test
-    fun theNetsScratchFileSuffixIsExcludedByName() {
-        assertEquals(".part", BundledNetProvider.PART_SUFFIX)
+    fun theNetAndItsPartFileLiveUnderTheExcludedNetsDirectory() {
+        assertEquals("nets", NetStore.DIR_NAME)
+        assertEquals(".part", NetStore.PART_SUFFIX)
+        val store = NetStore(File("files"))
+        assertEquals(File(File("files"), "nets"), store.netFile.parentFile)
+        assertEquals(File(File("files"), "nets"), store.partFileFor().parentFile)
         assertFalse(
             "the old downloader's suffix must not linger in the rules",
             excludesUnder("backup_rules.xml", null).any { it.path.endsWith(".download") },

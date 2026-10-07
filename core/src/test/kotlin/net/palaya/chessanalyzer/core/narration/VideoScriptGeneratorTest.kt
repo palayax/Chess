@@ -196,9 +196,9 @@ class VideoScriptGeneratorTest {
     }
 
     @Test
-    fun `total estimated ms is speech plus holds`() {
+    fun `total estimated ms is speech plus lead-ins plus holds`() {
         val s = script()
-        val expected = s.segments.sumOf { it.estimatedSpeechMs + it.holdAfterMs }
+        val expected = s.segments.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs }
         assertEquals(expected, s.totalEstimatedMs)
         assertTrue("a full script should be more than 30 seconds", s.totalEstimatedMs > 30_000)
     }

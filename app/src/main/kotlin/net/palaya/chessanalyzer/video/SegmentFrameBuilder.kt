@@ -4,6 +4,8 @@ import net.palaya.chessanalyzer.core.chess.Position
 import net.palaya.chessanalyzer.core.chess.parseUci
 import net.palaya.chessanalyzer.core.narration.BoardDirective
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
+import net.palaya.chessanalyzer.core.narration.ScriptTiming
+import net.palaya.chessanalyzer.core.narration.SegmentLeadIn
 import net.palaya.chessanalyzer.core.narration.SegmentKind
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.data.mapper.fenToBoardState
@@ -28,7 +30,7 @@ sealed interface RenderInstruction {
 object SegmentFrameBuilder {
 
     /** How long a single move's slide animation takes, honouring the "~400ms, not a snap" spec. */
-    const val MOVE_ANIMATION_MS = 400L
+    const val MOVE_ANIMATION_MS = ScriptTiming.MOVE_ANIMATION_MS
 
     /** How many previously-played moves the side panel's "recent moves" list shows. */
     private const val RECENT_MOVES_LIMIT = 5
@@ -42,17 +44,24 @@ object SegmentFrameBuilder {
         return label
     }
 
-    /** SAN of every `PlayMove` segment up to and including [uptoIndex], most recent last. */
+    /** SAN of every `PlayMove` segment (and lead-in approach move) up to and including [uptoIndex], most recent last. */
     private fun recentPlayedSans(script: VideoScript, uptoIndex: Int): List<String> {
         val result = ArrayList<String>()
         for (seg in script.segments) {
             if (seg.index > uptoIndex) break
+            // The game moves a key move's lead-in played first (ANALYSIS_SPEC 9.8) come before it.
+            seg.leadIn?.let { result.addAll(it.approachSan) }
             val directive = seg.board
             if (directive is BoardDirective.PlayMove) result.add(directive.san)
         }
         return result.takeLast(RECENT_MOVES_LIMIT)
     }
 
+    /**
+     * @param elapsedMs time since the segment started, lead-in included: while it is inside
+     *   [ScriptSegment.leadIn] the lead-in is drawn (ANALYSIS_SPEC 9.8), and the segment's own board
+     *   starts after it, so a PlayMove slides exactly when its narration starts.
+     */
     fun build(
         script: VideoScript,
         segment: ScriptSegment,
@@ -60,6 +69,21 @@ object SegmentFrameBuilder {
         orientation: BoardOrientation,
         /** Resolved once per frame stream by the caller — see [BoardFrameRenderer.PanelLabels]. */
         labels: BoardFrameRenderer.PanelLabels = BoardFrameRenderer.PanelLabels.ENGLISH,
+    ): RenderInstruction {
+        val leadIn = segment.leadIn
+        if (leadIn != null && elapsedMs < leadIn.durationMs) {
+            return buildLeadIn(script, segment, leadIn, elapsedMs, orientation, labels)
+        }
+        return buildBoard(script, segment, (elapsedMs - segment.leadInMs).coerceAtLeast(0L), orientation, labels)
+    }
+
+    /** The segment's own board, [elapsedMs] after its lead-in (if any) ended. */
+    private fun buildBoard(
+        script: VideoScript,
+        segment: ScriptSegment,
+        elapsedMs: Long,
+        orientation: BoardOrientation,
+        labels: BoardFrameRenderer.PanelLabels,
     ): RenderInstruction {
         val chapterLabel = chapterLabelFor(script, segment.index)
         // Common panel context, independent of which BoardDirective this segment carries — merged
@@ -167,6 +191,82 @@ object SegmentFrameBuilder {
         } else {
             result
         }
+    }
+
+    /**
+     * The silent lead-in before a key move (ANALYSIS_SPEC 9.8): first the skipped game moves, one every
+     * [SegmentLeadIn.stepMs], each sliding for [MOVE_ANIMATION_MS] and then resting with its own caption;
+     * then the position before the key move, still, with the move's two squares lit and the last
+     * approach move still marked. The eval bar shows the position before the key move, and the panel
+     * shows no verdict yet: the key move has not been played (its badge appears with it, as in a
+     * review); the chip reads "Key moment" during the pause and is absent while the skipped moves play.
+     */
+    private fun buildLeadIn(
+        script: VideoScript,
+        segment: ScriptSegment,
+        leadIn: SegmentLeadIn,
+        elapsedMs: Long,
+        orientation: BoardOrientation,
+        labels: BoardFrameRenderer.PanelLabels,
+    ): RenderInstruction {
+        val base = BoardFrameRenderer.BoardFrameSpec(
+            boardState = net.palaya.chessanalyzer.ui.model.BoardState.empty(),
+            labels = labels,
+            chapterLabel = chapterLabelFor(script, segment.index),
+            // No verdict yet: the chip says "Key moment" during the pause and nothing while the skipped moves play.
+            segmentKind = null,
+            speakerColor = segment.speakerColor,
+            userColor = script.userColor,
+            ply = segment.ply,
+            header = script.header,
+            evalWinPercentWhite = leadIn.eval?.winPercentWhite ?: segment.eval?.winPercentWhite,
+            evalCp = leadIn.eval?.evalCp ?: segment.eval?.evalCp,
+            evalMateIn = leadIn.eval?.mateIn ?: segment.eval?.mateIn,
+            moveNumber = segment.moveNumber,
+            orientation = orientation,
+        )
+        val before = recentPlayedSans(script, segment.index - 1)
+        // The approach moves are game moves too: the panel's "recent moves" lists each once it has been played.
+        fun recent(played: Int) = (before + leadIn.approachSan.take(played)).takeLast(RECENT_MOVES_LIMIT)
+        val steps = leadIn.approachUci
+        var pos = Position.fromFen(leadIn.fen)
+        if (steps.isNotEmpty() && leadIn.stepMs > 0 && elapsedMs < leadIn.approachMs) {
+            val stepIndex = (elapsedMs / leadIn.stepMs).toInt().coerceIn(0, steps.size - 1)
+            val local = elapsedMs - stepIndex * leadIn.stepMs
+            for (i in 0 until stepIndex) pos = safeMakeMove(pos, steps[i])
+            val beforeState = fenToBoardState(pos.toFen())
+            val fromTo = uciSquares(steps[stepIndex])
+            val settled = local >= MOVE_ANIMATION_MS
+            val afterPos = safeMakeMove(pos, steps[stepIndex])
+            val animating = if (!settled && fromTo != null) {
+                val progress = easeInOut((local.toFloat() / MOVE_ANIMATION_MS).coerceIn(0f, 1f))
+                beforeState.pieces[fromTo.first]?.let { BoardFrameRenderer.AnimatingPiece(it, fromTo.first, fromTo.second, progress) }
+            } else null
+            return RenderInstruction.Board(
+                base.copy(
+                    boardState = if (settled) fenToBoardState(afterPos.toFen()) else beforeState,
+                    lastMove = fromTo,
+                    animating = animating,
+                    checkedKingSquare = if (settled) checkedSquare(afterPos.toFen()) else null,
+                    caption = leadIn.approachCaptions.getOrNull(stepIndex) ?: segment.caption,
+                    san = leadIn.approachSan.getOrNull(stepIndex),
+                    recentMoves = recent(if (settled) stepIndex + 1 else stepIndex),
+                )
+            )
+        }
+        for (uci in steps) pos = safeMakeMove(pos, uci)
+        val fen = pos.toFen()
+        return RenderInstruction.Board(
+            base.copy(
+                boardState = fenToBoardState(fen),
+                segmentKind = SegmentKind.KEY_MOMENT,
+                lastMove = steps.lastOrNull()?.let { uciSquares(it) },
+                highlightSquares = leadIn.highlightSquares.mapNotNull { algebraicToSquare(it) },
+                checkedKingSquare = checkedSquare(fen),
+                caption = segment.caption,
+                recentMoves = recent(steps.size),
+            )
+        )
     }
 
     private fun buildPlayLine(

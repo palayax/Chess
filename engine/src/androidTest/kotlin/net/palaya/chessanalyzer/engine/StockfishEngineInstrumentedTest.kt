@@ -13,9 +13,9 @@ import java.io.File
 /**
  * End-to-end test against the real native engine (libstockfish.so) on a device/emulator.
  *
- * The NNUE net is bundled in the APK's assets (we build with NNUE_EMBEDDING_OFF, so it is not
- * compiled in) and [TestNet] copies it to the test package's filesDir through [BundledNetProvider],
- * exactly as the app does. Nothing is pushed to the device and no test skips itself.
+ * The NNUE net is not compiled in (we build with NNUE_EMBEDDING_OFF) and not in any APK since D2b;
+ * [TestNet] installs the test APK's seed copy (D2d) through [NetStore.installVerified], the same tail
+ * the app's download uses. Nothing is pushed to the device and no test skips itself.
  *
  * Note: [StockfishEngine.start] redirects the whole process's STDIN_FILENO/STDOUT_FILENO to pipes
  * talking to the native engine thread (see engine/src/main/cpp/jni_bridge.cpp). That is

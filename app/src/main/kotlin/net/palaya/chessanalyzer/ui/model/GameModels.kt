@@ -3,6 +3,7 @@ package net.palaya.chessanalyzer.ui.model
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.core.narration.NarrationOptions
+import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.theme.MoveClassification
 
 /**
@@ -130,21 +131,31 @@ data class RecentGameSummary(
 
 enum class AnalysisPhase {
     PREPARING_ENGINE,
-    /**
-     * One-time first-launch setup: the net and the voice ship inside the APK and are copied or
-     * extracted to app storage before the first analysis. Shown as "Setting up the engine (one
-     * time)…" with a determinate bar ([AnalysisProgress.fractionComplete]) and no byte counters.
-     */
-    FIRST_RUN_SETUP,
     ANALYZING_MOVES,
     DONE,
 }
 
 data class AnalysisProgress(
     val phase: AnalysisPhase,
+    /** Positions done (the engine counts positions: the start plus one per ply). */
     val currentMoveIndex: Int = 0,
+    /** Positions in the game. */
     val totalMoves: Int = 0,
     val fractionComplete: Float = 0f,
+    /** Deepest depth the engine has completed on the position being searched now; 0 when none yet. */
+    val searchDepth: Int = 0,
+    /** The depth asked for (the strength's depth); 0 when not searching. */
+    val targetDepth: Int = 0,
+    /** Monotonic time (elapsedRealtime) the current position's search started; 0 when not searching. */
+    val positionStartedAtMs: Long = 0L,
+    /** Nodes, wall time and positions the engine has searched in this run (not counting a checkpoint). */
+    val runNodes: Long = 0L,
+    val runSearchMs: Long = 0L,
+    val runPositionsSearched: Int = 0,
+    /** Monotonic time this analysis run started (set by the ViewModel); 0 when unknown. */
+    val runStartedAtMs: Long = 0L,
+    /** "About N min left", measured (set by the ViewModel, see [AnalysisTimeLeftTracker]). */
+    val timeLeft: net.palaya.chessanalyzer.video.ExportTimeLeft = net.palaya.chessanalyzer.video.ExportTimeLeft.Hidden,
 )
 
 data class ClassificationCount(val classification: MoveClassification, val count: Int)
@@ -259,6 +270,11 @@ data class GameReport(
      * buckets do. Null for placeholder data and for a report with no moves.
      */
     val summarySentence: String? = null,
+    /**
+     * Positions whose search the per-position budget stopped before the requested depth
+     * (ANALYSIS_SPEC §8.1). The Summary's Details says so in one quiet line when it is not 0.
+     */
+    val cappedPositions: Int = 0,
 ) {
     /** Number of half-moves played; Home and the Summary both show it as whole moves. */
     val plyCount: Int get() = maxOf(plyClassifications.size, evalHistory.size - 1, 0)
@@ -302,7 +318,16 @@ data class EngineSettings(
      * only English is offered today — see [AppLanguage] for what adding one involves.
      */
     val language: AppLanguage = AppLanguage.SYSTEM,
-)
+    /**
+     * How slowly the narrated review moves through its key moments (V3, ANALYSIS_SPEC 9.8): the pause
+     * before a key move, the hold after it, the time per move of a played-out sequence. Not the speech.
+     * Applies to the in-app player and the MP4 alike, because both play the same script.
+     */
+    val videoPace: VideoPace = VideoPace.DEFAULT,
+) {
+    /** The per-position node and time limits that go with [depth] (ANALYSIS_SPEC §8.1). */
+    val searchBudget: SearchBudget get() = SearchBudget.forDepth(depth)
+}
 
 /** Placeholder sample data so every screen has something realistic to render in @Preview and initial state. */
 object PlaceholderData {

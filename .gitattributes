@@ -1,0 +1,2 @@
+# Signed test fixtures: the signature covers the exact bytes, so git must never rewrite their line endings (D2e).
+app/src/test/resources/manifest/** -text

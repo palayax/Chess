@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-07T12:00:00Z",
+  "models": [
+    {
+      "id": "voice-kokoro-en",
+      "displayName": "Narration voice",
+      "version": "v0_19-r2",
+      "fileName": "kokoro-int8-en-v0_19-r2.tar",
+      "url": "https://github.com/palayax/palaya-chess/releases/download/models-2026.10.1/kokoro-int8-en-v0_19-r2.tar",
+      "size": 158279680,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "minVersionCode": 1,
+      "maxVersionCode": null,
+      "compat": { "kind": "sherpa-onnx-kokoro", "layout": "kokoro-v0_19" },
+      "runtime": { "name": "sherpa-onnx", "min": "1.13.8", "max": "1.13.8" },
+      "someFutureField": { "ignored": true }
+    },
+    { "id": "some-future-model", "whatever": 1 }
+  ]
+}

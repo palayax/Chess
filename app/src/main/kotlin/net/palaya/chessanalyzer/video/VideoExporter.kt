@@ -496,11 +496,11 @@ class VideoExporter(private val context: Context) {
     // ---------------------------------------------------------------------
 
     /**
-     * Writes the whole spoken track as raw 16-bit mono PCM at [sampleRate]: each segment's
-     * speech samples (real TTS audio, or silence when that segment fell back), padded out to
-     * exactly [TimedSegment.speechDurationMs] then followed by [TimedSegment.totalDurationMs] -
-     * [TimedSegment.speechDurationMs] of trailing silence (the `holdAfterMs` beat plus the
-     * inter-segment gap) — so every segment's audio chunk is exactly as long as the board holds
+     * Writes the whole spoken track as raw 16-bit mono PCM at [sampleRate]: each segment's silent
+     * lead-in ([TimedSegment.leadInMs], ANALYSIS_SPEC 9.8), then its speech samples (real TTS audio,
+     * or silence when that segment fell back), padded out to exactly [TimedSegment.speechDurationMs],
+     * then the rest of [TimedSegment.totalDurationMs] as trailing silence (the `holdAfterMs` beat plus
+     * the inter-segment gap) — so every segment's audio chunk is exactly as long as the board holds
      * that segment on screen, keeping speech and picture in lockstep however TTS durations landed.
      */
     private fun buildPcmTrack(
@@ -513,6 +513,10 @@ class VideoExporter(private val context: Context) {
         val byIndex = synthResults.associateBy { it.segmentIndex }
         outFile.outputStream().buffered().use { out ->
             for (timed in timeline.segments) {
+                // ANALYSIS_SPEC 9.8: the lead-in before a key move is silent; the speech starts after it,
+                // exactly when the board starts the move (SegmentFrameBuilder shifts the board the same way).
+                val leadInSamples = ((timed.leadInMs * sampleRate) / 1000L).toInt().coerceAtLeast(0)
+                writeSilence(out, leadInSamples)
                 val speechTargetSamples = ((timed.speechDurationMs * sampleRate) / 1000L).toInt().coerceAtLeast(0)
                 val rawSpeech = when (val result = byIndex[timed.segment.index]) {
                     is NarrationSynthesizer.Result.Synthesized -> WavUtil.readAsMono16(result.wavFile, sampleRate)
@@ -523,7 +527,7 @@ class VideoExporter(private val context: Context) {
                 writeShorts(out, fitted)
 
                 val totalSamples = ((timed.totalDurationMs * sampleRate) / 1000L).toInt().coerceAtLeast(0)
-                writeSilence(out, (totalSamples - speechTargetSamples).coerceAtLeast(0))
+                writeSilence(out, (totalSamples - leadInSamples - speechTargetSamples).coerceAtLeast(0))
             }
             // The recap card is silent: the audio track stays as long as the picture.
             writeSilence(out, ((timeline.recapDurationMs * sampleRate) / 1000L).toInt())

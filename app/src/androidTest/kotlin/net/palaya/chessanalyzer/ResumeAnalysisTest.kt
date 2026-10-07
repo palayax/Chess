@@ -6,6 +6,10 @@ import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.analysis.EngineLineInput
 import net.palaya.chessanalyzer.core.analysis.PositionEval
 import net.palaya.chessanalyzer.data.GameRepository
+import net.palaya.chessanalyzer.data.PendingAnalysisStore
+import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -96,5 +100,75 @@ class ResumeAnalysisTest {
     fun resumePrefixIsEmptyForAnEmptyCache() {
         val service = TestApp.analysisService()
         assertTrue(service.usableResumePrefix(listOf("a", "b"), emptyList()).isEmpty())
+    }
+
+    // ---- F1: a killed process resumes instead of losing the game ----
+
+    /** The request written when an analysis starts is what a new process reads back to resume it. */
+    @Test
+    fun thePendingRequestRoundTripsAndIsClearedOnlyForItsOwnGame() {
+        val dir = java.io.File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "pending-${System.nanoTime()}")
+            .apply { mkdirs() }
+        try {
+            val store = PendingAnalysisStore(dir)
+            assertNull(store.load())
+            val request = PendingAnalysisStore.Request(
+                gameId = "imported-1-1",
+                pgnText = "[White \"Fouchon\"]\n\n1. e4 d5 0-1",
+                depth = 18,
+                multiPv = 3,
+                username = "Sonarmind",
+                startedAtMs = 1_791_288_000_000L,
+            )
+            store.save(request)
+            assertEquals(request, store.load())
+            store.clear("some-other-game")
+            assertEquals("another game's clear leaves it", request, store.load())
+            store.clear(request.gameId)
+            assertNull(store.load())
+            assertFalse(java.io.File(dir, PendingAnalysisStore.FILE_NAME).exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun aDamagedPendingRequestIsDroppedNotFatal() {
+        val dir = java.io.File(InstrumentationRegistry.getInstrumentation().targetContext.cacheDir, "pending-${System.nanoTime()}")
+            .apply { mkdirs() }
+        try {
+            java.io.File(dir, PendingAnalysisStore.FILE_NAME).writeText("{\"gameId\": \"x\", \"pgnTe")
+            assertNull(PendingAnalysisStore(dir).load())
+            assertFalse(java.io.File(dir, PendingAnalysisStore.FILE_NAME).exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    /** The capped flag survives the eval cache, so a reopened game still says how many were capped. */
+    @Test
+    fun theRequestedDepthRoundTripsThroughTheEvalCache() = runBlocking {
+        val repo = GameRepository(InstrumentationRegistry.getInstrumentation().targetContext.filesDir)
+        val key = "test-capped-${System.nanoTime()}"
+        val capped = eval("fen-0").copy(depth = 16, requestedDepth = 18)
+        val full = eval("fen-1").copy(depth = 18, requestedDepth = 18)
+        val legacy = eval("fen-2")
+        repo.savePartialEvalCache(key, listOf(capped, full, legacy))
+        val loaded = repo.loadPartialEvalCache(key)!!
+        repo.clearPartialEvalCache(key)
+        assertEquals(listOf(true, false, false), loaded.map { it.isCapped })
+        assertEquals(listOf(18, 18, null), loaded.map { it.requestedDepth })
+    }
+
+    /** A result is reused only under identical limits: the budget is part of the cache key. */
+    @Test
+    fun theSearchBudgetIsPartOfTheEvalCacheKey() {
+        val repo = GameRepository(InstrumentationRegistry.getInstrumentation().targetContext.filesDir)
+        val pgn = "1. e4 e5 *"
+        val deep = repo.cacheKey(pgn, 18, 3, AnalysisStrength.DEEP.budget.cacheKeyPart)
+        assertEquals(deep, repo.cacheKey(pgn, 18, 3, AnalysisStrength.DEEP.budget.cacheKeyPart))
+        assertNotEquals("unbudgeted (pre-F1) results are not reused", repo.cacheKey(pgn, 18, 3), deep)
+        assertNotEquals(deep, repo.cacheKey(pgn, 18, 3, AnalysisStrength.DEEP.budget.copy(nodes = 1L).cacheKeyPart))
+        assertNotEquals(deep, repo.cacheKey(pgn, 18, 3, AnalysisStrength.DEEP.budget.copy(movetimeMs = 1L).cacheKeyPart))
     }
 }

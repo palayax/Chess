@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.video
 
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
+import net.palaya.chessanalyzer.core.narration.ScriptTiming
 import net.palaya.chessanalyzer.core.narration.VideoScript
 
 /**
@@ -14,10 +15,18 @@ data class TimedSegment(
     val startMs: Long,
     /** How long the voice (or its silent stand-in) actually takes. */
     val speechDurationMs: Long,
-    /** [speechDurationMs] + [ScriptSegment.holdAfterMs] + the inter-segment pacing gap. */
+    /** [leadInMs] + [speechDurationMs] + [ScriptSegment.holdAfterMs] + the inter-segment pacing gap. */
     val totalDurationMs: Long,
+    /**
+     * The silent lead-in before the speech (ANALYSIS_SPEC 9.8, [ScriptSegment.leadIn]): the board plays
+     * the skipped moves and pauses on the key move's position, then the speech starts at [speechStartMs].
+     */
+    val leadInMs: Long = 0L,
 ) {
     val endMs: Long get() = startMs + totalDurationMs
+
+    /** When the narration starts: after the lead-in. */
+    val speechStartMs: Long get() = startMs + leadInMs
 }
 
 data class ScriptTimeline(
@@ -48,10 +57,10 @@ data class ScriptTimeline(
 
 object TimelineBuilder {
     /** A floor so a mis-estimated/near-empty segment still gets visible board time. */
-    const val MIN_SEGMENT_MS = 900L
+    const val MIN_SEGMENT_MS = ScriptTiming.MIN_SEGMENT_MS
 
     /** Silence between segments — also what keeps a slightly-early `onDone` from clipping speech. */
-    const val INTER_SEGMENT_GAP_MS = 250L
+    const val INTER_SEGMENT_GAP_MS = ScriptTiming.INTER_SEGMENT_GAP_MS
 
     fun build(script: VideoScript, synthResults: List<NarrationSynthesizer.Result>): ScriptTimeline {
         val byIndex = synthResults.associateBy { it.segmentIndex }
@@ -60,8 +69,8 @@ object TimelineBuilder {
         for (seg in script.segments) {
             val speechMs = (byIndex[seg.index]?.durationMs ?: seg.estimatedSpeechMs)
                 .coerceAtLeast(MIN_SEGMENT_MS)
-            val total = speechMs + seg.holdAfterMs + INTER_SEGMENT_GAP_MS
-            timed.add(TimedSegment(seg, cursor, speechMs, total))
+            val total = seg.leadInMs + speechMs + seg.holdAfterMs + INTER_SEGMENT_GAP_MS
+            timed.add(TimedSegment(seg, cursor, speechMs, total, seg.leadInMs))
             cursor += total
         }
         return ScriptTimeline(timed, cursor)

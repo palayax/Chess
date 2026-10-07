@@ -178,6 +178,53 @@ class PanelChipLabelTest {
     }
 
     // -----------------------------------------------------------------------
+    // V3: the lead-in before a key move shows no verdict yet
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun theLeadInShowsNoVerdictThenTheMoveCarriesIt() {
+        // 2. Nf3 Nc6 skipped by the story, then the key move 3. Bb5 (labelled MISTAKE here only to see the chip).
+        val start = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+        val before = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
+        val lead = net.palaya.chessanalyzer.core.narration.SegmentLeadIn(
+            fen = start,
+            approachUci = listOf("g1f3", "b8c6"),
+            approachSan = listOf("Nf3", "Nc6"),
+            approachCaptions = listOf("2. Nf3", "2... Nc6"),
+            stepMs = 1_500L,
+            pauseMs = 1_200L,
+            highlightSquares = listOf("f1", "b5"),
+            eval = SegmentEval(winPercentWhite = 55.0, evalCp = 30),
+        )
+        val seg = segment(
+            kind = SegmentKind.BLUNDER,
+            board = BoardDirective.PlayMove(before, "f1b5", "Bb5", MoveClassification.MISTAKE),
+            classification = MoveClassification.MISTAKE,
+        ).copy(caption = "3. Bb5 ?", leadIn = lead)
+        fun at(ms: Long) = (SegmentFrameBuilder.build(script(seg), seg, ms, BoardOrientation.WHITE_DOWN) as RenderInstruction.Board).spec
+
+        // The first skipped move, landed: its own caption, its squares marked, no chip at all.
+        val approach = at(SegmentFrameBuilder.MOVE_ANIMATION_MS + 100)
+        assertEquals("2. Nf3", approach.caption)
+        assertEquals(null, approach.classification)
+        assertEquals(null, BoardFrameRenderer.panelChip(approach))
+        assertEquals(55.0, approach.evalWinPercentWhite!!, 0.0)
+        // The pause: the key move's position, its two squares lit, "Key Moment", still no verdict.
+        val pause = at(3_000L + 600L)
+        assertEquals("3. Bb5 ?", pause.caption)
+        assertEquals(2, pause.highlightSquares.size)
+        assertEquals(null, pause.classification)
+        assertEquals(null, pause.animating)
+        assertEquals("Key Moment", BoardFrameRenderer.panelChip(pause)!!.text)
+        // After the lead-in the move slides in and carries its verdict.
+        val sliding = at(lead.durationMs + 100)
+        assertNotNull(sliding.animating)
+        val landed = at(lead.durationMs + SegmentFrameBuilder.MOVE_ANIMATION_MS)
+        assertEquals("? Mistake", BoardFrameRenderer.panelChip(landed)!!.text)
+        assertEquals(62.0, landed.evalWinPercentWhite!!, 0.0)
+    }
+
+    // -----------------------------------------------------------------------
     // The recap card (R6b) says a class the way the panel chip does
     // -----------------------------------------------------------------------
 

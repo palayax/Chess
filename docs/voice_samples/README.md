@@ -78,3 +78,33 @@ Nobody has listened to these yet. Everything above is measured; *which voice sou
 the one question measurement cannot answer, which is the entire reason this directory exists.
 
 Regenerate with `VoiceSampleSweep` — see `docs/NEURAL_VOICE.md`.
+
+## V1 (2026-10-07): the voice picker's sample sentence through all eleven speakers
+
+Settings, Video, "Narrator voice" now offers all eleven speakers (default still Bella, sid 1) with an on-device
+"Play sample". `v1/` holds that sample sentence, rendered on chess36 by the app's own call
+(`NeuralTtsProvider.synthesizeAs`, the one "Play sample" uses; `NarratorVoiceEvidence`) and pulled:
+
+> Knight to f seven, check! The king must move, and the queen on d eight is lost.
+
+| sid | File | Picker label | Duration | RMS | Peak | Clipped | Median pitch | Spectral centroid |
+|---|---|---|---|---|---|---|---|---|
+| 0 | `v1/v1_sid00_af.wav` | Blend · American, female | 5.47 s | 1884 (-24.8 dBFS) | -9.7 dBFS | 0 | 195 Hz | 2730 Hz |
+| 1 | `v1/v1_sid01_af_bella.wav` | Bella · American, female (default) | 5.41 s | 1984 (-24.4) | -7.6 | 0 | 198 Hz | 2896 Hz |
+| 2 | `v1/v1_sid02_af_nicole.wav` | Nicole · American, female | 6.50 s | 2138 (-23.7) | -4.0 | 0 | 154 Hz | 2671 Hz |
+| 3 | `v1/v1_sid03_af_sarah.wav` | Sarah · American, female | 5.59 s | 1864 (-24.9) | -8.9 | 0 | 197 Hz | 2596 Hz |
+| 4 | `v1/v1_sid04_af_sky.wav` | Sky · American, female | 5.08 s | 1487 (-26.9) | -11.9 | 0 | 170 Hz | 1627 Hz |
+| 5 | `v1/v1_sid05_am_adam.wav` | Adam · American, male | 5.03 s | 2470 (-22.5) | -6.1 | 0 | 126 Hz | 2026 Hz |
+| 6 | `v1/v1_sid06_am_michael.wav` | Michael · American, male | 5.81 s | 1575 (-26.4) | -6.8 | 0 | 124 Hz | 2205 Hz |
+| 7 | `v1/v1_sid07_bf_emma.wav` | Emma · British, female | 5.43 s | 2143 (-23.7) | -9.3 | 0 | 189 Hz | 3043 Hz |
+| 8 | `v1/v1_sid08_bf_isabella.wav` | Isabella · British, female | 5.56 s | 2866 (-21.2) | -4.4 | 0 | 203 Hz | 2715 Hz |
+| 9 | `v1/v1_sid09_bm_george.wav` | George · British, male | 6.05 s | 2172 (-23.6) | -9.5 | 0 | 144 Hz | 1820 Hz |
+| 10 | `v1/v1_sid10_bm_lewis.wav` | Lewis · British, male | 5.31 s | 1460 (-27.0) | -6.7 | 0 | 102 Hz | 2165 Hz |
+
+24 kHz mono 16-bit. Measured on the host with numpy, not with the app's `WavUtil` (pitch: median autocorrelation
+peak of voiced 40 ms frames, 60-400 Hz; centroid: mean over the same frames). No clipping, no silent file (10 to
+19 of about 110 50-ms windows are pauses), and the speakers are measurably different: the male voices sit at
+102-144 Hz, the female ones at 154-203 Hz, and the centroids spread from 1.6 to 3.0 kHz. Nobody has listened
+to them yet; that is the owner's call.
+
+The voices file is 5,755,904 B = 11 x 523,264 B (511 x 256 float32 per speaker).

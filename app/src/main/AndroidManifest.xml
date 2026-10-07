@@ -3,11 +3,17 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      No INTERNET and no ACCESS_NETWORK_STATE: the app is fully offline. The Stockfish net and the
-      narration voice ship inside the APK and are set up on the first analysis (see
-      FirstRunSetup), and nothing in the app opens a socket. ManifestPermissionsTest and the
-      instrumented NoNetworkPermissionTest keep it that way.
+      INTERNET and ACCESS_NETWORK_STATE (D2b, docs/MODEL_DOWNLOAD_DESIGN.md): the Stockfish net and the
+      narration voice are no longer in the APK. They are downloaded ONCE, from the app's GitHub release,
+      only after the user taps Download on the Setup screen (ACCESS_NETWORK_STATE: the "you're on mobile
+      data" check before it), and afterwards the app is fully offline; the only other network use is a
+      manual "Check for updates". No program code is ever downloaded. One class opens connections
+      (data/models/ModelDownloader.kt; NetworkCallSitesTest), https only. Cleartext is NOT enabled here:
+      only the debug build's network security config (src/debug) allows http, to the local test server.
+      ManifestPermissionsTest (host) and NetworkPermissionTest (instrumented) pin the exact set.
     -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!--
       Video export runs in VideoExportService, a started foreground service, so it survives the
@@ -131,6 +137,13 @@
             android:exported="false"
             android:foregroundServiceType="dataSync|mediaProcessing" />
 
+        <!-- D2c: the one-time model download (docs/MODEL_DOWNLOAD_DESIGN.md §1.5), started only from the user's tap
+             on the Setup screen. dataSync on every API level (FOREGROUND_SERVICE_DATA_SYNC above); onTimeout pauses it. -->
+        <service
+            android:name=".data.models.ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <!-- FileProvider for sharing generated game reports (PDF/PGN/PNG) out to other apps. -->
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -140,6 +153,26 @@
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- D2f: no network on the app's behalf at start. androidx.emoji2 (pulled in by Compose) registers an
+             EmojiCompat initializer that, on the first Activity, asks Google Play services' font provider for
+             "Noto Color Emoji Compat"; when GMS does not have it cached it DOWNLOADS it (about 3 MB from
+             fonts.gstatic.com) and charges the traffic to this app's uid. Seen on chess36 in D2f:
+             NoNetworkAfterSetupTest measured tx 30,966 B / rx ~3 MB for the app's uid while the FontLog said
+             "Download finished for https://fonts.gstatic.com/...". The app does not need downloadable emoji
+             (the system font renders what it shows), so the initializer is removed; the other startup
+             initializers stay. Pinned by ManifestPermissionsTest (source) and NetworkPermissionTest (installed).
+             MissingClass is ignored because androidx.startup is only on the runtime classpath (transitive). -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:ignore="MissingClass"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
         </provider>
 
     </application>

@@ -61,16 +61,24 @@ import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.a11y.asHeading
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import net.palaya.chessanalyzer.ui.model.AdvancedExpander
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.AppLanguage
 import net.palaya.chessanalyzer.ui.model.AppLocales
 import net.palaya.chessanalyzer.ui.model.EngineSettings
+import net.palaya.chessanalyzer.core.narration.VideoPace
+import net.palaya.chessanalyzer.ui.model.KOKORO_DEFAULT_SPEAKER_ID
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
+import net.palaya.chessanalyzer.video.KokoroVoices
+import net.palaya.chessanalyzer.video.VoiceSamplePlayer
 import net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings
 import net.palaya.chessanalyzer.ui.model.ReviewDetail
+import net.palaya.chessanalyzer.ui.model.UpdateBlock
+import net.palaya.chessanalyzer.ui.model.UpdateRowLine
 import net.palaya.chessanalyzer.ui.model.customDepthValue
 import net.palaya.chessanalyzer.ui.model.customThresholdValue
 import net.palaya.chessanalyzer.ui.model.formatStorageMegabytes
@@ -79,9 +87,12 @@ import net.palaya.chessanalyzer.ui.model.voiceSwitchIsOn
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 
 /**
- * Settings (UX step U9, `docs/MOBILE_UX_DESIGN.md` §3.2 and §6.7): four rows. **Your name**,
- * **Language** (opens a list), **Advanced** (collapsed; expands in place to four controls) and
- * **About Palaya Chess**. Nothing else.
+ * Settings (UX step U9, `docs/MOBILE_UX_DESIGN.md` §3.2 and §6.7): **Your name**, **Language**
+ * (opens a list), **Video** (V1 + V3: "Narrator voice" opens the voice picker, "Pace" is Relaxed /
+ * Normal / Brisk), **Advanced** (collapsed; expands in place to four controls), **Share diagnostic
+ * log** (F1, the owner's request: sends the on-device log through the share sheet), **About
+ * Palaya Chess** and, below it, **Check for updates** (D2e, docs/MODEL_DOWNLOAD_DESIGN.md §1.8: checks
+ * only when tapped; the result sheet is `UpdateSheet`).
  *
  * State is passed in and out through callbacks; [onSettingsChange] receives the whole
  * [EngineSettings] snapshot, so the two presets are just `copy(depth = ...)` and
@@ -100,6 +111,26 @@ fun SettingsScreen(
     /** Total bytes currently held in the persistent narration cache (`filesDir/narration/`). */
     narrationStorageBytes: Long = 0L,
     onClearNarrationStorage: () -> Unit = {},
+    /** F1: shares the on-device diagnostic log; null hides the row (previews). */
+    onShareDiagnosticLog: (() -> Unit)? = null,
+    /** D2e: what the "Check for updates" row's second line says; null hides the row (previews). */
+    updateRowLine: UpdateRowLine? = null,
+    /** When the last check finished, null for never. */
+    lastUpdateCheckMs: Long? = null,
+    /** Why the row is disabled (an analysis, an export, setup), or null. */
+    updateBlock: UpdateBlock? = null,
+    /** The last start rolled back an update that could not be used (shown once). */
+    updateRolledBackNotice: Boolean = false,
+    onCheckForUpdates: () -> Unit = {},
+    /** V1: whether the natural voice is installed (the picker explains it comes with setup otherwise). */
+    voiceInstalled: Boolean = true,
+    onNarratorSpeakerChange: (Int) -> Unit = {},
+    /** V1: the sample player's state, for the picker's Play / Stop / Preparing buttons. */
+    voiceSampleState: VoiceSamplePlayer.State = VoiceSamplePlayer.State.Idle,
+    onPlayVoiceSample: (Int) -> Unit = {},
+    onStopVoiceSample: () -> Unit = {},
+    /** The picker closed: stop the sample and free the voice engine. */
+    onVoicePickerClosed: () -> Unit = {},
 ) {
     var advanced by rememberSaveable(stateSaver = AdvancedExpanderSaver) { mutableStateOf(AdvancedExpander()) }
 
@@ -170,6 +201,22 @@ fun SettingsScreen(
                 }
             }
 
+            item(key = "video") {
+                SettingsCard {
+                    VideoSection(
+                        settings = settings,
+                        onSettingsChange = onSettingsChange,
+                        narrationVoiceSettings = narrationVoiceSettings,
+                        voiceInstalled = voiceInstalled,
+                        onNarratorSpeakerChange = onNarratorSpeakerChange,
+                        voiceSampleState = voiceSampleState,
+                        onPlayVoiceSample = onPlayVoiceSample,
+                        onStopVoiceSample = onStopVoiceSample,
+                        onVoicePickerClosed = onVoicePickerClosed,
+                    )
+                }
+            }
+
             item(key = "advanced") {
                 SettingsCard {
                     Column {
@@ -202,6 +249,19 @@ fun SettingsScreen(
                 }
             }
 
+            if (onShareDiagnosticLog != null) {
+                item(key = "diagnostic-log") {
+                    SettingsCard {
+                        SettingsRow(
+                            title = stringResource(R.string.settings_share_log),
+                            // Says where the log is before anyone taps: on this phone, until shared.
+                            supporting = stringResource(R.string.settings_share_log_help),
+                            onClick = onShareDiagnosticLog,
+                        )
+                    }
+                }
+            }
+
             item(key = "about") {
                 SettingsCard {
                     SettingsRow(
@@ -211,9 +271,49 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            if (updateRowLine != null) {
+                item(key = "updates") {
+                    SettingsCard {
+                        Column {
+                            val supporting = when (updateRowLine) {
+                                UpdateRowLine.CHECKING -> stringResource(R.string.update_row_checking)
+                                UpdateRowLine.INSTALLING -> stringResource(R.string.update_row_installing)
+                                UpdateRowLine.BLOCKED -> stringResource(updateBlockText(updateBlock ?: UpdateBlock.SETUP))
+                                UpdateRowLine.LAST_CHECKED -> stringResource(
+                                    R.string.update_row_supporting,
+                                    lastUpdateCheckMs?.let { formatLastChecked(it) } ?: stringResource(R.string.update_last_checked_never),
+                                )
+                            }
+                            SettingsRow(
+                                title = stringResource(R.string.update_row_title),
+                                supporting = supporting,
+                                // A running check or install can always be looked at; a new one waits for the block.
+                                enabled = updateBlock == null || updateRowLine == UpdateRowLine.CHECKING || updateRowLine == UpdateRowLine.INSTALLING,
+                                onClick = onCheckForUpdates,
+                            )
+                            if (updateRolledBackNotice) {
+                                Text(
+                                    text = stringResource(R.string.update_rolled_back),
+                                    style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                                        .semantics { liveRegion = LiveRegionMode.Polite },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
+
+/** "7 Oct 2026, 14:05" in the user's locale. */
+private fun formatLastChecked(ms: Long): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(ms))
 
 /** Survives rotation and process death: collapsed by default, remembered as one boolean. */
 private val AdvancedExpanderSaver = Saver<AdvancedExpander, Boolean>(
@@ -353,6 +453,237 @@ private fun LanguageRow(selected: AppLanguage, onLanguageChange: (AppLanguage) -
                 }
             },
         )
+    }
+}
+
+/**
+ * V1 + V3: the Video section. "Narrator voice" opens the picker; "Pace" is Relaxed / Normal / Brisk
+ * (ANALYSIS_SPEC 9.8), and goes through [onSettingsChange] like the other presets.
+ */
+@Composable
+private fun VideoSection(
+    settings: EngineSettings,
+    onSettingsChange: (EngineSettings) -> Unit,
+    narrationVoiceSettings: NarrationVoiceSettings,
+    voiceInstalled: Boolean,
+    onNarratorSpeakerChange: (Int) -> Unit,
+    voiceSampleState: VoiceSamplePlayer.State,
+    onPlayVoiceSample: (Int) -> Unit,
+    onStopVoiceSample: () -> Unit,
+    onVoicePickerClosed: () -> Unit,
+) {
+    var pickerOpen by rememberSaveable { mutableStateOf(false) }
+    Column {
+        Text(
+            text = stringResource(R.string.settings_video_header),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+                .asHeading(),
+        )
+        val chosen = voiceLabel(narrationVoiceSettings.speakerId)
+        SettingsRow(
+            title = stringResource(R.string.settings_voice_row),
+            supporting = when {
+                narrationVoiceSettings.provider == NarrationProviderChoice.DEVICE -> stringResource(R.string.settings_voice_row_device)
+                !voiceInstalled -> stringResource(R.string.settings_voice_row_not_installed, chosen)
+                else -> chosen
+            },
+            onClick = { pickerOpen = true },
+        )
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)) {
+            PresetControl(
+                title = stringResource(R.string.settings_pace),
+                help = stringResource(R.string.settings_pace_help),
+                options = listOf(
+                    VideoPace.RELAXED to stringResource(R.string.settings_pace_relaxed),
+                    VideoPace.NORMAL to stringResource(R.string.settings_pace_normal),
+                    VideoPace.BRISK to stringResource(R.string.settings_pace_brisk),
+                ),
+                selected = settings.videoPace,
+                customLabel = null,
+                onSelect = { onSettingsChange(settings.copy(videoPace = it)) },
+            )
+        }
+    }
+    if (pickerOpen) {
+        val close = {
+            pickerOpen = false
+            onVoicePickerClosed()
+        }
+        VoicePickerDialog(
+            selected = narrationVoiceSettings.speakerId,
+            voiceInstalled = voiceInstalled,
+            deviceVoiceOn = narrationVoiceSettings.provider == NarrationProviderChoice.DEVICE,
+            sampleState = voiceSampleState,
+            onSelect = onNarratorSpeakerChange,
+            onPlay = onPlayVoiceSample,
+            onStop = onStopVoiceSample,
+            onDismiss = close,
+        )
+    }
+}
+
+/** "Bella · American, female": the name (the blend has none of its own), the accent and the voice. */
+@Composable
+private fun voiceLabel(sid: Int): String {
+    val speaker = KokoroVoices.speaker(sid) ?: KokoroVoices.SPEAKERS[KOKORO_DEFAULT_SPEAKER_ID]
+    return stringResource(
+        R.string.voice_label,
+        speaker.displayName ?: stringResource(R.string.voice_name_blend),
+        stringResource(
+            when (speaker.accent) {
+                KokoroVoices.Accent.AMERICAN -> R.string.voice_accent_american
+                KokoroVoices.Accent.BRITISH -> R.string.voice_accent_british
+            },
+        ),
+        stringResource(
+            when (speaker.gender) {
+                KokoroVoices.Gender.FEMALE -> R.string.voice_gender_female
+                KokoroVoices.Gender.MALE -> R.string.voice_gender_male
+            },
+        ),
+    )
+}
+
+/**
+ * The narrator voice picker (V1). Follows the pattern of chess.com's coach picker (reference only):
+ * one list, each entry its name and a short descriptor, a way to hear it before choosing, the current
+ * one marked; tapping an entry chooses it at once and the list stays open, so several can be compared.
+ * Our own words and no art. One sample plays at a time (the player stops the previous one).
+ */
+@Composable
+private fun VoicePickerDialog(
+    selected: Int,
+    voiceInstalled: Boolean,
+    deviceVoiceOn: Boolean,
+    sampleState: VoiceSamplePlayer.State,
+    onSelect: (Int) -> Unit,
+    onPlay: (Int) -> Unit,
+    onStop: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.voice_picker_title)) },
+        text = {
+            LazyColumn {
+                item(key = "help") {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                        Text(
+                            text = stringResource(R.string.voice_picker_help),
+                            style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!voiceInstalled) {
+                            Text(
+                                text = stringResource(R.string.voice_picker_not_installed),
+                                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else if (deviceVoiceOn) {
+                            Text(
+                                text = stringResource(R.string.voice_picker_device_on),
+                                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+                for (sid in KokoroVoices.PICKER_ORDER) {
+                    item(key = "voice-$sid") {
+                        VoicePickerRow(
+                            sid = sid,
+                            selected = sid == selected,
+                            canPlay = voiceInstalled,
+                            sampleState = sampleState,
+                            onSelect = { onSelect(sid) },
+                            onPlay = { onPlay(sid) },
+                            onStop = onStop,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_picker_done)) }
+        },
+    )
+}
+
+@Composable
+private fun VoicePickerRow(
+    sid: Int,
+    selected: Boolean,
+    canPlay: Boolean,
+    sampleState: VoiceSamplePlayer.State,
+    onSelect: () -> Unit,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val label = voiceLabel(sid)
+    val isDefault = sid == KOKORO_DEFAULT_SPEAKER_ID
+    val preparing = sampleState is VoiceSamplePlayer.State.Preparing && sampleState.sid == sid
+    val playing = sampleState is VoiceSamplePlayer.State.Playing && sampleState.sid == sid
+    val failed = sampleState is VoiceSamplePlayer.State.Failed && sampleState.sid == sid
+    // At a large font the name and the button do not fit side by side: the button goes under the name.
+    val stacked = LocalDensity.current.fontScale >= LARGE_FONT_SCALE
+    val selectRow: @Composable (Modifier) -> Unit = { mod ->
+        Row(
+            modifier = mod
+                .heightIn(min = 48.dp)
+                .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = selected, onClick = null)
+            Column(modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp)) {
+                Text(text = label, style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content))
+                if (isDefault) {
+                    Text(
+                        text = stringResource(R.string.voice_default_tag),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                if (failed) {
+                    Text(
+                        text = stringResource(R.string.voice_sample_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+            }
+        }
+    }
+    val button: @Composable () -> Unit = {
+        val cd = stringResource(if (playing) R.string.cd_voice_sample_stop else R.string.cd_voice_sample_play, label)
+        TextButton(
+            onClick = { if (playing || preparing) onStop() else onPlay() },
+            enabled = canPlay,
+            modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = cd },
+        ) {
+            Text(
+                stringResource(
+                    when {
+                        preparing -> R.string.voice_sample_preparing
+                        playing -> R.string.voice_sample_stop
+                        else -> R.string.voice_sample_play
+                    },
+                ),
+            )
+        }
+    }
+    if (stacked) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            selectRow(Modifier.fillMaxWidth())
+            Row(modifier = Modifier.padding(start = 36.dp)) { button() }
+        }
+    } else {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            selectRow(Modifier.weight(1f))
+            button()
+        }
     }
 }
 

@@ -149,6 +149,11 @@ fun VideoScreen(
     onBack: () -> Unit = {},
     /** Non-null only when the user has a non-device narration voice selected and installed. */
     narrationProvider: NarrationVoiceProvider? = null,
+    /**
+     * D2c: non-null while the neural voice is chosen but not installed yet (setup unfinished). The phone's
+     * voice narrates meanwhile (the existing fallback); a one-line notice says so, with "Finish setup".
+     */
+    onFinishSetup: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -355,6 +360,9 @@ fun VideoScreen(
             }
             // Everything under (or, in landscape, beside) the picture.
             val controls: @Composable () -> Unit = {
+                if (onFinishSetup != null) {
+                    VoiceNotInstalledNotice(onFinishSetup)
+                }
                 if (!playerState.narrationAvailable) {
                     Text(
                         text = stringResource(R.string.video_narration_unavailable),
@@ -445,6 +453,25 @@ fun VideoScreen(
         )
     }
 
+}
+
+/** "Narrated with the phone's voice until setup is finished." + Finish setup; wraps at a large font. */
+@Composable
+private fun VoiceNotInstalledNotice(onFinishSetup: () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.video_voice_not_installed),
+            style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 8.dp).align(Alignment.CenterVertically),
+        )
+        TextButton(onClick = onFinishSetup, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.video_finish_setup))
+        }
+    }
 }
 
 /**

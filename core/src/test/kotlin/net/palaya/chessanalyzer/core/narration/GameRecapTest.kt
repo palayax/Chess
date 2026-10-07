@@ -155,7 +155,7 @@ class GameRecapTest {
             assertNotNull(script.recap)
             assertEquals(
                 "$name: the budgeted length is the segments' alone",
-                script.segments.sumOf { it.estimatedSpeechMs + it.holdAfterMs }, script.totalEstimatedMs
+                script.segments.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs }, script.totalEstimatedMs
             )
             assertEquals("$name: segment indexes run 0..n-1 with no recap among them", script.segments.indices.toList(), script.segments.map { it.index })
         }

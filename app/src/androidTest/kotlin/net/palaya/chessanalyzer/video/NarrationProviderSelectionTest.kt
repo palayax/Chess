@@ -35,7 +35,7 @@ class NarrationProviderSelectionTest {
     }
 
     @Test
-    fun theDefaultSettingsSelectTheBundledVoice() {
+    fun theDefaultSettingsSelectTheKokoroVoice() {
         assertEquals(
             NarrationProviderSelection.Neural(NeuralVoiceTier.KOKORO),
             selectNarrationProvider(NarrationVoiceSettings(), all),

@@ -5,7 +5,6 @@ import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.data.AnalysisService
-import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -22,9 +21,9 @@ import org.junit.runner.RunWith
  * the engine loop, classification, tactics and the report all work together against a real game;
  * driving the same thing through the SAF picker would test Android's file picker, not this app.
  *
- * Nothing is seeded and nothing is skipped: the Stockfish net and the Kokoro voice are bundled in
- * the APK, and the first analysis of a fresh install sets them up itself (`FirstRunSetup`), exactly
- * as a user's first launch does. If the bundled files were missing or damaged this test fails.
+ * Nothing is skipped: the Stockfish net and the Kokoro voice are installed from the test APK's seed
+ * assets ([TestApp.ensureSetUp], the same store tails the first-run download uses; seeded from D2d on).
+ * If they were missing or damaged this test fails.
  */
 @RunWith(AndroidJUnit4::class)
 class EndToEndAnalysisTest {
@@ -54,9 +53,9 @@ class EndToEndAnalysisTest {
         val app = TestApp.app
         val service = TestApp.analysisService()
 
+        TestApp.ensureSetUp()
         var lastMove = 0
         var sawAnalyzingPhase = false
-        var lastSetupFraction = -1f
 
         val started = System.currentTimeMillis()
         val outcome = service.analyze(
@@ -66,17 +65,12 @@ class EndToEndAnalysisTest {
             settings = EngineSettings(depth = 12, multiPv = 3, username = "MorphyFan1857"),
             onProgress = { p ->
                 if (p.currentMoveIndex > 0) { lastMove = p.currentMoveIndex; sawAnalyzingPhase = true }
-                if (p.phase == AnalysisPhase.FIRST_RUN_SETUP) {
-                    assertTrue("setup progress must be monotonic", p.fractionComplete >= lastSetupFraction)
-                    lastSetupFraction = p.fractionComplete
-                }
             },
         )
         val elapsedMs = System.currentTimeMillis() - started
 
-        android.util.Log.i("E2E", "firstRunSetupReported=${lastSetupFraction >= 0f} (false when an earlier test already set up)")
-        assertTrue("the net must be installed in filesDir after an analysis", app.engineController.isNetPresent())
-        assertTrue("the voice must be installed after an analysis (setup runs before it)", app.voiceInstaller.isInstalled())
+        assertTrue("the net must be installed under filesDir/nets", app.engineController.isNetPresent())
+        assertTrue("the voice must be installed", app.voiceStore.isInstalled())
         assertTrue(
             "analysis did not succeed: $outcome",
             outcome is AnalysisService.Outcome.Success

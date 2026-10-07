@@ -26,8 +26,8 @@ enum class NarrationProviderChoice {
 
 /**
  * The on-device neural voice [NarrationProviderChoice.NEURAL] uses. It runs fully offline via
- * sherpa-onnx (Apache 2.0) from a model bundled in the APK; see
- * [net.palaya.chessanalyzer.video.BundledVoiceInstaller] for how it reaches app storage and
+ * sherpa-onnx (Apache 2.0) from a model downloaded once on first run; see
+ * [net.palaya.chessanalyzer.video.VoiceStore] for how it reaches app storage and
  * [net.palaya.chessanalyzer.video.NeuralTtsProvider] for how it is turned into audio.
  *
  * Kokoro is the only tier. Piper, the smaller voice that existed for the metered-network fallback,
@@ -101,7 +101,7 @@ const val KOKORO_DEFAULT_SPEAKER_ID: Int = 1
  * lives in plain DataStore (see [net.palaya.chessanalyzer.data.NarrationSettingsRepository]).
  *
  * Whether the voice is installed is deliberately NOT a field here: it is runtime storage state,
- * re-derived from [net.palaya.chessanalyzer.video.BundledVoiceInstaller], not a persisted preference.
+ * re-derived from [net.palaya.chessanalyzer.video.VoiceStore], not a persisted preference.
  */
 data class NarrationVoiceSettings(
     val provider: NarrationProviderChoice = NarrationProviderChoice.NEURAL,
@@ -113,5 +113,13 @@ data class NarrationVoiceSettings(
      * this when both values are reachable defaults of an older build.
      */
     val providerExplicitlyChosen: Boolean = false,
+    /**
+     * Which Kokoro speaker narrates (V1, Settings, Video, "Narrator voice"): a sid of
+     * [net.palaya.chessanalyzer.video.KokoroVoices.SPEAKERS]. Defaults to [KOKORO_DEFAULT_SPEAKER_ID]; an
+     * unknown stored value reads as the default. Used by the in-app player and the MP4 alike, and part of
+     * the narration cache key ([net.palaya.chessanalyzer.video.NeuralTtsProvider.cacheFingerprint]), so a
+     * switch never plays another speaker's cached audio. The update trial (D2e) keeps using the default.
+     */
+    val speakerId: Int = KOKORO_DEFAULT_SPEAKER_ID,
 )
 

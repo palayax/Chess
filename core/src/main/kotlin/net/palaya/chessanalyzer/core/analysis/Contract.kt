@@ -33,12 +33,23 @@ data class EngineLineInput(
     val pvUci: List<String>
 )
 
-/** Everything the engine had to say about one position. */
+/**
+ * Everything the engine had to say about one position.
+ *
+ * [depth] is the depth every line in [lines] was searched to (one depth for all of them, spec
+ * §8.2). [requestedDepth] is the depth the analysis asked for, or null when unknown (evals built
+ * by hand, caches written before F1). A position whose search was stopped by the node or time
+ * budget before reaching it is [isCapped] (spec §8.1).
+ */
 data class PositionEval(
     val fen: String,
     val lines: List<EngineLineInput>,
-    val depth: Int
+    val depth: Int,
+    val requestedDepth: Int? = null,
 ) {
+    /** True when the budget stopped this position's search below [requestedDepth]. */
+    val isCapped: Boolean get() = requestedDepth != null && depth < requestedDepth
+
     val best: EngineLineInput? get() = lines.minByOrNull { it.multiPv }
     val secondBest: EngineLineInput? get() = lines.filter { it.multiPv == 2 }.minByOrNull { it.multiPv }
 }

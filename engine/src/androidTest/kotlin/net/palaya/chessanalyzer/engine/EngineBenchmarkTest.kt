@@ -18,6 +18,15 @@ import kotlin.system.measureTimeMillis
  *
  * Results are logged under the tag "EngineBench"; read them with:
  *     adb logcat -d -s EngineBench
+ *
+ * **Depth 18 runs under the production Deep budget** (D2d). Since F1 the app never sends a bare
+ * `go depth 18`: every position is `go depth 18 nodes 45000000 movetime 270000` (`SearchBudget.DEEP` in
+ * `:app`, docs/ANALYSIS_SPEC.md §8.1; `:engine` cannot import it, so the two numbers are restated in
+ * [DEEP_NODES] / [DEEP_MOVETIME_MS] and must follow it). The old unbounded search measured a behaviour the
+ * app no longer has, and its 900 s per-position timeout was hit once on a loaded host (F1, chess36). With
+ * the budget the search stops by itself, so the per-position timeout is the movetime cap plus a margin
+ * for the engine's own wind-down, and the test cannot hang. It still logs total/mean/worst time, plus how
+ * many positions the budget capped (each capped position also reports the depth it reached).
  */
 @RunWith(AndroidJUnit4::class)
 class EngineBenchmarkTest {
@@ -31,7 +40,7 @@ class EngineBenchmarkTest {
         "b3b8", "d7b8", "d1d8"
     )
 
-    private fun benchmarkAtDepth(depth: Int): Unit = runBlocking {
+    private fun benchmarkAtDepth(depth: Int, nodes: Long? = null, movetimeMs: Long? = null): Unit = runBlocking {
         val engine = StockfishEngine()
         try {
             engine.start()
@@ -41,13 +50,21 @@ class EngineBenchmarkTest {
             engine.setOption("Hash", "96")
             engine.newGame()
 
+            // Unbudgeted (depth 12, seconds per position): the old generous cap. Budgeted: the
+            // movetime cap plus a minute for the stop to land and the last batch to be read.
+            val perPositionTimeoutMs = movetimeMs?.let { it + 60_000 } ?: 900_000L
             val perPosition = mutableListOf<Long>()
+            val capped = mutableListOf<String>()
             val total = measureTimeMillis {
                 for (i in 0..moves.size) {
                     val played = moves.take(i)
                     perPosition += measureTimeMillis {
                         engine.setPosition(fen = null, moves = played)
-                        withTimeout(900_000) { engine.analyze(multiPv = 3, depth = depth) }
+                        val r = withTimeout(perPositionTimeoutMs) {
+                            engine.analyze(multiPv = 3, depth = depth, movetimeMs = movetimeMs, nodes = nodes)
+                        }
+                        check(r.isTerminal || r.lines.isNotEmpty()) { "no lines at ply $i" }
+                        if (r.stoppedEarly) capped += "ply $i: depth ${r.depth}, ${r.nodes} nodes, ${r.timeMs} ms"
                     }
                 }
             }
@@ -57,8 +74,9 @@ class EngineBenchmarkTest {
             val worst = perPosition.max()
             Log.i(
                 "EngineBench",
-                "depth=$depth positions=$n totalMs=$total meanMs=${"%.0f".format(mean)} " +
-                    "worstMs=$worst totalSec=${"%.1f".format(total / 1000.0)}"
+                "depth=$depth nodes=${nodes ?: "-"} movetimeMs=${movetimeMs ?: "-"} positions=$n totalMs=$total " +
+                    "meanMs=${"%.0f".format(mean)} worstMs=$worst totalSec=${"%.1f".format(total / 1000.0)} " +
+                    "capped=${capped.size}" + (if (capped.isEmpty()) "" else " [${capped.joinToString("; ")}]")
             )
         } finally {
             engine.shutdown()
@@ -67,5 +85,14 @@ class EngineBenchmarkTest {
 
     @Test fun benchmarkDepth12(): Unit = benchmarkAtDepth(12)
 
-    @Test fun benchmarkDepth18(): Unit = benchmarkAtDepth(18)
+    /** Deep, exactly as the app runs it since F1: depth 18 under the Deep node budget and time cap. */
+    @Test fun benchmarkDepth18(): Unit = benchmarkAtDepth(18, nodes = DEEP_NODES, movetimeMs = DEEP_MOVETIME_MS)
+
+    private companion object {
+        /** `SearchBudget.DEEP.nodes` in `:app` (docs/ANALYSIS_SPEC.md §8.1). */
+        const val DEEP_NODES = 45_000_000L
+
+        /** `SearchBudget.DEEP.movetimeMs` in `:app`: a safety net for slow phones, not the real limit. */
+        const val DEEP_MOVETIME_MS = 270_000L
+    }
 }

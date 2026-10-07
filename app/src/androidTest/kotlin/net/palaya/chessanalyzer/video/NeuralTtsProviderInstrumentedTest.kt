@@ -47,12 +47,12 @@ class NeuralTtsProviderInstrumentedTest {
      *    is the one that ran.
      */
     @Test
-    fun kokoroInstalledFromTheApkSynthesizesRealNonSilentAudio(): Unit = runBlocking {
+    fun kokoroInstalledThroughVoiceStoreSynthesizesRealNonSilentAudio(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        // Install from the APK exactly as a first launch does (the app's own installer, which
-        // verifies the pinned hash and extracts atomically). Nothing is staged on the device.
+        // Install through the app's own VoiceStore (it verifies the pinned hash and extracts
+        // atomically), from the test APK's seed copy (D2d) instead of a download.
         val modelDir = TestApp.installedVoiceDir()
-        val installer = TestApp.app.voiceInstaller
+        val installer = TestApp.app.voiceStore
         assertTrue("the installer must report the voice installed", installer.isInstalled())
         // The extracted model is ~150 MB; anything under 100 MB means the archive did not unpack
         // fully, which would otherwise surface as a confusing load failure.

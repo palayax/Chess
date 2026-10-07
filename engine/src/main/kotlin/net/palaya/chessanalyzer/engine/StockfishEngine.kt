@@ -111,7 +111,7 @@ class StockfishEngine {
     }
 
     /**
-     * Points the engine at a NNUE net file (see [BundledNetProvider]),
+     * Points the engine at a NNUE net file (see [NetStore], which only hands out verified ones),
      * via the standard "EvalFile" UCI option.
      *
      * **This guard is not optional.** We build Stockfish with `NNUE_EMBEDDING_OFF`, so it has no
@@ -177,9 +177,20 @@ class StockfishEngine {
      * Runs a search on the current position (set via [setPosition]) and suspends until the
      * engine's "bestmove" line arrives.
      *
-     * At least one of [depth] or [movetimeMs] must be given. When both are given, both are
-     * passed to the engine ("go depth D movetime T"), so the search stops at whichever limit
-     * is hit first.
+     * At least one of [depth] or [movetimeMs] must be given. Every limit given is passed to the
+     * engine ("go depth D nodes N movetime T"), so the search stops at whichever is hit first.
+     * [nodes] counts all threads together (Stockfish's own rule), so it is the same budget on any
+     * device; [movetimeMs] is wall-clock and only a last resort for very slow devices.
+     *
+     * The returned lines all come from one depth (see [ConsistentLines]): when a node or time
+     * limit stops the search mid-iteration, Stockfish's last printed batch mixes depths and is not
+     * used. [AnalysisResult.stoppedEarly] tells the caller the requested depth was not reached.
+     *
+     * [onProgress], when given, is called on this coroutine (inside the engine's command lock, so
+     * it must be quick and must not call back into this engine) each time an exact "info" line
+     * arrives, with the deepest exact depth so far and the engine's node and time counters. It is
+     * a plain Kotlin callback on the output already being read here: nothing crosses JNI. If it
+     * throws, the search is stopped and drained exactly as on cancellation, so the pipe stays clean.
      *
      * Cancellable: if the calling coroutine is cancelled while a search is in flight, a "stop"
      * is sent to the engine and its (now-unwanted) bestmove is drained internally, so the pipe
@@ -190,9 +201,13 @@ class StockfishEngine {
         multiPv: Int = 1,
         depth: Int? = null,
         movetimeMs: Long? = null,
+        nodes: Long? = null,
+        onProgress: ((SearchProgress) -> Unit)? = null,
     ): AnalysisResult {
         require(depth != null || movetimeMs != null) { "Provide depth and/or movetimeMs" }
         require(multiPv >= 1) { "multiPv must be >= 1" }
+        require(nodes == null || nodes > 0) { "nodes must be > 0" }
+        require(movetimeMs == null || movetimeMs > 0) { "movetimeMs must be > 0" }
         // Searching without a loaded net is the other route into Stockfish's fatal exit path.
         // Fail as an ordinary Kotlin exception the caller can show the user.
         if (evalFilePath == null) {
@@ -212,30 +227,51 @@ class StockfishEngine {
             val goCmd = buildString {
                 append("go")
                 depth?.let { append(" depth ").append(it) }
+                nodes?.let { append(" nodes ").append(it) }
                 movetimeMs?.let { append(" movetime ").append(it) }
             }
 
-            val latestByPv = LinkedHashMap<Int, EngineLine>()
+            val infos = ArrayList<EngineLine>()
+            var maxNodes = 0L
+            var maxTimeMs = 0L
+            var progressDepth = 0
             var result: AnalysisResult? = null
             NativeBridge.nativeWriteLine(goCmd)
             try {
                 while (result == null) {
                     val line = engineOutput.receive()
                     UciLineParser.parseBestMove(line)?.let { (best, ponder) ->
-                        val orderedLines = latestByPv.values.sortedBy { it.multiPv }
-                        val maxDepth = orderedLines.maxOfOrNull { it.depth } ?: 0
-                        result = AnalysisResult(orderedLines, best, ponder, maxDepth)
+                        // A limit was hit when the engine's own counters reached it: then its last
+                        // batch was printed at the stop and is not trusted (ConsistentLines).
+                        val limitHit = (nodes != null && maxNodes >= nodes) ||
+                            (movetimeMs != null && maxTimeMs >= movetimeMs)
+                        val chosen = ConsistentLines.select(infos, limitHit)
+                        result = AnalysisResult(
+                            lines = chosen.lines,
+                            bestMoveUci = best,
+                            ponderUci = ponder,
+                            depth = chosen.depth,
+                            nodes = maxNodes,
+                            timeMs = maxTimeMs,
+                            requestedDepth = depth,
+                        )
                     }
                     if (result == null) {
-                        UciLineParser.parseInfo(line)?.let { info -> latestByPv[info.multiPv] = info }
+                        UciLineParser.parseInfo(line)?.let { info ->
+                            infos += info
+                            info.nodes?.let { if (it > maxNodes) maxNodes = it }
+                            info.timeMs?.let { if (it > maxTimeMs) maxTimeMs = it }
+                            if (!info.bound && info.depth > progressDepth) progressDepth = info.depth
+                            onProgress?.invoke(SearchProgress(progressDepth, info.nodes, info.timeMs))
+                        }
                     }
                 }
                 result!!
             } finally {
                 if (result == null) {
-                    // We got here via cancellation (or an engine crash closing the channel)
-                    // before a bestmove arrived. Ask the engine to stop and drain its
-                    // response so a stray "bestmove" doesn't corrupt the next command.
+                    // We got here via cancellation, a throwing progress callback, or an engine
+                    // crash closing the channel, before a bestmove arrived. Ask the engine to stop
+                    // and drain its response so a stray "bestmove" doesn't corrupt the next command.
                     withContext(NonCancellable) {
                         NativeBridge.nativeWriteLine("stop")
                         while (true) {

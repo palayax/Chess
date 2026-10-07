@@ -84,7 +84,10 @@ class VideoScriptGenerator(
                 script = builder.build()
             }
         }
-        return script
+        // ANALYSIS_SPEC 9.8: the pace is laid over the finished story, after the budget has decided what
+        // is told, so every pace tells the same story in the same words (and plays the same cached
+        // narration); only the silent board time around the key moves differs.
+        return builder.paced(script)
     }
 
     companion object {
@@ -127,6 +130,15 @@ class VideoScriptGenerator(
         const val BUDGET_RAMP_PER_MOVE_MS = 23_000L
         const val BUDGET_RAMP_OFFSET_MS = 32_000L
         const val BUDGET_MIN_MS = 20_000L
+
+        /**
+         * The most [VideoPace] time a video of [fullMoves] moves may add on top of its story
+         * (ANALYSIS_SPEC 9.8): [PACING_CAP_FRACTION] of the §9.7 budget. The five recorded games use
+         * 2.5 to 11 percent of their budget at RELAXED, so the cap only binds on an unusual game.
+         */
+        fun pacingCapMs(fullMoves: Int): Long = (budgetMs(fullMoves) * PACING_CAP_FRACTION).toLong()
+
+        const val PACING_CAP_FRACTION = 0.15
 
         /** The structure trims (lessons, ratings, opening summary), one level per round; see [ScriptBuilder]. */
         private const val MAX_STRUCTURE_TRIM = 5
@@ -625,6 +637,151 @@ private class ScriptBuilder(
         val mate = a.mateInBefore ?: return false
         return mate != 0 && (mate > 0) == (a.color == Color.WHITE)
     }
+
+    // -----------------------------------------------------------------------
+    // The pace (ANALYSIS_SPEC 9.8, V3)
+    // -----------------------------------------------------------------------
+
+    /**
+     * [script] with [NarrationOptions.pace] laid over it: silent board time around the key moves, and
+     * nothing else. Same segments, same indices, same words; only [ScriptSegment.leadIn] and
+     * [ScriptSegment.holdAfterMs] change, and [VideoScript.pacingMs] says by how much in total.
+     *
+     *  - A **key move** (see [isKeyMoveBeat]) gets a lead-in: the one or two game moves the story
+     *    skipped since the board last showed a game position are played first, at the line rate, and
+     *    then the position before the move is held still with its two squares lit for
+     *    [VideoPace.keyLeadInMs], unless the beat before is already a still picture of exactly that
+     *    position (the "back to the game" beat after a detour, a puzzle), which is that pause. After
+     *    its narration the result is held for [VideoPace.keyHoldAfterMs], unless the next beat is
+     *    another key move starting from it (its own pause shows that position).
+     *  - Every move of a played-out line (a detour's hypothetical moves) is on screen for at least
+     *    [VideoPace.lineMoveMinMs], and the line's final position for [VideoPace.lineFinalHoldMs] more.
+     */
+    fun paced(script: VideoScript): VideoScript {
+        val times = PaceTimes.of(options.pace)
+        val full = paced(script, times)
+        // The pace sits outside the story budget, but not without limit (spec 9.8): a game with an
+        // unusual number of key moves has every pace time scaled down until it fits the cap.
+        val cap = VideoScriptGenerator.pacingCapMs((annotations.size + 1) / 2)
+        if (full.pacingMs <= cap) return full
+        return paced(script, times.scaled(cap.toDouble() / full.pacingMs))
+    }
+
+    private fun paced(script: VideoScript, pace: PaceTimes): VideoScript {
+        val segs = script.segments
+        val out = ArrayList<ScriptSegment>(segs.size)
+        var pacing = 0L
+        for ((i, s) in segs.withIndex()) {
+            var seg = s
+            val d = s.board
+            if (d is BoardDirective.PlayMove && isKeyMoveBeat(s)) {
+                val a = annotations[s.ply!! - 1]
+                val prev = segs.getOrNull(i - 1)
+                val approach = approachPlies(a.ply, prev?.let { endBoard(it.board) })
+                val prevIsStillHere = prev != null && approach.isEmpty() &&
+                    (prev.board is BoardDirective.Annotate || prev.board is BoardDirective.Hold) &&
+                    endBoard(prev.board)?.let { boardKey(it) } == boardKey(a.fenBefore)
+                val pause = if (prevIsStillHere) 0L else pace.keyLeadInMs
+                if (approach.isNotEmpty() || pause > 0) {
+                    seg = seg.copy(
+                        leadIn = SegmentLeadIn(
+                            fen = approach.firstOrNull()?.fenBefore ?: a.fenBefore,
+                            approachUci = approach.map { it.uci },
+                            approachSan = approach.map { it.san },
+                            approachCaptions = approach.map { caption(it) },
+                            stepMs = if (approach.isEmpty()) 0L else pace.lineMoveMinMs,
+                            pauseMs = pause,
+                            highlightSquares = if (a.uci.length >= 4) listOf(a.uci.substring(0, 2), a.uci.substring(2, 4)) else emptyList(),
+                            eval = evalBefore(a.ply)
+                        )
+                    )
+                    pacing += seg.leadInMs
+                }
+                val next = segs.getOrNull(i + 1)
+                val nextBoard = next?.board as? BoardDirective.PlayMove
+                val nextIsKeyFromHere = next != null && nextBoard != null && isKeyMoveBeat(next) &&
+                    boardKey(nextBoard.fen) == boardKey(a.fenAfter)
+                if (!nextIsKeyFromHere) {
+                    seg = seg.copy(holdAfterMs = seg.holdAfterMs + pace.keyHoldAfterMs)
+                    pacing += pace.keyHoldAfterMs
+                }
+            } else if (d is BoardDirective.PlayMove && s.kind == SegmentKind.MISSED_TACTIC && s.classification == null) {
+                // A move of a played-out line: never on screen for less than the line rate.
+                val onScreen = max(s.estimatedSpeechMs, ScriptTiming.MIN_SEGMENT_MS) + s.holdAfterMs + ScriptTiming.INTER_SEGMENT_GAP_MS
+                val extra = (pace.lineMoveMinMs - onScreen).coerceAtLeast(0L)
+                if (extra > 0) {
+                    seg = seg.copy(holdAfterMs = seg.holdAfterMs + extra)
+                    pacing += extra
+                }
+            } else if (s.kind == SegmentKind.MISSED_TACTIC && d is BoardDirective.Annotate && isAfterLineMove(segs, i)) {
+                // The line's final position (its payoff beat): held a little longer.
+                seg = seg.copy(holdAfterMs = seg.holdAfterMs + pace.lineFinalHoldMs)
+                pacing += pace.lineFinalHoldMs
+            }
+            out.add(seg)
+        }
+        return script.copy(
+            segments = out,
+            totalEstimatedMs = out.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs },
+            pacingMs = pacing
+        )
+    }
+
+    private fun isAfterLineMove(segs: List<ScriptSegment>, i: Int): Boolean {
+        val prev = segs.getOrNull(i - 1) ?: return false
+        return prev.kind == SegmentKind.MISSED_TACTIC && prev.board is BoardDirective.PlayMove
+    }
+
+    /**
+     * A beat that plays a real game move the review dwells on: the mate, a brilliant or great move, a
+     * found tactic told in its own beat, and any move whose tier is DWELL or FULL (an error played
+     * after its detour, a key move told in full). A routine BRIEF move is not one: the pace is for the
+     * moments the owner found too fast, not for every move.
+     */
+    private fun isKeyMoveBeat(s: ScriptSegment): Boolean {
+        val d = s.board as? BoardDirective.PlayMove ?: return false
+        val a = annotations.getOrNull((s.ply ?: return false) - 1) ?: return false
+        if (s.classification == null || d.uci != a.uci || d.fen != a.fenBefore) return false
+        return isMate(a) ||
+            a.classification == MoveClassification.BRILLIANT || a.classification == MoveClassification.GREAT ||
+            s.kind == SegmentKind.FOUND_TACTIC ||
+            (tiers[a.ply] ?: PacingTier.SKIP) >= PacingTier.DWELL
+    }
+
+    /**
+     * The game moves between the position the board shows ([shownFen], the end of the previous beat)
+     * and the position before [ply]: one or two plies the story skipped, which the lead-in plays so
+     * the board never jumps. Empty when the board is already there, when it shows no game position
+     * (a card, a detour's line) or when more plies are missing (a spoken "skip ahead" covers those).
+     */
+    private fun approachPlies(ply: Int, shownFen: String?): List<MoveAnnotation> {
+        val shown = shownFen?.let { boardKey(it) } ?: return emptyList()
+        if (shown == boardKey(annotations[ply - 1].fenBefore)) return emptyList()
+        for (missing in 1..SegmentLeadIn.MAX_APPROACH_PLIES) {
+            val first = ply - missing
+            if (first < 1) break
+            if (boardKey(annotations[first - 1].fenBefore) == shown) {
+                return (first until ply).map { annotations[it - 1] }
+            }
+        }
+        return emptyList()
+    }
+
+    /** The position a directive leaves on the board, or null for a card. */
+    private fun endBoard(d: BoardDirective): String? = when (d) {
+        is BoardDirective.PlayMove -> {
+            val p = safeFen(d.fen)
+            val m = SpokenChess.moveOrNull(p, d.uci)
+            if (m == null) d.fen else p.makeMove(m).toFen()
+        }
+        is BoardDirective.PlayLine -> null
+        is BoardDirective.Annotate -> d.fen
+        is BoardDirective.Hold -> d.fen
+        is BoardDirective.Card -> null
+    }
+
+    /** Pieces and side to move: two FENs of one position can differ in their move counters. */
+    private fun boardKey(fen: String): String = fen.split(' ').take(2).joinToString(" ")
 
     // -----------------------------------------------------------------------
     // The length budget (ANALYSIS_SPEC 9.7)

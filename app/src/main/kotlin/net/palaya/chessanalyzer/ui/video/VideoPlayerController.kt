@@ -287,6 +287,9 @@ class VideoPlayerController(
     private fun playOrSpeakCurrentIfNeeded() {
         val timed = timeline.segmentAt(positionMs) ?: return
         if (timed.segment.index == lastNarratedIndex) return
+        // ANALYSIS_SPEC 9.8: a key move's lead-in is silent (the board plays the skipped moves and pauses
+        // on the position); the voice starts with the move, at the same instant as in the exported MP4.
+        if (positionMs < timed.speechStartMs) return
         lastNarratedIndex = timed.segment.index
         releaseMediaPlayer()
         tts?.stop()

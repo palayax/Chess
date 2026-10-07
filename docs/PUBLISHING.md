@@ -1,7 +1,23 @@
 # PUBLISHING — what you must do before this app goes on Google Play
 
-This is not boilerplate. Two items here (GPL, and the APK-vs-AAB choice) genuinely
-affect whether and how you can list this app.
+This is not boilerplate. Several items here (GPL, the first-run download, the foreground-service and Data
+safety declarations) genuinely affect whether and how you can list this app. Rewritten in D2f for the
+downloading build; the owner's own to-do list is at the top of `HANDOFF.md`.
+
+## 0. Current facts (version 1.1, versionCode 2, D2f)
+
+| | |
+|---|---|
+| Package | `net.palaya.chessanalyzer` |
+| Version | versionName **1.1**, versionCode **2** (1.0 / 1 is the bundled R7 build in `dist/`, which updates in place to this one: same key, proven on chess36, RUN_LOG D2f) |
+| Target / min SDK | 36 / 26 |
+| What Play delivers | the App Bundle (`app-release.aab`), about **14.5 MB** to a 64-bit phone (§3) |
+| First run | the Setup screen; a tap on **Download** fetches the engine net (98,511,183 B) and the voice (`kokoro-int8-en-v0_19.tar.gz`, 102,543,452 B, unpacks to 158,269,440 B): **201 MB** from GitHub, about 400 MB free space at the peak, 257 MB on disk after |
+| Where from | `https://github.com/palayax/Chess/releases/download/models-2026.10/<file>` (the owner's repo, created 2026-10-07; §4c) |
+| Network | only after a tap: the setup download, and Settings > Check for updates (`models.json` + `.sig`, then a file only on "Download and install"). Nothing in the background, nothing uploaded |
+| Permissions | `INTERNET`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `POST_NOTIFICATIONS` (checked with aapt2 on the release APK, D2f) |
+| Foreground services | `ModelDownloadService` (dataSync), `VideoExportService` (mediaProcessing on Android 15+, dataSync on 10-14) |
+| Privacy policy | `docs/PRIVACY_POLICY.md`, to be hosted on palaya.net (not hosted yet) |
 
 ---
 
@@ -66,38 +82,32 @@ vocabulary and not protectable, but the specific badge *artwork* is — hence or
 
 ---
 
-## 3. APK vs AAB
+## 3. App Bundle, APKs and the Play declarations
 
-**Google Play takes an Android App Bundle (.aab)**; the APKs are for direct installs and for
-stores that accept APKs (F-Droid, Amazon Appstore, Samsung Galaxy Store, a download page).
+**Google Play takes an Android App Bundle (.aab)**; the APKs are for direct installs and for stores that
+accept APKs (F-Droid, Amazon Appstore, Samsung Galaxy Store, a download page).
 
-### The App Bundle (D1)
+### The App Bundle
 
 ```bash
 ./gradlew :app:bundleRelease    # -> app/build/outputs/bundle/release/app-release.aab (signed with the upload key)
 ```
 
-The build targets **API 36** (Android 16), which Play requires for new apps and updates from
-31 Aug 2026; R8 is on; every native library is 16 KB-aligned (see `CLAUDE.md`, build gotchas).
+Run it as its **own** Gradle invocation (not together with `assembleRelease`, see "APKs" below). The build
+targets **API 36** (Android 16), which Play requires for new apps and updates from 31 Aug 2026; R8 is on; every
+native library is 16 KB-aligned (`CLAUDE.md`, build gotchas).
 
-**What a phone downloads from Play** (bundletool 1.18.3 `get-size total`, which estimates the
-compressed download per device; measured on the D1 bundle):
+**What a phone downloads from Play** (bundletool 1.18.3 `get-size total`, the compressed download per
+device, API 36 spec, en-US, 420 dpi; D2f bundle, 68,714,862 B):
 
-| Device | With the two models (as built) | Without the two models |
+| Device | D2f (models downloaded on first run) | D1 (models inside) |
 |---|---|---|
-| arm64-v8a (practically every phone) | **196,058,239 B** (~196 MB) | **14,364,484 B** (~14 MB) |
-| x86_64 (emulators, a few Chromebooks) | 197,495,419 B | 15,801,664 B |
-| armeabi-v7a (old 32-bit phones) | 195,043,077 B | 13,349,322 B |
+| arm64-v8a (practically every phone) | **14,473,967 B** | 196,058,239 B |
+| x86_64 (emulators, a few Chromebooks) | 15,911,159 B | 197,495,419 B |
+| armeabi-v7a (old 32-bit phones) | 13,458,827 B | 195,043,077 B |
 
-"Without the two models" was measured on a throwaway copy of the bundle with the net and the voice
-removed (never kept in the build); the difference (~181.7 MB) is the two models compressed (the
-voice tar gzips to 102.6 MB, the net to 78.9 MB).
-
-**Size limit.** Play's limit for the compressed download of the base module is 200 MB. The bundle as
-built is **just under** it on every ABI (196-197.5 MB by bundletool's estimate), which is too close to
-rely on: Play's own compression is not the same as bundletool's, and any growth in the code or the
-libraries crosses it. The planned fix is to stop bundling the models (`docs/MODEL_DOWNLOAD_DESIGN.md`,
-D-track); then the per-device download is about **14 MB**.
+Play's limit for the compressed base module is 200 MB; the D2f bundle is far below it, so no asset packs are
+needed. The first-run download (201 MB) is not part of this: it comes from GitHub after a tap (§0).
 
 Reproduce the numbers:
 
@@ -118,90 +128,88 @@ Play re-signs what it delivers with an **app signing key** that Google holds. Op
 the app (it is the default, and required for App Bundles):
 
 - The existing keystore (`keystore/chessanalyzer-release.jks`, alias `chessanalyzer`, certificate SHA-256
-  below) becomes the **upload key**: it signs the `.aab` you upload, and Play checks that signature.
+  in §4) becomes the **upload key**: it signs the `.aab` you upload, and Play checks that signature.
 - Let Google generate the app signing key, **or** upload the existing key as the app signing key (Play
   Console offers "Export and upload a key from Java keystore" with its PEPK tool). Use the existing key
-  if the APKs already handed out by direct download must keep updating in place on the same phones:
-  Android only installs an update signed with the same key. If Google generates a new key, Play installs
-  and sideloaded APKs are different apps to Android (a user must uninstall one to install the other).
+  if the APKs already handed out by direct download (`PalayaChess-1.0-release.apk`, and the 1.1 APKs) must
+  keep updating in place on the same phones: Android only installs an update signed with the same key. If
+  Google generates a new key, Play installs and sideloaded APKs are different apps to Android (a user must
+  uninstall one to install the other, and loses the app's data).
 - If the upload key is ever lost, Play support can reset it; the app signing key stays with Google.
-- After the first upload, Play Console > App integrity shows the app signing certificate. That is the
-  fingerprint for anything that pins the app's signature.
+- After the first upload, Play Console > App integrity shows the app signing certificate.
 
-### Foreground-service declaration (Play Console > App content > Foreground service permissions)
+### Foreground-service declarations (Play Console > App content > Foreground service permissions)
 
-The app declares `FOREGROUND_SERVICE_MEDIA_PROCESSING` (used on Android 15+) and
-`FOREGROUND_SERVICE_DATA_SYNC` (used on Android 10-14, where mediaProcessing does not exist), both for one
-service, `VideoExportService`. Suggested text:
+The app declares `FOREGROUND_SERVICE_DATA_SYNC` and `FOREGROUND_SERVICE_MEDIA_PROCESSING`, for two services.
+Play asks, per type, what the task is, why it must not be interrupted, and for a short video. Suggested text:
 
-> **Media processing.** When the user taps "Save video", the app renders their game review into an MP4
-> video on the device (drawing the frames, synthesizing the narration with an on-device voice, encoding
-> and muxing the video). This takes several minutes and must continue if the user leaves the screen or
-> switches apps, so it runs in a foreground service with a visible progress notification and a Cancel
-> button. It starts only from that tap, never in the background, and stops as soon as the video is saved
-> or cancelled. On Android 10-14 the same service uses the dataSync type because mediaProcessing is not
-> available there. Nothing is uploaded or synced: the app has no network permission.
+> **Data sync: one-time setup download (`ModelDownloadService`).** On first launch the app shows a Setup
+> screen that states the size (about 210 MB) and downloads the chess engine's evaluation data and the
+> narration voice model only when the user taps "Download". The download takes several minutes and must
+> continue if the user leaves the screen or switches apps, so it runs as a foreground service with a progress
+> notification that has Pause and Cancel buttons. It never starts by itself and is never restarted by the
+> system (START_NOT_STICKY); it stops when the files are downloaded and verified, or when the user pauses or
+> cancels. The same type is used by the video export on Android 10-14 (below).
+>
+> **Media processing: video export (`VideoExportService`).** When the user taps "Save video", the app
+> renders their game review into an MP4 on the device (drawing the frames, synthesizing the narration with
+> an on-device voice, encoding and muxing). This takes several minutes and must continue if the user leaves
+> the screen, so it runs in a foreground service with a progress notification and a Cancel button. It starts
+> only from that tap and stops when the video is saved or cancelled. Nothing is uploaded. On Android 10-14
+> the service uses the dataSync type because mediaProcessing does not exist there.
 
-Video for the declaration: a screen recording of "Save video" with the notification shade pulled down.
+Videos for the declarations: (1) the Setup screen, the tap on Download, the notification shade with the
+progress notification and Pause/Cancel; (2) "Save video" with the notification shade pulled down. Both
+services implement `onTimeout` (Android 15's 6-hour limit): the download pauses, the export stops.
 
-F-Droid is worth considering given the GPL requirement — it is the natural home for a
-GPLv3 app and handles the source-offer obligation for you.
+### 3b. Device and Network Abuse policy: data, not code
+
+Play's Device and Network Abuse policy forbids an app to download executable code (dex, JAR, `.so`) from
+anywhere but Google Play. Palaya Chess downloads two **data files**:
+
+- `nn-1a298aa575a0.nnue`: the numeric weights of Stockfish's evaluation network, read by the Stockfish code
+  that ships in the app (`libstockfish.so`).
+- `kokoro-int8-en-v0_19.tar.gz`: an ONNX voice model, its voice embeddings, token table and espeak-ng
+  pronunciation data, read by sherpa-onnx/onnxruntime, which also ship in the app.
+
+All program code (dex, `libstockfish.so`, the sherpa-onnx and onnxruntime libraries) is in the bundle and is
+updated only through Play. A new engine is an app update: the app refuses any net whose NNUE version or
+architecture hash differs from the compiled engine's (`ModelCompatibility`, `NetStore.installVerified`), so a
+downloaded file can never change what code runs. First-run files are pinned by SHA-256 at build time; update
+files must also be listed in a manifest signed with the maintainers' P-256 key (§4b). This is the position to
+state if Play asks. (F-Droid, if the app goes there, may flag the remote download as an anti-feature.)
 
 ### APKs for direct installs
 
-`./gradlew :app:assembleRelease` writes per-ABI APKs and a universal one to
-`app/build/outputs/apk/release/` (sizes from the D1 build). Run it as its **own** Gradle invocation, not
-together with `bundleRelease`: with both in one command the ABI split is switched off (AGP 8.9 fails the
-bundle otherwise) and you get a single universal `app-release.apk`.
+`./gradlew :app:assembleRelease` writes per-ABI APKs and a universal one to `app/build/outputs/apk/release/`.
+Run it as its **own** Gradle invocation, not together with `bundleRelease`: with both in one command the ABI
+split is switched off (AGP 8.9 fails the bundle otherwise) and you get a single universal `app-release.apk`.
 
-| APK | Size | For |
+| APK (D2f, 1.1) | Size | For |
 |---|---|---|
-| `app-arm64-v8a-release.apk` | 292,485,879 B | practically every phone from the last ~8 years: **ship this one** |
-| `app-armeabi-v7a-release.apk` | 282,389,054 B | old 32-bit phones |
-| `app-x86_64-release.apk` | 296,743,865 B | emulators, some Chromebooks |
-| `app-universal-release.apk` | 353,729,432 B | any device (all three ABIs) |
+| `app-arm64-v8a-release.apk` | 35,866,501 B | practically every phone from the last ~8 years: **ship this one** |
+| `app-armeabi-v7a-release.apk` | 25,769,676 B | old 32-bit phones |
+| `app-x86_64-release.apk` | 40,124,486 B | emulators, some Chromebooks |
+| `app-universal-release.apk` | 97,110,046 B | any device (all three ABIs) |
 
-The R7 file in `dist/` (`PalayaChess-1.0-release.apk`, 364,733,235 B) is the pre-D1 universal APK
-(targetSdk 34, no R8); it is kept as it was.
+Copies in `dist/` (gitignored), with SHA-256s in RUN_LOG D2f: `PalayaChess-1.1-arm64-release.apk`,
+`PalayaChess-1.1-universal-release.apk`, `PalayaChess-1.1-release.aab`. `PalayaChess-1.0-release.apk`
+(364,733,235 B, the bundled R7 build) is kept; installing 1.1 over it keeps the user's games and the models it
+had already set up (no download).
 
-### APK size by design
-
-The net and the narration voice are bundled so the app works fully offline from the first launch
-(owner decision, Round 13: "a big APK is fine"). Measured on the R4a debug build:
-`app-debug.apk` is **371,058,258 bytes**; the signed release APK (R7, built) is **364,733,235 bytes** (about 348 MiB, 365 MB). The biggest parts:
-
-| Part | Size | How it is stored |
-|---|---|---|
-| Stockfish NNUE net (`nn-1a298aa575a0.nnue`, `:engine` asset) | 98,511,183 B | uncompressed |
-| Kokoro voice, plain `.tar` (`:app` asset) | 158,269,440 B | uncompressed |
-| sherpa-onnx native libraries, three ABIs | ~89 MB | uncompressed `.so` |
-| Everything else (dex, resources, Stockfish `.so`, assets) | ~20 MB before D1; the dex is now 3.1 MB (R8) instead of 44.7 MB | mostly deflated |
-
-On first run the app copies the net and unpacks the voice into private storage, about 257 MB more, so an
-install needs roughly 620 MB steady and more at peak.
-
-What this means for distribution:
-
-- **Sideloading, F-Droid, direct download:** fine. Offer the arm64-v8a APK and state its size on the
-  download page.
-- **Google Play:** Play delivers per ABI from the bundle, so a phone downloads ~196 MB (table above),
-  just under the 200 MB base-module limit. Moving the models out of the APK (D-track,
-  `docs/MODEL_DOWNLOAD_DESIGN.md`) brings it to ~14 MB. (Before D1 this section said the bundle was "far
-  over" the limit; that was the universal APK's size, not what Play delivers per device.)
-
----
+Size history: 1.0 (R7, models inside, no R8) 364.7 MB universal; D1 (R8, models inside) 292.5 MB arm64 and
+~196 MB per device from Play; D2f 1.1 (models downloaded) as above.
 
 ## 4. Signing
 
-- Release build: `./gradlew :app:assembleRelease` (needs `scripts/fetch_models.sh` first on a fresh clone) writes
-  the per-ABI APKs and `app-universal-release.apk` to `app/build/outputs/apk/release/` (before D1 it wrote a single
-  `app-release.apk`, which R7 copied to `dist/PalayaChess-<versionName>-release.apk`, gitignored).
-  `./gradlew :app:bundleRelease` writes the signed `.aab` for Play (section 3); with Play App Signing this
-  keystore is the **upload key**.
-  Verify with `apksigner verify --verbose --print-certs` (build-tools 36.1.0): v2 and v3 are true; v1 is false
-  by design (minSdk 26+ does not need it). The certificate fingerprint below matched on the R7 build.
-- Keystore: `keystore/chessanalyzer-release.jks`, alias `chessanalyzer`, RSA 4096,
-  valid until 2054-02-02.
+- Release outputs: `./gradlew :app:assembleRelease` (per-ABI APKs + `app-universal-release.apk`) and, as a
+  separate invocation, `./gradlew :app:bundleRelease` (the `.aab` for Play; with Play App Signing this keystore
+  is the **upload key**). Neither needs the model files (the build compiles their pins from
+  `vendor/models/MODELS.lock`).
+- Verify with `apksigner verify --verbose --print-certs` (build-tools 36.1.0): v2 and v3 are true; v1 is false
+  by design (minSdk 26+ does not need it). The certificate fingerprint below matched on R7, D1 and D2f builds.
+  The `.aab` is jar-signed: `jarsigner -verify`.
+- Keystore: `keystore/chessanalyzer-release.jks`, alias `chessanalyzer`, RSA 4096, valid until 2054-02-02.
 - Credentials: `keystore.properties` (gitignored — **never commit it**).
 - Certificate SHA-256 fingerprint:
   `CA:4F:7B:42:CE:83:7F:97:D4:8E:0E:80:2B:48:B1:C9:C9:C2:53:BA:4E:60:4E:56:A8:DF:F6:97:9A:89:09:47`
@@ -211,60 +219,197 @@ can never update the app under the same listing — Play will reject a different
 update. (With Play App Signing, which an App Bundle requires, a lost upload key can be reset by Play
 support; see section 3. Sideloaded APKs still depend on whichever key signs them.)
 
+### 4b. Model files and the signed update manifest (D2a, D2e, D2f)
+
+The two models are not in the APK. A fresh install downloads them once from
+`<MODEL_BASE_URL><release.tag>/<file>`, checked against the pins compiled from `vendor/models/MODELS.lock`; no
+manifest is read on first run:
+
+| File on the release | Size | SHA-256 (pinned) |
+|---|---|---|
+| `nn-1a298aa575a0.nnue` | 98,511,183 B | `1a298aa575a085434d29027978dc36867fe9c5bcea9376654b7a8eba1e52dfc2` |
+| `kokoro-int8-en-v0_19.tar.gz` | 102,543,452 B | `936044f1f7e3e9822e35ac3212ed555a958983b4c255b9aac7c3b9c9069619c6` |
+| (the tar inside, checked while unpacking) | 158,269,440 B | `7190c4801645bf31d10996477a04082019d9cf492ad3d5aeef7b1f7cf10a5dea` |
+
+**Voice format (D2f).** The voice is the upstream sherpa-onnx `kokoro-int8-en-v0_19.tar.bz2`, decompressed and
+re-compressed with GNU `gzip -9 -n` (reproducible: no name, no time stamp). Measured: 102.5 MB instead of the
+158.3 MB plain tar (55.7 MB less for every user), and `java.util.zip.GZIPInputStream` inflates it in 0.9-1.3 s
+on the chess36 emulator (the plain tar's read + hash alone: 0.4 s). The download stays resumable (HTTP Range
+on the `.part`); the inflation happens locally while the voice is unpacked, and the TAR inside is checked
+against `kokoro.tar.*`, so the installed voice's marker is the same as the bundled builds' (an update from 1.0
+keeps its voice). bzip2 was not used: Java has no built-in decoder and a pure-Java one is tens of seconds on a
+phone. `scripts/fetch_models.sh` makes and pins the `.tar.gz`; another gzip implementation can produce
+different bytes, in which case take the file from the release.
+
+Settings > **Check for updates** reads `<MODEL_BASE_URL>models/models.json` and `models.json.sig` (only when
+tapped) and offers a file only if the signature verifies with the public key compiled into the app and the
+entry is compatible (net: NNUE header version and architecture hash equal to the engine's; voice: layout
+`kokoro-v0_19`, a sherpa-onnx range containing the app's, a `.tar` or a `.tar.gz` with `tarSha256`/`tarSize`;
+`minVersionCode`/`maxVersionCode`). "Already installed" compares the tar's hash with the installed voice.
+`MODEL_BASE_URL` points at the owner's repo `palayax/Chess` (created 2026-10-07, §4c).
+
+**The manifest signing key (key custody).**
+
+| What | Where | In git? |
+|---|---|---|
+| Private key, ECDSA P-256 (prime256v1), PEM | `keystore/models-signing.pem` (beside the release keystore) | **No**: `*.pem` is gitignored (`git check-ignore -v keystore/models-signing.pem` names the rule) |
+| Public key, X.509 SubjectPublicKeyInfo DER, 91 bytes | `vendor/models/manifest_public_key.der` | **Yes** (negated in `.gitignore`) |
+| The same public key inside the app | `GeneratedModelPins.MANIFEST_PUBLIC_KEY_DER_BASE64`, written by `:app:generateModelPins`, which fails the build unless the file is a P-256 key | generated |
+| Public-key fingerprint (SHA-256 of the DER) | `912744011368613075e4fdd3604d2e6de4be46528f5e29e5dcfa4300e449f699` (also `GeneratedModelPins.MANIFEST_PUBLIC_KEY_SHA256`) | safe to publish |
+
+The key pair was generated on 2026-10-07 (D2e) with
+`openssl ecparam -genkey -name prime256v1 -noout -out keystore/models-signing.pem` and
+`openssl ec -in keystore/models-signing.pem -pubout -outform DER -out vendor/models/manifest_public_key.der`.
+Never print, paste, log or commit the `.pem`; the scripts only pass its path to `openssl`.
+
+- **Back up `keystore/models-signing.pem` offline, together with the release keystore.** It is needed for
+  every future model update.
+- **If it is lost:** no model update can be offered to installed apps until an app update ships a new public
+  key (generate a new pair, commit the new `.der`, release the app; old installs keep working, they just never
+  see a newer manifest as valid). A fresh install is unaffected: first-run downloads are pinned at build time
+  and do not use the manifest.
+- **If it leaks:** treat it as compromised. Rotate the same way (new pair, app update). Until users update, a
+  holder of the leaked key could make the app offer a file; that file must still pass the compatibility
+  rules, the structural checks (NNUE header, tar layout, zip-slip guard, the size cap while inflating) and the
+  trial, and it is never installed without the user's tap. It can never change program code.
+
+**Publishing flow** (`scripts/publish_models.sh`, needs `gzip`, `openssl`, `python`, and `gh` for the upload):
+
+1. `scripts/fetch_models.sh` (the files under `vendor/models/` must match `MODELS.lock`).
+2. `scripts/publish_models.sh models-2026.10 --min-version-code 2 --dry-run`: verifies the files (the net,
+   the `.tar.gz` and the tar it inflates to), writes `dist/models/models.json` (schema in
+   `docs/MODEL_DOWNLOAD_DESIGN.md` §3.2 and `ModelManifest.kt`; the voice entry carries `tarSize`/`tarSha256`).
+3. `scripts/publish_models.sh models-2026.10 --min-version-code 2`: the same, then signs it
+   (`openssl dgst -sha256 -sign keystore/models-signing.pem` -> `models.json.sig`, a DER ECDSA signature),
+   verifies the signature with the committed public key and the JSON schema (`--verify`, it stops on a
+   mismatch), creates the immutable release `models-2026.10` with the two files and uploads `models.json` +
+   `models.json.sig` to the rolling `models` release (`--clobber`).
+4. Check what is live: download both manifest files and run `scripts/publish_models.sh --verify <dir>/models.json`,
+   and download the two model files and compare their SHA-256 with the table above.
+
+`--min-version-code 2`: versionCode 1 (the bundled 1.0) has no update check; 2 is the first build that reads
+the manifest. Other modes: `--verify [manifest]` (signature + schema, no private key needed; default
+`dist/models/models.json`) and `--sign <manifest>` (signs a hand-made manifest, e.g. the D2e emulator test's,
+served by `scripts/model_test_server.py --manifest-dir`). **Publish the binaries and the manifest BEFORE an app
+build that points at them is released**: until then a fresh install's Download ends in "The engine files
+aren't on the server" (seen on the release build, D2c/D2f).
+
+A net upgrade usually needs an app update anyway: Stockfish changes its architecture hash in most releases,
+and the app refuses (never offers, never downloads) a net whose `compat.archHash`/`version` differ from the
+engine's. The manifest path is for a same-architecture net and for the voice.
+
+### 4c. The GitHub repository and the model release (owner)
+
+The app downloads from GitHub Releases of the project's public repository, which is also where the GPLv3
+source offer points. The URL is compiled in (`app/build.gradle.kts`, `defaultModelBaseUrl`), so the repo must
+exist, with the files, before the app is released.
+
+1. **Create the public repo `palayax/Chess`** on GitHub (or pick another name and tell the developers:
+   it is one line in `app/build.gradle.kts` (`defaultModelBaseUrl`), the default `--repo` in
+   `scripts/publish_models.sh`, the URL in `docs/PRIVACY_POLICY.md`, and this document; rebuild after the
+   change). The Claude app token cannot create repos; create it in the GitHub web UI or with your own `gh`.
+2. **Push the source** (GPLv3 obligation). Check first that nothing secret is staged: `keystore/`,
+   `keystore.properties`, `*.pem`, `local.properties`, `vendor/models/*` (except `MODELS.lock` and
+   `manifest_public_key.der`), `dist/` and `tools/` are gitignored; `git status --ignored` lists them. Then set
+   the About screen's source link (`about_license_source_url` in `strings.xml`) and the listing
+   already point at https://github.com/palayax/Chess (set 2026-10-07).
+3. **Install and log in to `gh`** (`gh auth login`, with an account that can create releases in the repo).
+4. **Publish the models**: `scripts/fetch_models.sh`, then
+   `scripts/publish_models.sh models-2026.10 --min-version-code 2` (§4b). This creates the immutable
+   `models-2026.10` release (the net and the voice `.tar.gz`) and the rolling `models` release with the
+   signed `models.json`.
+5. **Verify from outside**: on a phone or emulator with the release APK, Setup > Download must reach
+   "All set", and Settings > Check for updates must say "You're up to date." (this is the last open check of
+   the D-track, blocked until the repo exists).
+
 ---
 
-## 5. Data safety declaration
+## 5. Data safety declaration (Play Console > App content > Data safety)
 
-Play requires a Data Safety form. This app's honest answers:
+Answers for version 1.1 (D2f; replaces the bundled builds' "no network use" answers). This is the common
+reading of the form, not a legal conclusion; confirm against the form's wording on the day.
 
-- **Does it collect user data?** No.
-- **Does it share user data?** No.
-- **Network use:** none. The app makes no network connection of its own: it opens no sockets, and
-  nothing is downloaded, uploaded or checked online. The one outbound action is the About screen's links
-  (stockfishchess.org and palaya.net), which hand a URL to the user's browser and need no permission.
-  No analytics, no accounts, no ads.
-- **Data stored on device:** imported PGNs and cached analysis, in app-private storage, plus the engine
-  net and the narration voice unpacked from the APK on first run and any saved narration audio.
-- **Permissions requested:** no network permissions (no `INTERNET`, no `ACCESS_NETWORK_STATE`). The manifest
-  declares only `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PROCESSING` (Android 15+),
-  `FOREGROUND_SERVICE_DATA_SYNC` (Android 10-14) and `POST_NOTIFICATIONS`, for the video export. This is
-  checked by the host `ManifestPermissionsTest` and the instrumented `NoNetworkPermissionTest`.
-
-The listing should state the size (~196 MB download from Play while the models are bundled, plus about
-257 MB unpacked on the first analysis), because users on limited storage will care.
+- **Does your app collect or share any of the required user data types?** **No.**
+  - Collected: none. The app sends no personal data, identifiers, device IDs, app activity, location,
+    contacts, files or diagnostics to the developer or anyone else. There is no account, no analytics SDK, no
+    crash-reporting service and no ads.
+  - Shared: none.
+- **Network use, for the reviewer's understanding:** the app downloads two data files from GitHub on the
+  first run (only after the user taps Download), and the update manifest, its signature and, on request, a
+  model file when the user taps Check for updates in Settings. GitHub receives the device's IP address and a
+  User-Agent (`PalayaChess/<version> (Android <SDK>)`) as part of serving the download, as with any web
+  request; the app transmits nothing else, and the developer receives nothing (GitHub shows publishers only
+  aggregate download counts). The usual reading of the form is that data which never leaves the device,
+  and the ordinary connection metadata of a request the app makes to fetch content from a host, are not
+  "collected"; the owner should confirm that reading against the form's help text on the day.
+- **No library fetches anything on the app's behalf.** androidx.emoji2 (a Compose dependency) would ask Play
+  services for the "Noto Color Emoji Compat" font on the first screen, and Play services downloads it (~3 MB)
+  charged to the app's uid when it is not cached: found in D2f by `NoNetworkAfterSetupTest`'s TrafficStats
+  check. Its startup initializer is removed in the manifest (pinned by `ManifestPermissionsTest` and
+  `NetworkPermissionTest`). Re-check the merged manifest's `androidx.startup` initializers after any
+  dependency change.
+- **The diagnostic log** (`filesDir/logs/`, ~1 MB) stays on the phone. It leaves only when the user taps
+  "Share diagnostic log" (Settings) or "Share details" (an error screen) and picks an app in the system share
+  sheet: user-initiated sharing to a destination the user chooses, not collection by the app.
+- **Android Auto Backup** is on (`allowBackup`): the user's imported games and general settings can go to
+  the user's own Google account backup; models, caches, the diagnostic log and narration audio are excluded
+  (`backup_rules.xml`, `data_extraction_rules.xml`). The developer never receives it.
+- **Is data encrypted in transit?** Not applicable (nothing is collected). The downloads themselves are
+  HTTPS only (the release build refuses plain HTTP).
+- **Can users request deletion?** Not applicable (no data held by the developer); uninstalling removes
+  everything the app stored.
+- **Data stored on the device (not part of the form):** imported PGNs and cached analysis, the engine net and
+  the voice, saved narration audio, settings, the diagnostic log, all in app-private storage; exported videos
+  in `Movies/ChessAnalyzer`.
+- **Permissions:** `INTERNET`, `ACCESS_NETWORK_STATE` (the downloads; the metered check before one),
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`,
+  `POST_NOTIFICATIONS`. Pinned by the host `ManifestPermissionsTest` and the instrumented
+  `NetworkPermissionTest`; "no request on its own" by `NoNetworkAfterSetupTest` and `UpdateCheckNetworkTest`.
+- **Privacy policy URL:** required because the app requests `INTERNET`: host `docs/PRIVACY_POLICY.md` on
+  palaya.net and enter that URL (also in the listing).
 
 ---
 
-## 6. Pre-launch checklist
+## 6. Release checklist
 
-- [ ] Publish source repo (GPLv3 obligation) and link it in About + listing
-- [ ] Confirm About screen shows the Stockfish GPL notice (with the Leela data note), the CC0 opening-book credit and the voice credits (sherpa-onnx, Kokoro, espeak-ng)
-- [ ] Back up `keystore/` and `keystore.properties` offline
-- [ ] Screenshots: phone portrait, minimum 2, no chess.com branding visible
-- [ ] Listing text avoids implying chess.com affiliation
-- [ ] State the size on the download page (the arm64-v8a APK's size for direct downloads)
-- [ ] Set a content rating (Everyone)
-- [x] Target API 36, R8, 16 KB-aligned native libraries, typed foreground service with `onTimeout` (D1)
-- [ ] For Play: upload `app-release.aab` from `:app:bundleRelease`, opt in to Play App Signing (section 3),
-      fill in the foreground-service declaration (section 3). The bundle is ~196 MB per device, just under
-      the 200 MB base limit; moving the models out (D-track) is planned before relying on it
-- [ ] Re-run `bundletool get-size total` after any dependency change and before each release
-- [ ] Re-confirm the voice licences before any commercial distribution. The Kokoro model's licence is
-      verified from the `LICENSE` inside the bundled archive (Apache 2.0). The espeak-ng pronunciation data
-      is credited from the espeak-ng project's README ("GPL version 3 or later"); the archive carries no
-      licence file for it, so per-file terms are unverified. This is a proof of concept, so none of this is
-      a hard blocker, but its status must stay recorded truthfully next to the credit.
-- [ ] Confirm the **Network use: none / no network permissions** answers still hold (run
-      `ManifestPermissionsTest`; look at the merged manifest) if any dependency is added
+Before the first Play upload (and again for each release):
+
+- [ ] **Publish the models with `scripts/publish_models.sh` BEFORE shipping** an app that points at them
+      (§4b, §4c), then verify from outside: release APK, fresh install, Setup > Download reaches "All set";
+      Settings > Check for updates says "You're up to date."
+- [ ] Public source repo pushed (GPLv3), linked in About (`about_license_source_url`) and in the listing
+- [ ] Privacy policy hosted on palaya.net; URL in Play Console and the listing
+- [ ] Back up `keystore/` (`chessanalyzer-release.jks` AND `models-signing.pem`) and `keystore.properties`
+      offline, in two places
+- [ ] `versionCode` raised for every upload (1.1 = 2); `versionName` matches the listing's "What's new"
+- [ ] `./gradlew :app:assembleRelease` and then, separately, `./gradlew :app:bundleRelease`
+- [ ] `apksigner verify --verbose --print-certs` on the APKs: v2 + v3, certificate `CA:4F:7B:…:09:47`;
+      `jarsigner -verify` on the `.aab`
+- [ ] `zipalign -c -P 16 -v 4` on every APK (16 KB pages); `llvm-readelf -lW` Align 0x4000 on every `.so`
+      after any NDK or dependency change
+- [ ] `aapt2 dump permissions`: exactly the six permissions in §0; `aapt2 dump xmltree --file
+      AndroidManifest.xml`: no `networkSecurityConfig`, no `usesCleartextTraffic` in the release manifest
+- [ ] `unzip -l`: no `.nnue`, `.tar`, `.tar.gz` in any release APK or the `.aab`
+- [ ] `bundletool get-size total` per device (§3), state the result if it changed much
+- [ ] The release APK run on a device: fresh install (Setup, download from the real release), and an update
+      from the previous version (no Setup, no download)
+- [ ] Data safety form (§5), content rating (Everyone), foreground-service declarations with videos (§3),
+      app access ("no login"), ads: No
+- [ ] Screenshots: phone portrait, at least 2, no chess.com branding (`STORE_LISTING.md`)
+- [ ] Listing text avoids implying chess.com affiliation; title has no "Stockfish"
+- [ ] Play App Signing chosen deliberately (§3: keep the existing key if sideloaded APKs must update in place)
+- [ ] Personal developer account: closed test with at least 12 testers for 14 days before production access
+      (Play's rule for personal accounts created after Nov 2023; an organisation account is exempt)
+- [ ] Re-confirm the voice licences before any commercial distribution (§7)
 
 ---
 
 ## 7. Narration voices — two providers, both on-device
 
-The app narrates a game review with one of two voice providers, both fully local. Neither needs
-an account, an API key, a billing relationship or a network connection, and no key of any kind ships in
-the APK. The neural voice is the default; Settings > Advanced has one switch to use the phone's built-in
-voice instead.
+The app narrates a game review with one of two voice providers, both running on the phone. Neither needs an
+account, an API key, a billing relationship, and no key of any kind ships in the APK. The neural voice is the
+default once it is downloaded; Settings > Advanced has one switch to use the phone's built-in voice instead,
+and the phone's voice is used automatically until setup has downloaded the neural one.
 
 > **Removed in Round 13: the Google Cloud voice.** An opt-in Google Cloud Text-to-Speech provider
 > (bring-your-own API key, with a setup wizard and encrypted key storage) existed through
@@ -276,30 +421,34 @@ voice instead.
 > provider choice now reads as the neural voice. Do not re-add a cloud provider without revisiting
 > that rule and the Data safety answers.
 
-> **Also removed in Round 13: downloads and the Piper tier.** The voice model used to be downloaded on
-> first use with a tier picker (Piper and Kokoro). It is now bundled in the APK and Piper is gone.
+> **History of the voice download.** Through Round 12 the voice was downloaded on first use with a tier picker
+> (Piper and Kokoro). Round 13 (1.0) bundled Kokoro in the APK and removed Piper. D2 (1.1) moved it out of the
+> APK again: one download on the Setup screen, as a `.tar.gz` since D2f.
 
 | Provider | Licence | In the APK? | Cost to user | Publishable? |
 |---|---|---|---|---|
 | **Device TTS** (Android built-in) | platform | n/a | free | yes, always |
-| **On-device neural** (sherpa-onnx + Kokoro) | sherpa-onnx **Apache 2.0**; Kokoro-82M **Apache 2.0**; espeak-ng data see below | library **yes**, model **yes** | free | yes (see the espeak-ng note) |
+| **On-device neural** (sherpa-onnx + Kokoro) | sherpa-onnx **Apache 2.0**; Kokoro-82M **Apache 2.0**; espeak-ng data see below | library **yes**; model **no**, downloaded once on first run | free | yes (see the espeak-ng note) |
 
 ### On-device neural voice — the default
-`sherpa-onnx` is Apache 2.0, which is **compatible with this app's GPLv3**. The Kokoro voice *model* ships
-inside the APK as one stored `.tar` asset, is unpacked once on the first analysis, and is SHA-256-verified
-against a hash pinned in the build (`vendor/models/MODELS.lock`, fetched by `scripts/fetch_models.sh`). See
-`app/src/main/kotlin/net/palaya/chessanalyzer/video/BundledVoiceInstaller.kt` and
-`app/src/main/assets/NEURAL_VOICE_LICENSE.txt` (surfaced in About) for the full attribution text this
-section summarises.
+`sherpa-onnx` is Apache 2.0, which is **compatible with this app's GPLv3**. The Kokoro voice *model* is
+downloaded once on the Setup screen as `kokoro-int8-en-v0_19.tar.gz` from the project's GitHub release, checked
+against SHA-256 pins compiled into the build (`vendor/models/MODELS.lock`), and unpacked into private storage
+(`video/VoiceStore.kt`). See `app/src/main/assets/NEURAL_VOICE_LICENSE.txt` (surfaced in About) for the full
+attribution text this section summarises. Redistributing the archive on our release is allowed by its Apache
+2.0 licence (its `LICENSE` file travels inside it).
 
 | Component | Licence | Verified from |
 |---|---|---|
 | sherpa-onnx (inference) | Apache 2.0 | its repository's licence |
-| Kokoro-82M (`kokoro-int8-en-v0_19`) | **Apache License 2.0** | The full `LICENSE` file inside that exact bundled archive, matching https://huggingface.co/hexgrad/Kokoro-82M's stated licence. |
+| Kokoro-82M (`kokoro-int8-en-v0_19`) | **Apache License 2.0** | The full `LICENSE` file inside that exact archive, matching https://huggingface.co/hexgrad/Kokoro-82M's stated licence. |
 | `espeak-ng-data/` (phoneme and dictionary data, 392 files inside the same archive) | espeak-ng project: **"GPL version 3 or later"** | The espeak-ng README ("License Information") and its `COPYING` (GPLv3 text) at https://github.com/espeak-ng/espeak-ng. The archive itself contains **no** licence file for this folder, the sherpa-onnx documentation does not state one, and the repository also holds separate notices for small parts (BSD-2-Clause, Apache-2.0, Unicode). The terms of each data file were **not** checked individually: unverified. |
 
 The espeak-ng data is credited in About as "from the espeak-ng project, GPL version 3 or later". This app is
-itself GPLv3, and nothing here is a legal conclusion about compatibility or obligations.
+itself GPLv3, and nothing here is a legal conclusion about compatibility or obligations. Because our GitHub
+release redistributes the archive (and the net, trained on ODbL Leela data), the release notes should name
+both and their licences; `publish_models.sh` writes the files' names and hashes there, the owner may add the
+licence line.
 
 **Piper voices NOT used, and why** (history; the Piper tier no longer ships), since this matters if anyone is
 tempted to add one later:

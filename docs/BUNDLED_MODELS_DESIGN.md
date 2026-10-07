@@ -1,5 +1,11 @@
 # Bundling the Stockfish net and the Kokoro voice inside the APK: design (Round 13, task 68)
 
+> **Superseded (D2, 2026-10-07).** This is the Round 13 design for the bundled 1.0 build and is kept as history.
+> Since version 1.1 the net and the voice are **not** in the APK: they are downloaded once on the first-run Setup
+> screen (the voice as `kokoro-int8-en-v0_19.tar.gz` since D2f) and the app holds `INTERNET` and
+> `ACCESS_NETWORK_STATE`. Current design: `docs/MODEL_DOWNLOAD_DESIGN.md`; current facts: `docs/PUBLISHING.md` §0.
+> The extraction, verification and marker logic described here survives in `VoiceStore` and `NetStore`.
+
 Produced by a Fable 5.1 / high design agent (read-only), 2026-10-03, saved by the orchestrator in condensed form.
 "Measured" means read from the tree or the live emulator. "Estimate" means arithmetic or a guess. The owner's two open
 questions were answered with the recommended defaults (§9).

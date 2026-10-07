@@ -51,7 +51,8 @@ For a move played by side S at ply p:
 
 **Important:** `evalBefore` must be the eval of the *best* move, and `evalAfter` the eval of
 the *played* move. Never compare evals taken at different depths — analyse every position
-at the same configured depth or the deltas become noise.
+at the same configured depth or the deltas become noise. The one exception is a position the
+per-position search budget stopped early (§8.1): it is flagged as capped, never silently mixed in.
 
 ---
 
@@ -460,11 +461,163 @@ engine's own numbers) at generation time:
 
 ## 8. Analysis engine settings
 
-- Default depth **14**, MultiPV 3, one position at a time, configurable in Settings
-  (depth 12 "fast" / 18 "standard" / 24 "deep").
-- Analyse every ply of the game plus the final position.
-- Progress reported per ply; analysis must be cancellable and resumable.
-- Results cached per game so re-opening a game is instant.
+- Strength presets in Settings: **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**
+  (`SettingsLogic.AnalysisStrength`). MultiPV 3, Threads `min(cores, 4)`, Hash 96 MB, one position at
+  a time, the hash kept from position to position. A stored custom depth (6..30, from older versions)
+  is still honoured.
+- Analyse every ply of the game plus the final position (a checkmate or stalemate is not searched).
+- Progress reported per ply; analysis must be cancellable and resumable (§8.3).
+- Results cached per game so re-opening a game is instant. The cache key is
+  SHA-256(PGN text, depth, MultiPV, search budget); a result is reused only under identical settings.
+
+### 8.1 Per-position search budget (F1)
+
+Every position is searched with `go depth D nodes N movetime T` (`ui/model/SearchBudget.kt`): it stops
+at depth D, or at N nodes (all threads together), or after T ms, whichever comes first.
+
+**Why.** Before F1 the search had no limit but the depth. Stockfish's work per position is very
+uneven: on the owner's game (`games/game01.txt`) the position after 23.Rdg1 took 59-86 s and 80-129 M
+nodes on the host at depth 18, against 1-15 s for every other position, and many minutes on a phone.
+The analysis looked stuck at "move 23".
+
+**The node budget N is the real limit.** Node counts do not depend on the device's speed, so the same
+game is cut at the same places on every phone. Rule for choosing N: **at least 95% of positions of the
+calibration games still reach full depth, and the game01 outlier stops near depth 16 at Deep.**
+
+**The time cap T is only a safety net for a slow phone, and generous on purpose.** The desktop P0 lesson
+applies: a tight `movetime` silently made the analysis shallower and changed move classifications.
+T is set so that a phone several times slower than the emulator still spends its node budget before
+the clock stops it.
+
+| Strength | Depth | Node budget N | Time cap T |
+|---|---|---|---|
+| Quick | 12 | 4,000,000 | 30 s |
+| Standard | 14 | 25,000,000 | 150 s |
+| Deep | 18 | 45,000,000 | 270 s |
+
+A custom depth uses the budget of the smallest preset at or above it (deeper than 18: Deep's).
+
+**Calibration (F1, 2026-10-06).** Host: Stockfish 19 (`pc/bin/stockfish`), Threads 4, Hash 96,
+MultiPV 3, `ucinewgame` once per game, then every position in order with `go depth D` and no other
+limit (the hash kept, as the app does). For each position, the nodes at which iteration D finished
+(the last exact multipv-1 line at depth D). 226 positions: `games/game01.txt` (66), the two recorded
+games of `scripts/audit_commentary.py` (`fixtures/chesscom_style_game.pgn` 33 and
+`fixtures/immortal.pgn` 45; the Immortal Game is one of them) and `fixtures/byrne_fischer.pgn` (82)
+for more data. Checkmates excluded (not searched).
+
+| Depth | Median | p90 | p95 | p99 | Max | Full depth at the budget |
+|---|---|---|---|---|---|---|
+| 12 | 0.3 M | 0.9 M | 1.5 M | 5.4 M | 6.5 M | 4 M: 221/226 = 97.8% (2 M would give 95.6%) |
+| 14 | 1.2 M | 10.3 M | 21.1 M | 59.6 M | 102.0 M | 25 M: 217/226 = 96.0% (20 M: 94.2%) |
+| 18 | 6.3 M | 26.2 M | 42.2 M | 83.9 M | 100.5 M | 45 M: 217/226 = 96.0% (40 M: 94.2%) |
+
+The tails are real and not only game01's: at depth 14 the chess.com game's 28...Qe6 needed 102 M nodes
+(54 s on the host) and at depth 18 the Immortal Game's 19...Qxa1+ 100.5 M (99 s). Node counts with 4
+threads are not repeatable: **the game01 position after 23.Rdg1** finished depth 18 at 24.9 M in the
+whole-game run above (warm hash), and in four cold runs (fresh engine, `go depth 18`) the depths
+completed at:
+
+| Cold run | d15 | d16 | d17 | d18 | Reached with 45 M |
+|---|---|---|---|---|---|
+| owner's report | | 30 M | 78 M | 80-129 M | 16 |
+| F1 run 1 | 2.0 M | 12.7 M | 16.3 M | 30.9 M | 18 |
+| F1 run 2 | 3.6 M | 13.8 M | 30.8 M | 76.5 M | 17 |
+| F1 run 3 | 10.9 M | 19.5 M | 37.5 M | 132.1 M | 17 |
+
+So at 45 M the outlier stops at depth 16-17 when it blows up, and finishes when it does not. On the
+emulator (`CappedSearchInstrumentedTest`, cold hash) it stopped at depth 16 after 45.0 M nodes and 72 s
+in one run and finished depth 18 in 21.0 M nodes and 30 s in the next.
+
+**Time caps from the emulator's speed.** chess34 (API 34, 4 vCPUs, 4 engine threads), two full game01
+Deep runs read from the diagnostic log: searches of more than 10 M nodes ran at 510-~600 k nodes/s
+(median 570 k; 2-10 M-node searches 400-1,100 k, median 590 k; the host does about 1.5 M). At a
+rounded-down 0.5 M nodes/s the node budgets take 8 s (Quick), 50 s (Standard) and 90 s (Deep) on the
+emulator; the caps (30 / 150 / 270 s) are at least 3 times that, so a phone up to 3 times slower than
+the emulator still spends its whole node budget and the clock never decides the result there.
+`SearchBudgetTest` asserts this relation. (The first calibration used one 0.63 M nodes/s sample and a
+240 s Deep cap; the full runs showed slower searches, so the cap was raised to 270 s.)
+
+**A capped position is flagged, honestly.** `PositionEval.requestedDepth` is the depth asked for and
+`PositionEval.depth` the depth every line was actually searched to; `isCapped` = depth < requested.
+The flag is stored in the eval cache. The Summary's Details ends with one quiet line when any position
+was capped ("To save time, N positions were searched less deeply than the rest."); the diagnostic log
+lists every position with requested and reached depth, nodes, time and the capped flag.
+
+A capped position's evaluation is compared with neighbours searched to the full depth, which §1.2
+otherwise forbids. That is accepted: the alternative is an analysis that does not finish. The budget is
+chosen so this affects about one position in twenty at most, those positions are typically the
+sharpest ones (where a few plies less matter least to the win-percent bands of §2), and they are
+flagged.
+
+### 8.2 Every line of a result comes from one depth (pipe safety)
+
+A search stopped by `nodes` or `movetime` still ends with `bestmove`, so the pipe protocol is unchanged
+(`StockfishEngine.analyze` waits for `bestmove` exactly as before, and cancellation still sends `stop` and
+drains to `bestmove`). What changes is which "info" lines can be trusted. Stockfish 19 prints one batch
+of lines (one per MultiPV slot) per completed iteration, and **one more batch at the stop**
+(`search.cpp`, `start_searching`: `if (!uciPvSent ...) output_pv(...)`). That stop batch mixes depths:
+slots re-searched in the unfinished iteration carry the new depth, slots not yet re-searched are
+re-printed from the previous iteration either at "depth − 1" or, if never touched, **with their old
+score under the new depth's label** (seen on the host: the depth-15 scores and PVs re-printed as
+"depth 16"). Secondary PVs can also lag a depth within a normal iteration.
+
+Rule (`engine/AnalysisModels.kt`, `ConsistentLines`, host-tested in `ConsistentLinesTest` against
+recorded Stockfish 19 output):
+1. Split the lines into batches (a new batch starts at slot 1). k = the largest batch size (MultiPV,
+   or fewer when the position has fewer legal moves).
+2. A batch is usable when it has exactly slots 1..k, all at one depth, none a `lowerbound` /
+   `upperbound`.
+3. If a limit was hit (the engine's last reported nodes reached the node limit, or its reported time
+   the time limit), **the final batch is the stop batch and is discarded**, even when it looks clean:
+   on the emulator a search stopped 1,673 nodes past its 45 M budget printed all three slots as
+   "depth 18", the requested depth. If no limit was hit, the search ended by reaching its depth and
+   there is no stop batch. (When the depth is reached in the same instant as the limit, or the stop
+   falls exactly between two iterations, this discards a good batch and reports one depth less than
+   was searched: conservative, never wrong.)
+4. Use the last usable batch of the deepest depth among the rest.
+5. Nothing usable (a tiny budget): the latest line per slot, with the shallowest of their depths.
+
+So a result is "full depth" only when the search used less than its node budget and its time cap.
+
+The `bestmove` of a stopped search (Stockfish's pick from the unfinished iteration) is not used when
+lines exist; the best line is slot 1 of the chosen batch, like every other position.
+
+### 8.3 Resuming after the process is killed
+
+Android may kill a backgrounded app during a long analysis (no foreground service: none of Play's
+types fits an analysis, and the owner rejected adding one). So:
+- The partial eval cache is checkpointed **after every ply** (`AnalysisService.CHECKPOINT_EVERY_PLIES`
+  = 1; a temp file then a rename).
+- The request (game text, depth, MultiPV, the name used to find the user's side, start time) is
+  written to `filesDir/pending_analysis.json` (`PendingAnalysisStore`, excluded from backup) when the
+  analysis starts, and deleted when it succeeds, when the text cannot be parsed, or when the user
+  cancels (Cancel or Back). The partial eval cache is kept on cancel.
+- A new process resumes it: a restored Analysing screen reads the request from disk instead of
+  reporting "The game text was lost"; an app that starts fresh at Home opens the Analysing screen for
+  it once, unless the request is more than 24 hours old (then it is dropped). The resume starts at the
+  checkpoint (`usableResumePrefix`, FEN-aligned) with the request's own settings, so the cache key
+  matches.
+
+### 8.4 The Analysing screen's time bar
+
+Under the progress bar: the elapsed time of this run; "About N min left" once 6 positions have been
+searched in this run; and "Thinking deeper on this move… depth d of D" when one position has taken more
+than 3 s (d = the deepest depth the engine has completed on it, from `StockfishEngine.analyze`'s progress
+callback).
+
+The estimate (`ui/model/AnalysisTimeLeft.kt`) is **positions left x `SearchBudget.typicalNodes` x this
+run's measured milliseconds per node**. `typicalNodes` is the calibration games' mean of min(nodes to full
+depth, budget): Quick 0.5 M, Standard 3.45 M, Deep 10.3 M. Node counts do not depend on the device; the
+device's speed is measured. The export's estimator (measured time per item x items left,
+`video/ExportTimeLeft.kt`) was tried first and is wrong here, because the opening is cheap and the
+middlegame dear: on the emulator's game01 Deep run it said 3 min after 6 positions with 19 left. Replayed
+on that run's log the node estimate says 14 min (19.3 left), 12 after 30 positions (12.5 left), 6 after
+50 (4.6 left). The display rules are the export's: minutes rounded up, "Less than a minute left" at the
+end, and the shown number rises only when it was off by 2 minutes or 25%. The game's own node counts are
+not blended in (its cheap opening would pull the estimate down when it matters most); a game much heavier
+than the calibration games is underestimated until that rule lets the number rise.
+
+The estimate and the "thinking deeper" line are a polite live region; the ticking clock is not.
 
 ---
 
@@ -699,8 +852,8 @@ at the length its tier gives (a SKIP/BRIEF ply is told as a single normal beat) 
 the threshold and the budget, as before. If everything is pruned, the single largest-swing ply is
 narrated (§9.2), as a BRIEF beat.
 
-**The length budget.** The script's `totalEstimatedMs` (speech from `estimateSpeechMs` at
-`NarrationOptions.speechWpm`, plus holds) may not exceed
+**The length budget.** The script's story length `storyMs` (speech from `estimateSpeechMs` at
+`NarrationOptions.speechWpm`, plus the puzzle holds; since V3 the pace time of §9.8 is outside it) may not exceed
 
     budgetMs = min(720 000, 120 000 + 14 000 × fullMoves, 23 000 × fullMoves − 32 000)
     floor 20 000                                                   fullMoves = (plies + 1) / 2
@@ -799,6 +952,95 @@ centred and, if still too tall, every size steps down together.
 
 No new chess claim is made: every field is a report number or the §12 sentence. `GameRecapTest`
 checks each against the report on the four recorded games.
+
+### 9.8 The video pace (V3)
+
+Added in Round 14 for the owner's "the analysis is a bit too fast for key moves/sequences". The pace is a
+**presentation layer over the finished story**: `VideoScriptGenerator.generate` first builds the script and
+holds it to the §9.7 budget exactly as before, and only then lays the pace over it (`ScriptBuilder.paced`).
+So every pace tells **the same story in the same words**: the same segments, indices, chapters, narration,
+speech estimates and recap; only `ScriptSegment.leadIn` and `ScriptSegment.holdAfterMs` differ. The pace
+never stretches the speech, and a narration clip cached at one pace is the clip played at every pace.
+
+**What was measured (before).** `PaceMeasurementDumpTest` lays the scripts of the Immortal Game and
+`games/game01.txt` (recorded at depth 12, MultiPV 3) on the app's time axis (speech estimated at 169 wpm, the
+900 ms floor, 250 ms gaps). Narration and board were in step (each move slides in the first 400 ms of the
+beat that speaks it), and the detour lines were not fast (5.7 to 9.5 s per move: every move has its own
+sentence). What was rushed was the **key moves themselves**:
+
+- the decisive moves started sliding on the first frame of their beat, with **0 ms** on the position before
+  them, at the same instant the voice started: in the Immortal Game 21.Nxg7+, 22.Qf6+ and 23.Be7#; in game01
+  10 of its 15 key moves (6...e5, 9.g4, 12...exf3, 14.Qb3, 19.d6, 26.Bh6, 28...Rb8,
+  30...Bxe4+, 31...Qc3+, 33...Qc1#);
+- the **replies in a sequence were never shown**: the board jumped from the end of one beat to the position
+  before the next (the Immortal Game 18 jumps in 47 beats, game01 27 in 70), so the mating sequence
+  21.Nxg7+ Kd8 22.Qf6+ Nxf6 23.Be7# was three slides with 21...Kd8 and 22...Nxf6 on screen for 0 ms each.
+
+**The pace.** `NarrationOptions.pace`, a `VideoPace`; the app's Settings, Video, **Pace** (default
+**Relaxed**, because the owner's complaint was exactly that these moments were too fast; Normal is the
+reference the owner's numbers are stated at, Brisk is close to the old feel):
+
+| | Relaxed | Normal | Brisk |
+|---|---|---|---|
+| pause on the position before a key move (`keyLeadInMs`) | 1.5 s | 1.2 s | 0.7 s |
+| hold on the result after the key move's speech (`keyHoldAfterMs`) | 1.5 s | 1.0 s | 0.5 s |
+| per move of a played sequence (`lineMoveMinMs`) | 2.0 s | 1.5 s | 1.1 s |
+| extra hold on a detour line's final position (`lineFinalHoldMs`) | 1.5 s | 1.0 s | 0.5 s |
+
+- A **key move** is a beat that plays a real game move (the segment carries its verdict) and is the mate, a
+  brilliant or great move, a found tactic told in its own beat, or a move whose tier is DWELL or FULL. A
+  routine BRIEF move is not one.
+- Its **lead-in** (`SegmentLeadIn`, silent): first the **approach**, the one or two game moves
+  (`MAX_APPROACH_PLIES = 2`) between the position the previous beat left on the board and the position before
+  the key move, one every `lineMoveMinMs` (each slides in 400 ms and then rests, with its own caption); three
+  or more missing plies already have a spoken "skip ahead" beat (§9.7) and are not walked. Then the **pause**:
+  the position before the move, still, the moving piece's square and its destination lit, the eval bar on the
+  position before, the panel chip "Key moment" and no verdict yet. Only then does the piece move, and the
+  narration starts with it. When the beat before is already a still picture of exactly that position (the
+  "back to the game" beat after a detour, a puzzle prompt) that picture is the pause, and none is added.
+- After its speech the result is held `keyHoldAfterMs`, unless the next beat is another key move starting from
+  that position (its own pause shows it).
+- A detour line's move is on screen at least `lineMoveMinMs` (speech, the 900 ms floor and the gap included;
+  the narrated lines are already longer), and the line's final position gets `lineFinalHoldMs` more.
+
+The in-app player and the MP4 exporter play the same script on the same timeline (`TimelineBuilder`: lead-in,
+then speech, then hold and gap): the exporter writes the lead-in as silence before the segment's speech and
+`SegmentFrameBuilder` draws the lead-in and starts the segment's own board after it; the player starts the
+voice at `TimedSegment.speechStartMs`. So the two cannot disagree.
+
+**The budget (§9.7) and the pace: decided.** The budget is **not** scaled with the pace. It holds the
+**story** (`VideoScript.storyMs` = speech estimates plus puzzle pauses, which is what `totalEstimatedMs` was
+before V3); the pace time (`VideoScript.pacingMs`) comes on top, like the recap card. Reasons: (1) a slower
+pace must not be paid for by cutting what is said, and a pace-scaled budget would make Relaxed drop beats that
+Brisk keeps, i.e. a different story per pace; (2) the same story means the same narration text, so switching
+the pace re-uses every cached clip and never re-synthesizes; (3) the cost is small and measured. The pace time
+is still bounded: at most `PACING_CAP_FRACTION` = **15 percent** of the budget
+(`VideoScriptGenerator.pacingCapMs`); a game that would pass it has every pace time scaled down until it fits
+(`PaceTimes.scaled`, a line move never below 700 ms). On the five recorded games it never binds:
+
+| Game (plies) | Budget | Story | Relaxed pace time | Normal | Brisk |
+|---|---|---|---|---|---|
+| scholar's mate (7) | 60 s | 52.5 s | +5.0 s (9.5%) | +3.7 s | +2.3 s |
+| chesscom_style_game, 17 moves (33) | 358 s | 306.9 s | +29.0 s (9.4%) | +21.2 s | +12.6 s |
+| Immortal Game (45) | 442 s | 422.0 s | +25.5 s (6.0%) | +18.1 s | +10.4 s |
+| game01 (66) | 582 s | 544.6 s | +64.0 s (11.8%) | +47.1 s | +28.7 s |
+| Byrne-Fischer 41 moves (82) | 694 s | 537.3 s | +51.5 s (9.6%) | +37.5 s | +22.2 s |
+
+(Percentages of the story.) So a video is at most its §9.7 budget plus 15 percent of it, plus the 250 ms gaps
+and the 4-6 s recap; in practice 2.5 to 12 percent longer than the story. The protected beats (§9.7) are
+untouched: the pace runs after every tier and budget decision, so BRILLIANT/GREAT, forced-mate and mate beats
+are exactly what they were, and only gain a pause.
+
+**Recap and time left.** Unchanged: the recap card is still after the last segment and outside both numbers;
+the export's "N of M" and "about N min left" count segments and measure synthesis time, and the pace adds no
+segment and no speech.
+
+**Reference (chess.com Game Review, pattern only).** Stepping through a review shows a key move on its own:
+the board sits on the position, the move is made, its classification appears with it, and the coach's
+explanation follows while the board holds the result; a best line is stepped one move at a time, never
+jumped. Taken: the pause on the position before the key move with the move's squares marked, the verdict
+appearing only with the move, the hold on the result, and a steady per-move rate for a sequence with no
+skipped replies. Our own timing values and words; no assets.
 
 ---
 

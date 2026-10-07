@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.data
 
 import android.content.Context
+import android.os.SystemClock
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import kotlin.coroutines.coroutineContext
@@ -21,16 +22,22 @@ import net.palaya.chessanalyzer.core.pgn.PgnParseException
 import net.palaya.chessanalyzer.core.pgn.PgnParser
 import net.palaya.chessanalyzer.core.tactics.MotifDetector
 import net.palaya.chessanalyzer.core.tactics.StaticExchangeEvaluator
+import net.palaya.chessanalyzer.diagnostics.AppDiagnostics
+import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
+import net.palaya.chessanalyzer.diagnostics.PositionLogLine
+import net.palaya.chessanalyzer.diagnostics.formatGameForLog
+import net.palaya.chessanalyzer.diagnostics.formatPositionLine
+import net.palaya.chessanalyzer.diagnostics.scoreText
 import net.palaya.chessanalyzer.engine.AnalysisResult
-import net.palaya.chessanalyzer.engine.BundledNetDamagedException
-import net.palaya.chessanalyzer.engine.InsufficientNetStorageException
+import net.palaya.chessanalyzer.engine.NetNotInstalledException
+import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 
 /**
  * The seam between raw PGN text and a finished [CoreGameReport]: parse -> pick game/user color
- * -> one-time setup -> ensure engine+net -> analyze every ply (cached) -> [GameAnalyzer]. This is the "Analysis
+ * -> eval cache, or ensure engine+net -> analyze every ply (cached) -> [GameAnalyzer]. This is the "Analysis
  * service" called for in the integration brief; it is deliberately plain Kotlin (no ViewModel
  * base class) so it can be driven from a ViewModel's `viewModelScope` and cancelled the normal
  * coroutine way — cancelling the caller's `Job` propagates into the suspended
@@ -45,7 +52,10 @@ class AnalysisService(
     private val context: Context,
     private val engineController: EngineController,
     private val gameRepository: GameRepository,
-    private val firstRunSetup: FirstRunSetup,
+    /** The diagnostic log (F1); null in tests that do not care. */
+    private val diagnostics: DiagnosticLog? = null,
+    /** Monotonic clock for the progress timestamps. */
+    private val nowMs: () -> Long = { SystemClock.elapsedRealtime() },
 ) {
 
     /**
@@ -61,10 +71,11 @@ class AnalysisService(
         PARSE,
         /** The engine could not be prepared. */
         ENGINE_PREPARE,
-        /** Not enough free space for the one-time setup (net and voice copied out of the APK). */
-        SETUP_STORAGE,
-        /** The engine or voice files bundled in the APK failed verification: reinstall the app. */
-        SETUP_DAMAGED,
+        /**
+         * No verified engine net is installed: the first-run download (Setup) has not finished, or the
+         * net on disk failed its SHA-256 check. The fix is the Setup screen (D2c), never a retry.
+         */
+        SETUP_REQUIRED,
         /** The engine object was not available after preparation. */
         ENGINE_START,
         /** The engine failed part-way through the game. */
@@ -79,6 +90,8 @@ class AnalysisService(
             val report: CoreGameReport,
             val userColor: Color?,
             val otherGamesInFile: Int,
+            /** Positions whose search the budget stopped before the requested depth (spec §8.1). */
+            val cappedPositions: Int = 0,
         ) : Outcome()
 
         data class ParseError(val reason: Failure, val detail: String? = null) : Outcome()
@@ -101,42 +114,38 @@ class AnalysisService(
         val games = try {
             PgnParser.parse(pgnText)
         } catch (e: PgnParseException) {
+            diagnostics?.error(TAG, "PGN could not be read", e)
             return Outcome.ParseError(Failure.PARSE, e.message)
         } catch (e: Exception) {
+            diagnostics?.error(TAG, "PGN could not be read", e)
             return Outcome.ParseError(Failure.PARSE, e.message)
         }
-        if (games.isEmpty()) return Outcome.ParseError(Failure.NO_GAMES)
+        if (games.isEmpty()) {
+            diagnostics?.error(TAG, "PGN held no games")
+            return Outcome.ParseError(Failure.NO_GAMES)
+        }
         val game = games.getOrElse(gameIndex) { games[0] }
         val userColor = detectUserColor(game, username)
+        val budget = settings.searchBudget
+        diagnostics?.log(
+            TAG,
+            "analysis start: depth ${settings.depth}, multipv ${settings.multiPv}, node budget ${budget.nodes}, " +
+                "time cap ${budget.movetimeMs} ms, threads ${EngineController.defaultThreads()}, " +
+                "hash ${EngineController.defaultHashMb()} MB, user side ${userColor ?: "unknown"}\n" +
+                formatGameForLog(game),
+        )
 
-        // One-time setup (net + voice copied out of the APK) runs after the parse, so a bad paste
-        // fails fast, and BEFORE the eval-cache lookup, so a game reopened from cache after an
-        // upgrade still gets the voice installed. Returns at once, with no progress, when done.
-        try {
-            val setup = firstRunSetup.ensure { fraction ->
-                onProgress(
-                    AnalysisProgress(
-                        phase = AnalysisPhase.FIRST_RUN_SETUP,
-                        fractionComplete = 0.02f + fraction * 0.28f,
-                    )
-                )
-            }
-            when (setup) {
-                SetupResult.Done -> Unit
-                is SetupResult.InsufficientStorage ->
-                    return Outcome.EngineError(Failure.SETUP_STORAGE, "needs ${setup.neededBytes} bytes")
-                is SetupResult.Damaged -> return Outcome.EngineError(Failure.SETUP_DAMAGED, setup.detail)
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            return Outcome.Cancelled
-        } catch (e: Exception) {
-            return Outcome.EngineError(Failure.ENGINE_PREPARE, e.message)
-        }
-
-        val cacheKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv)
-        var evals = gameRepository.loadEvalCache(cacheKey)
+        // The budget is part of the key: a cached result is reused only under identical limits.
+        val cacheKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, budget.cacheKeyPart)
+        // D2e: the eval cache has one folder per net; a result is reused only from the active net's.
+        var evals = gameRepository.loadEvalCache(cacheKey, gameRepository.currentNetPrefix())
+        if (evals != null) diagnostics?.log(TAG, "found in the eval cache (${evals.size} positions)")
 
         if (evals == null) {
+          // D2e: registered with the engine, so a net update cannot switch the net under this run (and a
+          // run started during an update's trial waits for it).
+          engineController.beginAnalysis()
+          try {
             try {
                 onProgress(AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE, fractionComplete = 0.02f))
                 engineController.ensureReady(
@@ -144,16 +153,23 @@ class AnalysisService(
                     hashMb = EngineController.defaultHashMb(),
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
+                diagnostics?.log(TAG, "cancelled while preparing the engine")
                 return Outcome.Cancelled
-            } catch (e: InsufficientNetStorageException) {
-                return Outcome.EngineError(Failure.SETUP_STORAGE, e.message)
-            } catch (e: BundledNetDamagedException) {
-                return Outcome.EngineError(Failure.SETUP_DAMAGED, e.message)
+            } catch (e: NetNotInstalledException) {
+                // Only an analysis that needs the engine needs the net: a game in the eval cache
+                // opens without it.
+                diagnostics?.error(TAG, "engine: no verified net installed, setup required")
+                return Outcome.EngineError(Failure.SETUP_REQUIRED, e.message)
             } catch (e: Exception) {
+                diagnostics?.error(TAG, "engine could not be prepared", e)
                 return Outcome.EngineError(Failure.ENGINE_PREPARE, e.message)
             }
-            val engine = engineController.engineOrNull()
-                ?: return Outcome.EngineError(Failure.ENGINE_START)
+            val engine = engineController.engineOrNull() ?: run {
+                diagnostics?.error(TAG, "engine missing after preparation")
+                return Outcome.EngineError(Failure.ENGINE_START)
+            }
+            // Every result of this run is the loaded net's, so the checkpoint and the result go to its folder.
+            val runPrefix = engineController.loadedNetName?.let { NetStore.prefixOf(it) } ?: gameRepository.currentNetPrefix()
 
             val positions = plyFens(game)
             val total = positions.size
@@ -163,11 +179,16 @@ class AnalysisService(
             // settings — but verify FEN alignment per index anyway rather than trusting the key,
             // because feeding mismatched evals into the analyzer would silently produce a wrong
             // report rather than an error.
-            val resumable = gameRepository.loadPartialEvalCache(cacheKey).orEmpty()
+            val resumable = gameRepository.loadPartialEvalCache(cacheKey, runPrefix).orEmpty()
             val computed = ArrayList<PositionEval>(total)
                 .apply { addAll(usableResumePrefix(positions, resumable)) }
             val startIndex = computed.size
+            // This run's own search totals, for the time-left estimate (spec §8.4).
+            var runNodes = 0L
+            var runSearchMs = 0L
+            var runPositions = 0
             if (startIndex > 0) {
+                diagnostics?.log(TAG, "resuming from the checkpoint: $startIndex of $total positions already done")
                 onProgress(
                     AnalysisProgress(
                         phase = AnalysisPhase.ANALYZING_MOVES,
@@ -187,12 +208,67 @@ class AnalysisService(
                     // such a position, so short-circuit it here rather than paying for a search
                     // whose answer we already know from the rules.
                     val terminal = terminalEvalOrNull(fen, settings.depth)
+                    val san = if (index == 0) null else game.moves.getOrNull(index - 1)?.san
                     if (terminal != null) {
                         computed.add(terminal)
+                        val best = terminal.best
+                        diagnostics?.log(
+                            TAG,
+                            formatPositionLine(
+                                PositionLogLine(index, san, settings.depth, settings.depth, 0, 0, false, scoreText(best?.scoreCp, best?.mateIn)),
+                            ),
+                        )
                     } else {
+                        val startedAt = nowMs()
+                        var shownDepth = 0
+                        val searching = AnalysisProgress(
+                            phase = AnalysisPhase.ANALYZING_MOVES,
+                            currentMoveIndex = index,
+                            totalMoves = total,
+                            fractionComplete = 0.3f + 0.68f * index / total,
+                            targetDepth = settings.depth,
+                            positionStartedAtMs = startedAt,
+                            runNodes = runNodes,
+                            runSearchMs = runSearchMs,
+                            runPositionsSearched = runPositions,
+                        )
+                        onProgress(searching)
                         engine.setPosition(fen = fen)
-                        val result = engine.analyze(multiPv = settings.multiPv, depth = settings.depth)
-                        computed.add(toPositionEval(fen, result, settings.depth))
+                        val result = engine.analyze(
+                            multiPv = settings.multiPv,
+                            depth = settings.depth,
+                            movetimeMs = budget.movetimeMs,
+                            nodes = budget.nodes,
+                            onProgress = { p ->
+                                // One update per new depth: the screen shows "depth 15 of 18", nothing finer.
+                                if (p.depth != shownDepth) {
+                                    shownDepth = p.depth
+                                    onProgress(searching.copy(searchDepth = p.depth))
+                                }
+                            },
+                        )
+                        val eval = toPositionEval(fen, result, settings.depth)
+                        computed.add(eval)
+                        val wallMs = nowMs() - startedAt
+                        runNodes += result.nodes
+                        runSearchMs += wallMs
+                        runPositions++
+                        val best = eval.best
+                        diagnostics?.log(
+                            TAG,
+                            formatPositionLine(
+                                PositionLogLine(
+                                    index = index,
+                                    san = san,
+                                    requestedDepth = settings.depth,
+                                    reachedDepth = result.depth,
+                                    nodes = result.nodes,
+                                    timeMs = wallMs,
+                                    capped = eval.isCapped,
+                                    score = scoreText(best?.scoreCp, best?.mateIn),
+                                ),
+                            ),
+                        )
                     }
                     onProgress(
                         AnalysisProgress(
@@ -200,13 +276,16 @@ class AnalysisService(
                             currentMoveIndex = index + 1,
                             totalMoves = total,
                             fractionComplete = 0.3f + 0.68f * (index + 1) / total,
+                            runNodes = runNodes,
+                            runSearchMs = runSearchMs,
+                            runPositionsSearched = runPositions,
                         )
                     )
-                    // Checkpoint periodically so a process kill (rather than a clean cancel) still
-                    // leaves most of the work recoverable.
+                    // Checkpoint so a process kill (rather than a clean cancel) leaves the work
+                    // recoverable: Android may kill a backgrounded app during a long Deep analysis.
                     if ((index + 1) % CHECKPOINT_EVERY_PLIES == 0) {
                         withContext(NonCancellable) {
-                            gameRepository.savePartialEvalCache(cacheKey, computed)
+                            gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
                         }
                     }
                 }
@@ -215,19 +294,24 @@ class AnalysisService(
                 // coroutine is already cancelled, so an ordinary suspend call here would throw
                 // immediately and we would lose the very work we are trying to save.
                 withContext(NonCancellable) {
-                    gameRepository.savePartialEvalCache(cacheKey, computed)
+                    gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
                 }
+                diagnostics?.log(TAG, "cancelled after ${computed.size} of $total positions (checkpoint saved)")
                 return Outcome.Cancelled
             } catch (e: Exception) {
                 withContext(NonCancellable) {
-                    gameRepository.savePartialEvalCache(cacheKey, computed)
+                    gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
                 }
+                diagnostics?.error(TAG, "engine failed at position ${computed.size} of $total", e)
                 return Outcome.EngineError(Failure.ANALYSIS, e.message)
             }
             evals = computed
-            gameRepository.saveEvalCache(cacheKey, computed)
+            gameRepository.saveEvalCache(cacheKey, computed, runPrefix)
             // The full cache supersedes the prefix; drop it so it cannot go stale.
-            gameRepository.clearPartialEvalCache(cacheKey)
+            gameRepository.clearPartialEvalCache(cacheKey, runPrefix)
+          } finally {
+            engineController.endAnalysis()
+          }
         } else {
             onProgress(
                 AnalysisProgress(
@@ -239,15 +323,19 @@ class AnalysisService(
             )
         }
 
+        // Both branches above leave evals set (the engine branch returns on every failure).
+        val allEvals: List<PositionEval> = checkNotNull(evals)
         val book = openingBook()
         val report = withContext(Dispatchers.Default) {
             val see = StaticExchangeEvaluator()
             val analyzer = GameAnalyzer(MoveClassifier(see), MotifDetector(see))
-            analyzer.analyze(game, evals, userColor, book)
+            analyzer.analyze(game, allEvals, userColor, book)
         }
 
         onProgress(AnalysisProgress(phase = AnalysisPhase.DONE, fractionComplete = 1f))
-        return Outcome.Success(game, report, userColor, otherGamesInFile = games.size - 1)
+        val capped = allEvals.count { it.isCapped }
+        diagnostics?.log(TAG, "analysis done: ${allEvals.size} positions, $capped capped")
+        return Outcome.Success(game, report, userColor, otherGamesInFile = games.size - 1, cappedPositions = capped)
     }
 
     /** FEN before ply 1, FEN after each subsequent ply — i.e. `moves.size + 1` positions. */
@@ -287,7 +375,7 @@ class AnalysisService(
         } else {
             EngineLineInput(multiPv = 1, scoreCp = 0, mateIn = null, depth = depth, pvUci = emptyList())
         }
-        return PositionEval(fen = fen, lines = listOf(line), depth = depth)
+        return PositionEval(fen = fen, lines = listOf(line), depth = depth, requestedDepth = depth)
     }
 
     /**
@@ -305,14 +393,19 @@ class AnalysisService(
         .takeWhile { (i, eval) -> i < positions.size && positions[i] == eval.fen }
         .map { it.value }
 
-    private fun toPositionEval(fen: String, result: AnalysisResult, depth: Int): PositionEval {
+    /**
+     * [result]'s lines all come from one depth (`StockfishEngine.analyze` guarantees it, spec §8.2),
+     * so [PositionEval.depth] is that depth and the position is capped when it is below
+     * [requestedDepth].
+     */
+    internal fun toPositionEval(fen: String, result: AnalysisResult, requestedDepth: Int): PositionEval {
         val lines = result.lines.map {
             EngineLineInput(multiPv = it.multiPv, scoreCp = it.scoreCp, mateIn = it.mateIn, depth = it.depth, pvUci = it.pvUci)
         }
         val effectiveLines = if (lines.isEmpty()) {
-            listOf(EngineLineInput(multiPv = 1, scoreCp = null, mateIn = null, depth = depth, pvUci = listOf(result.bestMoveUci)))
+            listOf(EngineLineInput(multiPv = 1, scoreCp = null, mateIn = null, depth = result.depth, pvUci = listOf(result.bestMoveUci)))
         } else lines
-        return PositionEval(fen = fen, lines = effectiveLines, depth = result.depth)
+        return PositionEval(fen = fen, lines = effectiveLines, depth = result.depth, requestedDepth = requestedDepth)
     }
 
     private suspend fun openingBook(): OpeningBook = withContext(Dispatchers.IO) {
@@ -326,10 +419,13 @@ class AnalysisService(
 
     companion object {
         /**
-         * Plies between partial-cache checkpoints. Small enough that a process kill loses only
-         * seconds of engine work, large enough that the JSON write is not a per-ply cost.
+         * Plies between partial-cache checkpoints: every ply (F1). A Deep position can take minutes
+         * on a phone and Android may kill a backgrounded app at any point; the write is one small
+         * JSON file (tens of KB, a temp file then a rename) against seconds of engine work per ply.
          */
-        private const val CHECKPOINT_EVERY_PLIES = 5
+        internal const val CHECKPOINT_EVERY_PLIES = 1
+
+        private const val TAG = AppDiagnostics.TAG_ANALYSIS
 
 
         private val bookLock = Any()

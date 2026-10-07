@@ -6,7 +6,7 @@ Conventions and hard-won gotchas for this project. Read before changing the buil
 
 - `:core` — pure Kotlin/JVM. Chess rules, PGN, and the whole analysis model. **No Android imports.**
   All of it is host-testable; keep it that way, it is why the analysis logic has real tests.
-- `:engine` — Android library. Stockfish compiled via NDK/CMake + JNI bridge + the bundled NNUE net (an asset, copied once to `filesDir`).
+- `:engine` — Android library. Stockfish compiled via NDK/CMake + JNI bridge + `NetStore` (the downloaded NNUE net in `filesDir/nets/`).
 - `:app` — Compose UI, navigation, PGN intake, orchestration.
 
 `:core` must never depend on `:engine` or Android. Engine results are adapted into
@@ -31,22 +31,110 @@ conflict.
    Two concurrent `StockfishEngine` instances corrupt each other. Own exactly one.
 3. **Do not vendor the official Android binary.** It is ~100 MB (embedded net) and `ET_EXEC`
    non-PIE. We compile from source instead: ~1.6 MB per ABI. See README.
-4. **The net is in the APK** (uncompressed asset in `:engine`), copied once to `filesDir` and
-   SHA-256-verified (98,511,183 bytes; the filename encodes the first 12 hex digits of its own hash).
-   Stockfish still cannot read it from the APK (it opens a plain file path), and the `setEvalFile`
-   guards are unchanged. Never point it at `/proc/self/fd/N` or any other APK-backed path.
+4. **The net is NOT in the APK any more (D2a/D2b, `docs/MODEL_DOWNLOAD_DESIGN.md`).** It is downloaded
+   once on first run (only after the user's tap on the Setup screen, D2c: `ModelDownloadService`) into `filesDir/nets/<name>.part`, checked
+   against the build-time pins (98,511,183 bytes, full SHA-256, NNUE header version + architecture hash,
+   all from `vendor/models/MODELS.lock` via `generateModelPins`) and moved to `filesDir/nets/<name>` by
+   `NetStore.installVerified`. `EngineController.ensureReady()` hands Stockfish only
+   `NetStore.verifiedNetOrNull()` (size + full SHA-256, hashed once per process) and otherwise throws
+   `NetNotInstalledException` (analysis -> `Failure.SETUP_REQUIRED`). The `setEvalFile` guards are
+   unchanged. Never point Stockfish at a file that has not passed `verifiedNetOrNull()`, and never use
+   the engine to "test-load" a net: a failed load is `exit()` (gotcha 1). An update from a bundled build
+   moves `filesDir/nn-*.nnue` into `nets/` once (`NetStore.migrateLegacy`, run in `Application.onCreate`).
 5. **Net name has one source of truth**: `vendor/Stockfish/src/evaluate.h` `EvalFileDefaultName`.
    The build generates a constant from it. Do not hardcode it a second place.
+6. **A search stopped by `nodes`/`movetime` prints one last batch that lies about its depth** (F1).
+   Stockfish 19 re-prints its lines at the stop: slots not re-searched yet keep the previous
+   iteration's score and PV but carry the NEW depth label (seen on the host: depth-15 numbers printed
+   as "depth 16"). `StockfishEngine.analyze` therefore never takes "the latest line per slot": it uses
+   `ConsistentLines` (last complete batch of one depth; the stop batch is discarded) and reports
+   `stoppedEarly`. Do not "simplify" that back. The progress callback on `analyze` is plain Kotlin
+   on the output already being read, nothing crosses JNI, so it needs no R8 rule.
+
+7. **Model updates switch the net on THE engine, journaled (D2e, `docs/MODEL_DOWNLOAD_DESIGN.md` §4).** The
+   active net is `NetStore.activeIdentity()`: the compiled pin, or an update's record in `nets/active.properties`
+   (name, size, SHA-256 from the signed manifest; ignored if the file's NNUE header is foreign). Only
+   `ModelActivator` and setup write it. A switch is `EngineController.exclusive { trialLocked() }`: it refuses
+   while an analysis runs (`AnalysisService` wraps its engine work in `beginAnalysis()`/`endAnalysis()`; a new
+   analysis waits for the switch) and hands the engine nothing but `verifiedNetOrNull()`. The header is checked
+   in Kotlin before (`activateNet`), so a wrong-architecture net never reaches Stockfish. A trial that kills the
+   process (Stockfish `exit()`) is rolled back by `ModelActivator.recoverOnStartup()`, which runs FIRST in
+   `ChessAnalyzerApplication.onCreate`: nothing may touch the engine or the voice before it. Never add a second
+   `EngineController`/`StockfishEngine` to "try" a net.
+8. **Eval caches are per net** (`eval_cache/<net 12-hex>/<key>.json`, `EvalCacheLayout`). The flat layout of
+   earlier builds is moved into the active net's folder at start; a committed net update deletes the other
+   folders. `AnalysisService` saves into the folder of the net the engine actually loaded
+   (`EngineController.loadedNetName`). The F1 budget stays in the key.
 
 ## Build gotchas
 
 - Stockfish source is **not** committed. Run `scripts/fetch_stockfish.sh` (pinned to tag `sf_19`)
   before a first build.
-- The two bundled models (the NNUE net and the Kokoro voice, ~257 MB) are **not** committed either.
-  Run `scripts/fetch_models.sh` before a first build (after `fetch_stockfish.sh`, which names the net):
-  it downloads them into the gitignored `vendor/models/`, verifies them against
-  `vendor/models/MODELS.lock`, and the build bundles them. The build **fails loudly** if a model is
-  missing or has the wrong size or SHA-256 (`verifyBundledModels`).
+- **The two models (NNUE net 98.5 MB, Kokoro voice 102.5 MB as `.tar.gz`) are not in the APK (D2a) and not committed.** The
+  build needs only `vendor/models/MODELS.lock`: `generateModelPins` (in `:engine` for the net, in `:app`
+  for the voice and `release.tag`) checks the lock (net name prefix of `net.sha256`, `net.version` equal
+  to `Version` in `nnue_common.h`, hash/size/tag formats) and writes `GeneratedNetPins` /
+  `GeneratedModelPins`. A clean clone builds WITHOUT `fetch_models.sh` (proven in D2a with the files moved
+  away). If the files ARE under `vendor/models/` they are verified against the lock too, and a mismatch
+  fails the build. `scripts/fetch_models.sh` is now the developer/test/publish fetcher (it also pins
+  `net.sha256`, `net.arch_hash`, `net.version` on its first run); you need it for
+  `scripts/model_test_server.py`, `scripts/publish_models.sh` and the instrumented tests (seed assets, D2d).
+  `-PpalayaModelsLock=<file>` points the task at another lock (only to prove a bad lock fails).
+- **The voice is downloaded as `kokoro-int8-en-v0_19.tar.gz` (D2f), but its identity is still the TAR.**
+  `MODELS.lock` pins both: `kokoro.targz.*` (what `ModelDownloader` verifies; `GeneratedModelPins.VOICE_FILE_NAME`,
+  `VOICE_DOWNLOAD_SIZE_BYTES`, `VOICE_DOWNLOAD_SHA256`) and `kokoro.tar.*` (`VOICE_SIZE_BYTES`, `VOICE_SHA256`: what
+  `VoiceStore` checks the inflated stream against, and what the `.provisioned` marker holds). Keep it that way: the
+  marker is how an update from the bundled 1.0 keeps its voice and how the narration cache key stays stable.
+  `VoiceStore.gunzipIfCompressed` switches on the gzip magic, so a plain tar still works; the unpack stops as
+  soon as the stream passes the tar's size (gzip bomb). Update manifests carry `tarSha256`/`tarSize` for a
+  `.tar.gz` voice and "already installed" compares tars (`ManifestEntry.unpackedSha256`). The `.tar.gz` is GNU
+  `gzip -9 -n` output (reproducible); `fetch_models.sh` makes it from the cached tar and refuses a different result.
+- **AAPT gunzips assets named `*.gz` and drops the suffix** (found in D2f: the test APK held the 158 MB tar, not
+  the 102.5 MB download). The voice seed therefore goes into the androidTest APK as `tts/<name>.tar.gz.seed`
+  (`prepareTestSeedAssets`, `TestApp.voiceSeedPath`). Never add a `.gz` asset expecting the bytes to survive.
+- **Version.** versionCode 1 = the bundled 1.0 (R7, in `dist/`); 2 = 1.1, the first downloading build (D2f). Raise
+  it for every upload. Publish model manifests with `--min-version-code 2`.
+- **Model download URLs.** `BuildConfig.MODEL_BASE_URL` = `https://github.com/palayax/Chess/releases/download/`
+  (the owner's public repo, created 2026-10-07); first-run URL = base + `release.tag` + `/` + file name.
+  `-PpalayaModelBaseUrl=http://10.0.2.2:8787/` overrides it **for debug builds only** (a release task in the
+  same invocation fails before anything runs). Cleartext is allowed only by the debug-only
+  `app/src/debug/res/xml/network_security_config.xml` (10.0.2.2, 127.0.0.1, localhost) and by
+  `ModelDownloader`'s own rule (`allowCleartextLoopback = BuildConfig.DEBUG`). Publish the release
+  (`scripts/publish_models.sh <tag> --min-version-code N`) BEFORE shipping an app that points at it.
+- **The update manifest is signed (D2e).** `models.json.sig` = DER ECDSA P-256 over the exact bytes; the
+  public key is `vendor/models/manifest_public_key.der` (committed), compiled into
+  `GeneratedModelPins.MANIFEST_PUBLIC_KEY_DER_BASE64` by `generateModelPins` (the build fails unless it is a
+  P-256 SPKI). The private key is `keystore/models-signing.pem` (gitignored by `*.pem`; never print, log or
+  read it into a tool output; custody in `docs/PUBLISHING.md` §4b). Tests sign with TEST keys generated at run
+  time (`TestManifests`) or the throwaway-openssl fixture in `app/src/test/resources/manifest/` (its private
+  half was deleted); `.gitattributes` marks those fixtures `-text` because CRLF conversion would break the
+  signature. `scripts/publish_models.sh --sign <file>` / `--verify [file]` sign and check by hand. On Windows
+  the `python3` on the PATH may be the Store alias that only prints a hint: scripts must pick a python that
+  actually runs.
+- **"Check for updates" runs only on the tap** (`UpdateChecker.check()` from the Settings sheet; exactly two
+  requests, `models.json` and `.sig`, through `ModelDownloader.fetchSmall`), and every entry is judged again by
+  `ModelCompatibility` right before a download (`ModelUpdateInstaller`), so an incompatible file can never be
+  fetched. `UpdateCheckNetworkTest` drives the real Settings UI against `FaultHttpServer`
+  (`ChessAnalyzerApplication.updateCheckerForTesting`, tests only).
+- **The narration cache key carries the voice id** (`NeuralTtsProvider(voiceVersionId = VoiceStore.installedVersionId())`)
+  **and the speaker** (V1: `sid` from Settings, Narrator voice; the update trial keeps the default speaker), and a
+  voice update clears `NarrationStore`.
+- **The video pace (V3, ANALYSIS_SPEC §9.8) is laid over the finished story** (`ScriptBuilder.paced`, after the
+  budget loop). Keep it there: then every pace has the same segments and words (cached narration is reused) and the
+  §9.7 budget holds `storyMs`, not the pace time. A key move's silent lead-in (`ScriptSegment.leadIn`) is honoured by
+  `TimelineBuilder`, `SegmentFrameBuilder`, the exporter's PCM track and the player; a new timeline consumer must
+  honour it too. A voice from an update is accepted by `VoiceStore.isInstalled()`
+  through its `kokoro/.compat` record (layout + sherpa-onnx range) while this build still matches it.
+- **Only `data/models/ModelDownloader.kt` may open a network connection** (`NetworkCallSitesTest` scans
+  `:app` and `:engine` main sources). The manifest has INTERNET + ACCESS_NETWORK_STATE since D2b; the app
+  must still make no network call on its own: downloads start only from a user tap.
+- **A library can use the network on the app's behalf without opening a socket in our process (D2f).**
+  androidx.emoji2 (via Compose) registered `EmojiCompatInitializer`, which asks Play services' font provider for
+  "Noto Color Emoji Compat" on the first Activity; GMS downloads it (~3 MB) and charges the app's uid. The
+  ProxySelector saw nothing; only `NoNetworkAfterSetupTest`'s TrafficStats check caught it, and only when GMS had
+  no cached copy. The initializer is removed in the main manifest (`tools:node="remove"`), pinned by
+  `ManifestPermissionsTest` and `NetworkPermissionTest`. After any dependency change, read the merged manifest's
+  `androidx.startup.InitializationProvider` meta-data.
 - `local.properties` `sdk.dir` must use forward slashes on Windows. Backslashes are Java-properties
   escapes and silently corrupt the path, breaking **every** module's configuration.
 - Any module declaring `testInstrumentationRunner` also needs an explicit
@@ -80,6 +168,15 @@ conflict.
   `Service.startForeground(id, n, type)`, **not** `ServiceCompat.startForeground`: androidx.core
   1.13.1 masks the type to the Android 14 set and turns mediaProcessing into 0, which the platform
   refuses ("FGS with type none"); the export then runs on silently without a foreground service.
+  `ModelDownloadService` (D2c, the first-run download) is `dataSync` only, on every API level, and also
+  calls the platform `startForeground` (seen on chess36/34: `types=0x00000001`); its `onTimeout` pauses the
+  download. It is started ONLY from the Setup screen's button (`START_NOT_STICKY`; a stray intent runs
+  nothing), so "no network call on its own" holds: a killed download is not restarted, it shows as
+  "Paused at N%" with Resume on the next launch.
+  **Never stopSelf() a started service unconditionally at the end of a run** (D2d): a Resume tapped right after
+  a Pause has already called `startForegroundService()`, and destroying the service before its
+  `startForeground()` makes the platform kill the app (`ForegroundServiceDidNotStartInTimeException`). The
+  download's tail stops on the main thread and only when no new run was queued.
 - **Edge to edge** is enforced at targetSdk 35+. A Scaffold `bottomBar` gets no insets of its own:
   wrap its content in `navigationBarsPadding()` (Practise, Walkthrough, Video do). `MainActivity` keeps
   the whole UI out of a side display cutout and forces dark system-bar styles (the app is always dark).
@@ -106,8 +203,20 @@ conflict.
   with `...navbar.gestural` and `cmd overlay disable ...cutout.emulation.tall`.
 - **Git Bash mangles device paths.** `adb push x /data/local/tmp/` becomes
   `C:/Program Files/Git/data/local/tmp/`. Use `MSYS_NO_PATHCONV=1`, or run adb from PowerShell.
-- `connectedDebugAndroidTest` pushes a ~371 MB debug APK (the models are inside it) and the full `:app`
-  run takes **20-40 minutes**. A hand `adb install` of that APK takes about a minute.
+- `connectedDebugAndroidTest`: the debug app APK is ~114 MB since D2a (no models). **The models reach a
+  test only as seed assets of the TEST APK (D2d):** `vendor/models/engine-assets` and (via `prepareTestSeedAssets`,
+  the voice `.tar.gz` renamed `.seed`) `build/generated/testSeedAssets` are the `androidTest` asset dirs of `:app`
+  (both files) and `:engine` (the net), stored uncompressed (`noCompress`), and `checkTestSeedAssets` fails the
+  test build if `scripts/fetch_models.sh` was never run.
+  `TestApp.ensureSetUp()` / `TestNet.net()` install them through the stores' own tails; the setup tests serve
+  them over the in-process `FaultHttpServer` (`SeedAssetBody`). They are NOT in `app-debug.apk` or any release
+  APK (checked with `unzip -l` in D2d); never "fix" a test by putting them back into the app. The androidTest
+  APK is ~202 MB since D2f (the `:engine` one ~105 MB). The full `:app` run took **12-14 minutes** per device in D2d
+  (153 tests; budget 20-40 under host load), `:engine` 5-8 minutes; run the devices one after the other (never
+  two connected suites at once on this host). A test that opens `MainActivity` and expects Home
+  must call `ensureSetUp()` first (a fresh process opens on Setup while the net is missing);
+  `SetupGateInstrumentedTest` pins the gate itself. `ChessAnalyzerApplication.modelSetupForTesting` points the
+  service and the gate at a scratch directory (tests only).
 - **Gradle uninstalls the app once `connectedDebugAndroidTest` finishes.** That deletes
   `/sdcard/Android/data/<pkg>/`, so any evidence file a test wrote there (a synthesized WAV, an
   exported MP4) is gone before you can `adb pull` it — and a later `run-as` reports
@@ -118,11 +227,29 @@ conflict.
   adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   adb shell am instrument -w -r -e class '<fqcn>#<method>'     net.palaya.chessanalyzer.test/androidx.test.runner.AndroidJUnitRunner
   ```
+- **The Video screen's preview never synthesizes**: it only plays WAVs already in `files/narration/` (put there
+  by an export or "Prepare narration") and otherwise speaks with the device voice. To get Kokoro WAVs onto a
+  device for a check, export ("Save video").
+- **Compose status lines are `clearAndSetSemantics` live regions**: their words are a content description, so
+  a test finds them with `onAllNodesWithContentDescription`, not `...WithText` (cost a run in D2e).
 - An exported video lands in `/sdcard/Movies/ChessAnalyzer/`, not `/sdcard/Movies/` — a
   non-recursive `ls` of the parent will tell you it failed when it did not.
-- **Nothing to seed.** A fresh install sets itself up on the first analysis ("Setting up the engine
-  (one time)...", about 10-30 s on the emulator): the net is copied and the voice unpacked from the
-  APK into `filesDir`. The app has no network permission, so there is nothing to download either.
+- **A fresh install has no models (D2b) and opens on the Setup screen (D2c).** Nothing is copied out of
+  the APK and there is no "Setting up the engine (one time)" phase. To get the models onto an emulator:
+  `python scripts/model_test_server.py` on the host (it serves `vendor/models/`, faults with `--fault`,
+  `--fault slow:3m --fault-times 0` makes the states visible), a debug build made with
+  `-PpalayaModelBaseUrl=http://10.0.2.2:8787/`, then tap Download. Killing the server makes connects TIME
+  OUT on the emulator (15 s each, about 100 s until "The connection dropped"); airplane mode fails at once
+  (about 30 s of backoff). Alternatively push them by hand: launch the app once (so `filesDir` exists), then
+  `adb push` the net and `run-as net.palaya.chessanalyzer` copy it to `files/nets/nn-1a298aa575a0.nnue`
+  (the voice needs `files/tts_models/kokoro/` unpacked plus its `.provisioned` marker holding the tar
+  SHA-256). A release build points at `palayax/Chess`: until the models release exists there, its Download
+  ends in "The engine files aren't on the server" (NOT_FOUND) until `publish_models.sh` has run.
+- **A release build is not debuggable, so `run-as` fails; the `google_apis` images allow `adb root`** (D2f): with
+  root, `ls /data/data/net.palaya.chessanalyzer/files/...` reads the release app's storage directly (the
+  migration proof used it). `adb unroot` afterwards. The `_playstore` images do not allow root.
+- A game shared while the net is missing waits in `filesDir/setup_waiting_game.json` (D2c) and is analysed
+  as soon as the net is in (from Setup or Home), even while the voice still downloads.
 
 ## Testing standards
 
@@ -144,6 +271,10 @@ conflict.
 - Move generation is verified by **perft** against the five standard positions: **depth 5** on the
   start position and Position 3, **depth 4** on Kiwipete, Position 4 and Position 5. If you
   touch move generation, those numbers must stay exact — they are the correctness oracle.
+- **"No network after setup" is measured, not assumed** (`NoNetworkAfterSetupTest`, D2d): a recording
+  `ProxySelector` (Android's HttpURLConnection/OkHttp asks it per route, URI without a path; a raw
+  `java.net.Socket` is NOT seen by it on this libcore) plus the uid's `TrafficStats` delta, which covers raw
+  sockets. The selector is proven live with an in-process request before the zero is trusted.
 - Instrumented tests that use `assumeTrue` can pass **vacuously**. Always check `skipped="0"` in
   `*/build/outputs/androidTest-results/**/*.xml`, not just "BUILD SUCCESSFUL".
 - Engine behaviour is verified on-device (`:engine:connectedDebugAndroidTest`), including a real
@@ -155,7 +286,7 @@ GPLv3, because Stockfish is linked. The app cannot be closed-source, and corresp
 be offered. Opening book is CC0. **Piece art is Cburnett, CC BY-SA 3.0** (attribution in
 `app/src/main/assets/PIECES_LICENSE.txt`); classification badges are original. Chess.com is a *design
 reference only* — no assets, logos or trademarks, and the listing must not imply affiliation.
-The bundled voice adds Kokoro-82M (Apache 2.0) and espeak-ng pronunciation data (GPL v3 or later per the
+The narration voice (downloaded on first run since D2b) adds Kokoro-82M (Apache 2.0) and espeak-ng pronunciation data (GPL v3 or later per the
 espeak-ng README; the archive ships no licence file for it), and the NNUE net was trained on Leela Chess
 Zero data (ODbL, per the Stockfish README). All are credited in About. Details in `docs/PUBLISHING.md`.
 

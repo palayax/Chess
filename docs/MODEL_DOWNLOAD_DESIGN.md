@@ -5,6 +5,11 @@ Produced by a Fable 5.1 / high design agent (read-only), 2026-10-06. Supersedes 
 kept. "Measured" = read from the tree or git history; "estimate" = arithmetic or a guess, marked as such.
 chess.com statements marked **[memory]** were not read on a page this session.
 
+> **Status (D2f, 2026-10-07): implemented as D2a-D2f (RUN_LOG).** The sizes in the UX mock-ups below are the
+> design's (plain tar: "about 260 MB", "450 MB"). Since D2f the voice is downloaded as `.tar.gz` (open question 2,
+> §10): the Setup screen reads "about 210 MB" to download, about 400 MB free space at the peak, 260 MB once done.
+> Current facts: `docs/PUBLISHING.md` §0. Deviations from this design are listed in each RUN_LOG entry.
+
 **Owner decision (2026-10-06):** a small installer for Google Play and direct installs. The two models
 (`nn-1a298aa575a0.nnue`, 98,511,183 B; `kokoro-int8-en-v0_19.tar`, 158,269,440 B; pins in
 `vendor/models/MODELS.lock`) leave the APK and are downloaded once, on one setup screen. Afterwards the app is
@@ -26,7 +31,7 @@ No program code is ever downloaded.
 | Activation | Download + verify + validate fully, then journaled swap, trial, and rollback on the next launch if the trial crashed the process | The only way to survive an `exit()` during the first load of a new net |
 | Eval cache | Keyed by net: `eval_cache/<net 12-hex>/<key>.json`; other nets' directories purged on activation | A report must come from one net |
 | Narration cache | `NeuralTtsProvider.cacheFingerprint` gains the installed voice id; `NarrationStore.clear()` on voice activation | WAVs from the old voice can never be hit again |
-| Voice archive format | Keep the plain `.tar` (158.3 MB) for v1; a compressed variant is an open question (§10) | Proven path, zero decode CPU on the phone, resumable, same hash pin |
+| Voice archive format | ~~Keep the plain `.tar` (158.3 MB) for v1~~ **D2f: `.tar.gz` (102.5 MB)**, inflated as a stream while unpacking (0.9-1.3 s on chess36); the TAR's hash stays the marker | Measured in D2f: saves 55.7 MB per user, under the 30 MB / 20 s bar; still resumable (the download), the extraction is local |
 | Permissions | Add `INTERNET` and `ACCESS_NETWORK_STATE`; nothing else | The metered/available check needs `ConnectivityManager` |
 
 ## 1. UX
@@ -573,6 +578,10 @@ Order: D2a+D2b → D2c → D2d → D2e → D2f. D2e can be deferred without harm
    users 55 MB more on first run; switching saves it at the price of a pure-Java bzip2 decode on the phone
    (tens of seconds, minutes on the emulator, per the B design) and a non-resumable extraction. Recommendation: tar
    now, measure a `.tar.gz` (likely ≈ 110–120 MB, estimate) in D2f and decide then.
+   **Decided in D2f: switched to `.tar.gz`.** Measured: `gzip -9 -n` gives 102,543,452 B (55.7 MB smaller than
+   the tar, 0.7 MB smaller than the upstream bzip2), and `GZIPInputStream` inflates it in 0.9-1.3 s on chess36
+   (the plain tar's read + SHA-256 takes 0.4 s), so both bars of the task (>= 30 MB saved, < ~20 s) are met by a
+   wide margin. The download stays resumable; the tar's pins stay the identity (marker, migration, cache key).
 3. **Manifest signing key custody.** The design puts `models-signing.pem` next to the release keystore. Losing it
    means no model updates until an app update rotates the public key (first run is unaffected). Accept?
 4. **Setup first, or Home first?** The design makes Setup the first screen on a fresh install with a "Not now"

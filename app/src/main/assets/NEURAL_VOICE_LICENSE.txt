@@ -1,8 +1,8 @@
 Narration voice ("Natural voice") — engine, voice model and pronunciation-data licenses.
 
-Everything in this file runs on your device. The voice model and the pronunciation data are included in
-the app's installer and are unpacked once, on the first analysis, into the app's private storage. Nothing
-is downloaded and no text or audio is ever sent to a server for this voice.
+Everything in this file runs on your device. The voice model and the pronunciation data are downloaded
+once, when you set up the app, and unpacked into the app's private storage. After that the voice works
+offline, and no text or audio is ever sent to a server.
 
 ==============================
 sherpa-onnx (inference engine)
@@ -37,11 +37,14 @@ License: the espeak-ng project's README states that it "is released under the GP
   checked file by file. This app is itself distributed under GPLv3.
 
 ==============================
-Included in the app
+How the voice reaches your phone
 ==============================
-The Kokoro model and the espeak-ng data are packaged inside this app's installer (not downloaded). On
-the first analysis the app unpacks them once into its private, per-app storage on your device, after
-checking them against checksums fixed in the app's build. Nothing about this voice needs a network.
+The Kokoro model and the espeak-ng data are not inside the app's installer. They are downloaded once,
+only when you tap Download on the setup screen, from the app's own GitHub release (the unmodified
+sherpa-onnx archive, repacked from .tar.bz2 to .tar.gz). The app checks the download against checksums
+fixed in its build, then unpacks it into its private, per-app storage on your device. A newer voice is
+only ever fetched when you tap Check for updates in Settings, and is checked against a signed list
+first. Speaking with the voice never needs a network.
 
 ==============================
 Voices NOT used, and why (history)

@@ -139,7 +139,7 @@ class SettingsLogicTest {
     // ---- The voice switch ----
 
     @Test
-    fun switchOnWritesTheDeviceVoiceAndOffWritesTheBundledOne() {
+    fun switchOnWritesTheDeviceVoiceAndOffWritesTheKokoroOne() {
         assertEquals(NarrationProviderChoice.DEVICE, providerForVoiceSwitch(true))
         assertEquals(NarrationProviderChoice.NEURAL, providerForVoiceSwitch(false))
     }

@@ -48,6 +48,13 @@ sealed class Destination(val route: String) {
         fun createRoute(gameId: String, ply: Int? = null) =
             if (ply != null) "practice/$gameId?ply=$ply" else "practice/$gameId"
     }
+    /**
+     * First-run setup: the one-time download of the engine data and the voice (D2c,
+     * docs/MODEL_DOWNLOAD_DESIGN.md §1). The start destination while the net is missing. A game shared
+     * before setup waits on disk (`PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME`), not in the route,
+     * so it survives "Not now" and a killed process.
+     */
+    data object Setup : Destination("setup")
     data object Settings : Destination("settings")
     data object About : Destination("about")
 

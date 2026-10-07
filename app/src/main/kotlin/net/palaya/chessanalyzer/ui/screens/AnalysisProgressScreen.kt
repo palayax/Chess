@@ -29,7 +29,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.pluralStringResource
+import android.os.SystemClock
+import kotlinx.coroutines.delay
+import net.palaya.chessanalyzer.ui.model.formatElapsed
+import net.palaya.chessanalyzer.ui.model.thinkingDeeper
+import net.palaya.chessanalyzer.video.ExportTimeLeft
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -51,7 +63,14 @@ import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
  * When [error] is non-null the same screen turns into an error state instead of the caller
  * stacking a dialog on top: a modal whose only button leaves the screen threw the user back to Home
  * with nothing to act on. Here they can [onRetry] (the game text is still registered, and cached
- * evals make a second attempt resume rather than restart) or go [onBack].
+ * evals make a second attempt resume rather than restart), go [onBack], or [onShareDetails] (the
+ * diagnostic log, F1).
+ *
+ * The time bar under the progress bar (F1): the elapsed time, "About N min left" once it can be
+ * measured, and "Thinking deeper on this move… depth 15 of 18" when one position takes longer than
+ * [net.palaya.chessanalyzer.ui.model.THINKING_DEEPER_AFTER_MS]. Design reference (chess.com's game
+ * review progress, pattern only): one determinate bar with a short status line, and the secondary
+ * facts below it in smaller, muted text that never competes with the status.
  */
 @Composable
 fun AnalysisProgressScreen(
@@ -61,9 +80,12 @@ fun AnalysisProgressScreen(
     error: AnalysisService.Failure? = null,
     onRetry: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
+    onShareDetails: (() -> Unit)? = null,
+    /** D2c: "Set up" on the SETUP_REQUIRED error, to the Setup screen (the game waits for it). */
+    onSetUp: (() -> Unit)? = null,
 ) {
     if (error != null) {
-        AnalysisErrorState(error = error, onRetry = onRetry, onBack = onBack, modifier = modifier)
+        AnalysisErrorState(error = error, onRetry = onRetry, onBack = onBack, onShareDetails = onShareDetails, onSetUp = onSetUp, modifier = modifier)
         return
     }
     Scaffold(modifier = modifier) { innerPadding ->
@@ -119,6 +141,8 @@ fun AnalysisProgressScreen(
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
             )
 
+            AnalysisTimeBar(progress = progress)
+
             if (onCancel != null) {
                 Spacer(modifier = Modifier.height(24.dp))
                 OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
@@ -130,12 +154,63 @@ fun AnalysisProgressScreen(
     }
 }
 
+/**
+ * Elapsed time, "About N min left" and "Thinking deeper…" under the bar. The elapsed clock ticks
+ * every second and is NOT a live region (TalkBack would read it every second); the estimate and the
+ * "thinking deeper" line change rarely and sit in a polite live region. Wraps at any font size.
+ */
+@Composable
+private fun AnalysisTimeBar(progress: AnalysisProgress) {
+    if (progress.runStartedAtMs <= 0L || progress.phase == AnalysisPhase.DONE) return
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = SystemClock.elapsedRealtime()
+            delay(1_000L)
+        }
+    }
+    Spacer(modifier = Modifier.height(12.dp))
+    Text(
+        text = stringResource(R.string.progress_elapsed, formatElapsed(now - progress.runStartedAtMs)),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+    )
+    val left = when (val t = progress.timeLeft) {
+        ExportTimeLeft.Hidden -> null
+        ExportTimeLeft.LessThanMinute -> stringResource(R.string.progress_less_than_minute)
+        is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.progress_minutes_left, t.minutes, t.minutes)
+    }
+    if (left != null) {
+        Text(
+            text = left,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    val deeper = thinkingDeeper(progress, now)
+    if (deeper != null) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.progress_thinking_deeper, deeper.first, deeper.second),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+}
+
 @Composable
 private fun AnalysisErrorState(
     error: AnalysisService.Failure,
     onRetry: (() -> Unit)?,
     onBack: (() -> Unit)?,
+    onShareDetails: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    onSetUp: (() -> Unit)? = null,
 ) {
     Scaffold(modifier = modifier) { innerPadding ->
         Box(
@@ -173,9 +248,17 @@ private fun AnalysisErrorState(
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(24.dp))
-            // Retrying a lost game text cannot work (nothing is registered to re-run), so the
-            // only honest action there is Back.
-            if (onRetry != null && error != AnalysisService.Failure.GAME_TEXT_LOST && error != AnalysisService.Failure.SETUP_DAMAGED) {
+            // A missing engine net is fixed by Setup, not by a retry (D2c): the one filled button is
+            // "Set up", and the game waits on disk until the net is in.
+            if (error == AnalysisService.Failure.SETUP_REQUIRED && onSetUp != null) {
+                Button(onClick = onSetUp, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.analysis_set_up))
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            // Retrying a lost game text cannot work (nothing is registered to re-run), and a retry
+            // cannot install the engine data, so for those two the only other action is Back.
+            if (onRetry != null && error != AnalysisService.Failure.GAME_TEXT_LOST && error != AnalysisService.Failure.SETUP_REQUIRED) {
                 Button(onClick = onRetry, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.analysis_try_again))
                 }
@@ -184,6 +267,13 @@ private fun AnalysisErrorState(
             if (onBack != null) {
                 OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.common_back))
+                }
+            }
+            if (onShareDetails != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                // Sends the diagnostic log (F1): what failed and why, for the developer.
+                TextButton(onClick = onShareDetails, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.analysis_share_details))
                 }
             }
         }
@@ -196,8 +286,7 @@ private fun AnalysisErrorState(
 internal fun failureHintRes(failure: AnalysisService.Failure): Int = when (failure) {
     AnalysisService.Failure.NO_GAMES, AnalysisService.Failure.PARSE -> R.string.analysis_failed_hint
     AnalysisService.Failure.ENGINE_PREPARE, AnalysisService.Failure.ENGINE_START -> R.string.analysis_failed_engine
-    AnalysisService.Failure.SETUP_STORAGE -> R.string.analysis_failed_setup_storage
-    AnalysisService.Failure.SETUP_DAMAGED -> R.string.analysis_failed_setup_damaged
+    AnalysisService.Failure.SETUP_REQUIRED -> R.string.analysis_failed_setup_required
     AnalysisService.Failure.ANALYSIS -> R.string.analysis_failed_generic
     AnalysisService.Failure.GAME_TEXT_LOST -> R.string.analysis_failed_lost
 }
@@ -205,7 +294,6 @@ internal fun failureHintRes(failure: AnalysisService.Failure): Int = when (failu
 @Composable
 private fun statusText(progress: AnalysisProgress): String = when (progress.phase) {
     AnalysisPhase.PREPARING_ENGINE -> stringResource(R.string.progress_downloading_engine)
-    AnalysisPhase.FIRST_RUN_SETUP -> stringResource(R.string.progress_first_run_setup)
     AnalysisPhase.ANALYZING_MOVES -> {
         val (done, total) = wholeMoveCounter(progress.currentMoveIndex, progress.totalMoves)
         stringResource(R.string.progress_analyzing_moves, done, total)
@@ -250,17 +338,6 @@ private fun AnalysisProgressScreenErrorPreview() {
             error = AnalysisService.Failure.PARSE,
             onRetry = {},
             onBack = {},
-        )
-    }
-}
-
-@Preview(showBackground = true, backgroundColor = 0xFF302E2B)
-@Composable
-private fun AnalysisProgressScreenFirstRunPreview() {
-    ChessAnalyzerTheme {
-        AnalysisProgressScreen(
-            progress = AnalysisProgress(phase = AnalysisPhase.FIRST_RUN_SETUP, fractionComplete = 0.1f),
-            onCancel = {},
         )
     }
 }

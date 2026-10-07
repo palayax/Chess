@@ -70,7 +70,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import net.palaya.chessanalyzer.ui.board.PieceGeometry
+import net.palaya.chessanalyzer.ui.model.HomeSetupCard
 import net.palaya.chessanalyzer.ui.model.PieceType
+import net.palaya.chessanalyzer.ui.model.aboutMegabytes
+import net.palaya.chessanalyzer.ui.model.megabytesLabel
+import net.palaya.chessanalyzer.ui.model.progressMegabytes
 import net.palaya.chessanalyzer.ui.model.PlaceholderData
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
@@ -110,6 +114,9 @@ fun ImportScreen(
     pastedPgn: String = "",
     onPastedPgnChange: (String) -> Unit = {},
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    /** D2c: "Finish setting up" above the start card until setup is complete (null hides it). */
+    setupCard: HomeSetupCard? = null,
+    onSetupCardClick: () -> Unit = {},
 ) {
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -125,6 +132,8 @@ fun ImportScreen(
         pastedPgn = pastedPgn,
         onPastedPgnChange = onPastedPgnChange,
         snackbarHostState = snackbarHostState,
+        setupCard = setupCard,
+        onSetupCardClick = onSetupCardClick,
     )
 }
 
@@ -142,6 +151,8 @@ fun ImportScreenContent(
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     /** Test/preview hook: open the paste sheet on first composition. Saved across rotation. */
     initiallyShowPasteSheet: Boolean = false,
+    setupCard: HomeSetupCard? = null,
+    onSetupCardClick: () -> Unit = {},
 ) {
     // The paste field lives in a sheet, not on the page: sharing a game into the app is the main
     // way in, so a permanently open text box was mostly noise. Saveable so rotating the phone with
@@ -174,6 +185,9 @@ fun ImportScreenContent(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (setupCard != null) {
+                item(key = "setup") { FinishSetupCard(card = setupCard, onClick = onSetupCardClick) }
+            }
             item {
                 // Same card either way: the full welcome while there is nothing to look at, a
                 // compact "add another" strip once recent games exist so the list dominates.
@@ -308,9 +322,54 @@ private fun StartCard(
     }
 }
 
+/**
+ * "Finish setting up" (D2c, design §1.4): what is left and one button, like chess.com's gated-feature
+ * card (pattern only). Shows the running download's progress when there is one, and says so when a
+ * shared game is waiting for the engine data.
+ */
+@Composable
+private fun FinishSetupCard(card: HomeSetupCard, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.setup_home_card_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.asHeading(),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (card.running) {
+                    val (done, total) = progressMegabytes(card.bytesDone, card.bytesTotal)
+                    stringResource(R.string.setup_status_downloading, megabytesLabel(done), megabytesLabel(total))
+                } else {
+                    stringResource(R.string.setup_home_card_body, megabytesLabel(aboutMegabytes(card.bytesLeft)))
+                },
+                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (card.gameWaiting) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.setup_game_waiting),
+                    style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.setup_home_card_action))
+            }
+        }
+    }
+}
+
 /** The app's own Cburnett knight (the one on the board), filled in the brand green. */
 @Composable
-private fun KnightIcon(modifier: Modifier = Modifier) {
+internal fun KnightIcon(modifier: Modifier = Modifier) {
     val color = MaterialTheme.colorScheme.primary
     Canvas(modifier = modifier) {
         val path = PieceGeometry.pathFor(PieceType.KNIGHT)
