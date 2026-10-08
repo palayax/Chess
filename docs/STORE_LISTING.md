@@ -11,7 +11,7 @@ Character counts were measured with Python `len()` on the exact text between the
 
 ## App name (Play limit: 30 characters)
 
-**Palaya Chess: Game Review** *(25)*
+**Palaya Chess** *(12; owner, 2026-10-08)*
 
 Alternatives if the owner prefers: `Palaya Chess` (12), `Palaya Chess – Game Analysis` (28).
 

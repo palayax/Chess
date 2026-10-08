@@ -48,7 +48,7 @@ Path: Play Console > Home > **Create app**.
 
 | Field | Enter |
 |---|---|
-| App name | `Palaya Chess: Game Review` (25 characters; limit 30) |
+| App name | `Palaya Chess` (12 characters; limit 30; owner's choice 2026-10-08) |
 | Default language | **English (United States) – en-US** |
 | App or game | **Game** (see the note below) |
 | Free or paid | **Free**. You can change free to paid later. You cannot make a free app paid. |
@@ -65,10 +65,10 @@ either way and you can change it later. The content rating is the same either wa
 
 ### 2.1 App details
 
-**App name** (25 / 30):
+**App name** (12 / 30):
 
 ```
-Palaya Chess: Game Review
+Palaya Chess
 ```
 
 **Short description** (79 / 80):

@@ -4177,3 +4177,33 @@ fully visible).
 3. Hebrew/RTL checks skipped (owner deferred, message from the coordinator); no he-IL pass, no RTL screenshots.
 4. `docs/voice_samples/c1_terms/` (8.6 MB of WAVs) is left uncommitted for the owner to keep or drop. Chess34 still holds a stray `net.palaya.chessanalyzer.engine.test`
    package that was there before this run (not installed here).
+
+## Device regression after C1-device (2026-10-08)
+
+Verification only: no product code changed, nothing committed. HEAD e52bf6f (respelling table + Hebrew/RTL hidden), C1 commentary merged since the last full run (176/0/0).
+
+### Full `:app:connectedDebugAndroidTest`, one device after the other, both started with `-gpu host`
+| Device | Tests | Failures | Errors | Skipped | Wall time |
+|---|---|---|---|---|---|
+| chess36 (API 36) | **177** | 0 | 0 | 0 | 38 min 25 s |
+| chess34 (API 34) | **177** | 0 | 0 | 0 | 25 min 47 s |
+
+Read from `app/build/outputs/androidTest-results/connected/debug/TEST-*.xml` (177 `<testcase>`, 0 `<skipped>`, 0 `<failure>`; AGP names the aggregate after
+its first class); both XMLs copied aside before the next run. 177 = 176 + the new `NeuralTtsProviderInstrumentedTest` case (4 tests in that class). No failure, so no re-run.
+
+### Release smoke check, chess36, release `app-x86_64-release.apk` from HEAD, device language he-IL
+Device language set to Hebrew through Settings > System > Languages (Hebrew moved to first; `config` showed `he-rIL,en-rUS-ldrtl`; the system bars mirrored, the system
+permission dialog was in Hebrew). The app opened fully **left-to-right, English, nothing mirrored**: title at the left, the Settings gear and the row chevrons at the
+right, the back arrow at the left, "Set up Palaya Chess" left-aligned. The models downloaded from the live GitHub release (palayax/Chess, Download tapped; both "Done",
+about 10 min including the pause for my screenshots), then Continue led to Home. Settings lists: name field, Video (Narrator voice, Pace), Advanced (expanded and checked
+through a UI dump: Analysis strength, What the review talks about, built-in voice, Saved narration audio), Share diagnostic log, About, Check for updates.
+**No "Language" row** (the UI dump contains no "language" and no Hebrew string). Screenshots (`adb emu screenrecord screenshot`):
+`docs/screenshots/ltr_he_device_setup.png`, `ltr_he_device_home.png`, `ltr_he_device_settings.png`.
+Restored: language back to en-US only (`config` en-rUS-ldltr, `persist.sys.locale` en-US), app uninstalled, font scale 1.0, emulators killed, adb server stopped.
+
+### Deviations
+1. chess36 was shut down and restarted with `-gpu swangle_indirect` for the smoke check (CLAUDE.md: host GPU gives an all-black screencap); the connected suite itself ran with `-gpu host`.
+2. `cmd locale` has no system-locale command and `setprop persist.sys.locale he-IL` (+ framework restart, + reboot) did not change the configuration, so the language was set through the Settings UI.
+3. The system notification-permission dialog (Android 13+) appeared on Download; answered "Don't allow" (the download does not need it).
+4. chess34 still holds the stray `net.palaya.chessanalyzer.engine.test` package noted in C1-device; untouched.
+5. Not mine: `git status` also shows `docs/STORE_LISTING.md` and `docs/play/PLAY_CONSOLE_ANSWERS.md` modified before this run; left as they are.
