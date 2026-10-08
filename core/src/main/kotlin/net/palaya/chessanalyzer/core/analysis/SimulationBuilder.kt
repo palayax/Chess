@@ -144,7 +144,7 @@ class SimulationBuilder {
         if (takesBack) {
             tradeClause(move, previous!!, before)?.let { clauses += it }
         } else {
-            materialClause(move, exchange)?.let { clauses += it }
+            materialClause(move, exchange, before)?.let { clauses += it }
         }
         val motif = tactic
             ?.takeUnless { restatesTheCapture(it, move) }
@@ -213,11 +213,12 @@ class SimulationBuilder {
      * Only ever claims won material when [ExchangeEvaluator] agrees; a capture that loses the
      * exchange is described as the sacrifice it is.
      */
-    private fun materialClause(move: Move, exchange: Int): String? {
+    private fun materialClause(move: Move, exchange: Int, before: Position): String? {
         if (!move.isCapture && move.promotion == null) return null
         return when {
+            // "winning the exchange" when a minor piece takes a rook and is taken back (C1).
             exchange >= minimumPayoffCp ->
-                ExchangeEvaluator.describeGain(exchange)?.let { "winning $it" } ?: "winning material"
+                ExchangeEvaluator.describeCapture(before, move)?.let { "winning $it" } ?: "winning material"
             // The sacrifice itself is already spelled out by the movement clause.
             exchange <= -minimumPayoffCp -> "betting on the attack instead of the material"
             move.isCapture -> "an even trade"
@@ -440,9 +441,8 @@ class SimulationBuilder {
             TacticType.PASSED_PAWN_BREAKTHROUGH -> return "creates a passed pawn nobody can catch"
             else -> Unit
         }
-        val gain = ExchangeEvaluator.settledGain(start, finalPosition, winner)
-        ExchangeEvaluator.describeGain(gain)?.let { return "wins $it" }
-        if (gain >= minimumPayoffCp) return "wins material"
+        // "wins the exchange" when the line gives a minor piece for a rook and nothing else (C1).
+        ExchangeEvaluator.describeSettled(start, finalPosition, winner, minimumPayoffCp)?.let { return "wins $it" }
         // Nothing cashed in: a reference knows what comes next (the corpus verified it), a game
         // excursion does not and says nothing.
         payoffOverride?.let { return it }

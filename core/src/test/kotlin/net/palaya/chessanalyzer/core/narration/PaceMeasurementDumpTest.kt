@@ -68,7 +68,7 @@ class PaceMeasurementDumpTest {
             out.appendLine(
                 "%3d %-14s %4s %-18s %5d %6d %5d %6d | %s".format(
                     t.seg.index, t.seg.kind, t.seg.ply ?: "-", b, t.leadIn, t.speech, t.seg.holdAfterMs, t.total,
-                    t.seg.narration.take(90)
+                    t.seg.narration
                 )
             )
         }
@@ -155,7 +155,7 @@ class PaceMeasurementDumpTest {
     fun dump() {
         val label = System.getProperty("pace.label") ?: "current"
         val dir = File("build/pace").apply { mkdirs() }
-        for ((name, game) in listOf("immortal" to RealGameFixture.immortal, "game01" to RealGameFixture.game01)) {
+        for ((name, game) in listOf("immortal" to RealGameFixture.immortal, "game01" to RealGameFixture.game01, "chesscom" to RealGameFixture.chesscom)) {
             for (pace in VideoPace.entries) {
                 val r = game.report(null)
                 val s = VideoScriptGenerator(null).generate(r, game.pgn, NarrationOptions(speechWpm = 169, pace = pace))

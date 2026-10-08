@@ -115,4 +115,78 @@ internal object ExchangeEvaluator {
 
     /** How far a net gain may be from a whole piece's value and still be named after it. */
     const val GAIN_TOLERANCE_CP = 40
+
+    /**
+     * "the exchange" when [move] is a minor piece capturing a rook and the swap-off nets the rook's
+     * value minus the minor's (the minor is taken back): `rook - knight` = 180, `rook - bishop` = 170,
+     * both inside [EXCHANGE_MIN_CP]..[EXCHANGE_MAX_CP]. Otherwise [describeGain] of the swap-off value,
+     * so a free rook is still "a rook" and an unnamed gain is null (C1, ANALYSIS_SPEC 6.1).
+     */
+    fun describeCapture(before: Position, move: Move): String? {
+        val gain = see(before, move)
+        if (isExchangeCapture(before, move) && gain in EXCHANGE_MIN_CP..EXCHANGE_MAX_CP) return "the exchange"
+        return describeGain(gain)
+    }
+
+    /** A knight or bishop captures a rook (never en passant, never a promotion). */
+    fun isExchangeCapture(before: Position, move: Move): Boolean {
+        if (!move.isCapture || move.isEnPassant || move.promotion != null) return false
+        val mover = before.pieceAt(move.from)?.type ?: return false
+        val victim = before.pieceAt(move.to)?.type ?: return false
+        return victim == PieceType.ROOK && (mover == PieceType.KNIGHT || mover == PieceType.BISHOP)
+    }
+
+    /**
+     * True when, between [from] and [to], [winner] has given up exactly one minor piece and taken exactly
+     * one rook, with no other change in either side's queens, rooks, minors or pawns: the shape every
+     * player calls "winning the exchange". A count of pieces by type, not a centipawn band: a bishop for
+     * two pawns is also worth about 130 and is not the exchange (ANALYSIS_SPEC 6.1).
+     */
+    fun winsTheExchange(from: Position, to: Position, winner: Color): Boolean {
+        val loser = winner.opposite()
+        fun delta(color: Color, type: PieceType) = count(to, color, type) - count(from, color, type)
+        fun minors(color: Color, position: Position) =
+            count(position, color, PieceType.KNIGHT) + count(position, color, PieceType.BISHOP)
+        val winnerMinors = minors(winner, to) - minors(winner, from)
+        val loserMinors = minors(loser, to) - minors(loser, from)
+        return winnerMinors == -1 && loserMinors == 0 &&
+            delta(loser, PieceType.ROOK) == -1 && delta(winner, PieceType.ROOK) == 0 &&
+            delta(winner, PieceType.QUEEN) == 0 && delta(loser, PieceType.QUEEN) == 0 &&
+            delta(winner, PieceType.PAWN) == 0 && delta(loser, PieceType.PAWN) == 0
+    }
+
+    /**
+     * [describeGain] of the material [winner] netted between [from] and [to], settled, with "the exchange"
+     * when [winsTheExchange]; "material" for a gain of at least [minimumCp] that is neither; null below.
+     */
+    fun describeSettled(from: Position, to: Position, winner: Color, minimumCp: Int = 100): String? {
+        val gain = settledGain(from, to, winner)
+        if (gain < minimumCp) return null
+        if (winsTheExchange(from, settledPosition(to, winner), winner) && gain in EXCHANGE_MIN_CP..EXCHANGE_MAX_CP) return "the exchange"
+        return describeGain(gain) ?: "material"
+    }
+
+    /**
+     * [finalPosition] with the opponent's best take-back played when it is their move and it wins
+     * something (the capture [settledGain] charges): the board the pieces are counted on, so a line that
+     * stops right after Bxg7 is still "the exchange" once Kxg7 has been allowed for.
+     */
+    fun settledPosition(finalPosition: Position, winner: Color): Position {
+        if (finalPosition.sideToMove == winner) return finalPosition
+        val takeBack = finalPosition.legalMoves().filter { it.isCapture }.maxByOrNull { see(finalPosition, it) } ?: return finalPosition
+        return if (see(finalPosition, takeBack) > 0) finalPosition.makeMove(takeBack) else finalPosition
+    }
+
+    private fun count(position: Position, color: Color, type: PieceType): Int {
+        var n = 0
+        for (index in 0..63) {
+            val piece = position.pieceAt(Square(index)) ?: continue
+            if (piece.color == color && piece.type == type) n++
+        }
+        return n
+    }
+
+    /** `rook - bishop` (170) and `rook - knight` (180), each [GAIN_TOLERANCE_CP] either way. */
+    const val EXCHANGE_MIN_CP = 500 - 330 - GAIN_TOLERANCE_CP
+    const val EXCHANGE_MAX_CP = 500 - 320 + GAIN_TOLERANCE_CP
 }

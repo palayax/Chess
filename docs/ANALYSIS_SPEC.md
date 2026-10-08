@@ -323,6 +323,12 @@ A walkthrough is read as fact, so each sentence is something the board proves:
 - **A gain is named only when it is within 40 cp of a whole piece** (`GAIN_TOLERANCE_CP`): queen 900,
   rook 500, piece 325, pawn 100. Anything between is "material": a rook taken for a bishop (+170) is
   not "a pawn", and a queen taken by a pawn that is then recaptured (+800) is not "a rook".
+- **"The exchange" is counted in pieces, not in centipawns (C1).** A single capture "wins the exchange"
+  when a knight or bishop takes a rook and the swap-off nets `rook - minor` (130..220 cp,
+  `ExchangeEvaluator.describeCapture`); a line wins it when, between its start and its settled end
+  (`settledPosition`: the opponent's best take-back played when it is their move), the winner has given
+  up exactly one minor piece and taken exactly one rook with no other change in queens, rooks, minors or
+  pawns (`winsTheExchange`). A bishop for two pawns is worth about the same and is "material".
 - **The payoff is what the line proves, settled.** A line that ends in checkmate says "mates in N".
   Otherwise it is the material the winning side has netted between the start and the end of the
   line - *after the opponent has taken back* the most the exchange evaluator says it can
@@ -375,7 +381,7 @@ whole PV and its depth (`CandidateLine.pvUci`, `CandidateLine.depth`, from the p
 2. What the shown plies prove on the board: "The line ends in checkmate." when its last move mates;
    otherwise, when the material the mover has netted, settled (`ExchangeEvaluator.settledGain`: the
    opponent's best take-back charged when it is their move), is at least 100 cp, "In this line White wins a
-   piece." named by the 40 cp rule of §6.1, "material" between two piece values. Nothing for a line that
+   piece." named by the 40 cp rule of §6.1, "the exchange" by its piece count (§6.1, C1), "material" between two piece values. Nothing for a line that
    nets nothing or gives material up.
 3. Who: "you" / "your opponent" for a chosen side, colours otherwise (§7 rule 4).
 
@@ -423,15 +429,16 @@ true is dropped, not hedged** (§7.2). Examples of what comes out:
 - MISS + mate: "Better was Qb8+, forcing mate in 3."
 - BEST with a motif: "Qb3 matches the engine's top choice. This pins the pawn on b7 to the knight on b8."
 
-The shapes, per class:
+The shapes, per class (each lead has two or three phrasings, chosen by the rule in §7.3; the first is shown):
 
 | Class | Text |
 |---|---|
 | FORCED, BOOK | "X was the only legal move." / "X follows known opening theory." |
 | BRILLIANT | the sacrifice lead (below), then what the move does |
-| GREAT, BEST, EXCELLENT, GOOD | one lead sentence about the engine's verdict, then what the move does |
-| INACCURACY, MISTAKE, BLUNDER | what went wrong (the opponent's reply, or "X gives back ground."), then "Better was Y[, which ...]." |
-| MISS | one sentence: "Better was Y, forcing mate in N." / "..., keeping a decisive advantage." |
+| GREAT | "X was the only move that kept things on track." (an *only move*: the MultiPV gap of §2), then what the move does |
+| BEST, EXCELLENT, GOOD | one lead sentence about the engine's verdict, then what the move does |
+| INACCURACY, MISTAKE, BLUNDER | what went wrong (the opponent's reply, or "X gives back ground." in the register of the class), then the evaluation in words when the move crossed a band ("That takes White from winning to about level.", §7.3), then "Better was Y[, which ...]." |
+| MISS | the evaluation in words when a band was crossed, then "Better was Y, forcing mate in N." / "..., keeping a winning position." (below 95 win-percent) / "..., keeping a decisive advantage." (from 95) |
 
 Rules every template obeys:
 
@@ -512,6 +519,56 @@ engine's own numbers) at generation time:
   moves here" when nothing can be taken (the classifier requires a *legal* capture, §2).
 - **Unprovable additions are not made**: "keeping material level", "stunning", "the point becomes clear
   a few moves later", "sets up a clearance on e2" (a motif's name with a square) are gone.
+- **A professional term is used only where its definition is proved (C1, `docs/COMMENTARY_STYLE.md`).**
+  The vocabulary-to-proof table there is binding: "fork" / "pawn fork" (the moved piece attacks every
+  named target; a pawn for the pawn fork), "absolute pin" (the rear piece is the king) and "relative
+  pin" (the rear piece is worth more), "skewer", "discovered attack" / "discovered check" (a new line
+  through the vacated square), "double check" (two checkers), "en prise" and "loose" (attacked by the
+  mover, no defender), "trapped" (every legal move of the piece loses material by exchange), "wins the
+  exchange" (§6.1), "zwischenzug" (the move gives check or captures something worth more than the mover,
+  a capture that does not lose material was waiting on an enemy piece worth a minor or more, and the
+  engine's line makes it on the mover's next move or the one after; said as the engine's line),
+  "overloaded" (on the position before the move the named piece is the opponent's and the sole defender
+  of two of its pieces that the mover attacks, and the engine's line lands on one of them; said as the
+  engine's line), "desperado" (the mover's piece, worth a minor or more, could have been taken where it
+  stood if the opponent had the move, the capture loses material by exchange, and the piece can still be
+  taken where it landed), a back-rank mate "threat" (the king on its back rank, every forward square
+  held by its own men with at least one pawn among them, and a rook or queen move onto that rank would
+  mate if the opponent could pass; the move named is the first such move in UCI order), "forced mate in
+  N" (the engine's own mate distance: before the move for the mover's and the better move's mate,
+  after the move for the reply's), "only move" (GREAT: the engine's top move with a MultiPV gap of at
+  least 10 win-percent, which is the "real ground" of §9), and the evaluation words (§7.3). Terms whose
+  proof is not on the board or in the numbers are not used: "simplifies", "liquidates", "trades into a
+  winning endgame", "loses a tempo", "converts", and any plan, idea or intention.
+
+### 7.3 Variety and the evaluation in words (C1)
+
+**Variety is deterministic.** Every template has two or three phrasings (`docs/COMMENTARY_STYLE.md` lists
+them all). Which one a card gets is `Variety(ply).index(template, n) = (ply + hash(template)) mod n`, with
+`ply` read off the position (`CommentaryGenerator.plyOf`) and `hash` Java's `String.hashCode` of the
+template's key. So: the same game always produces the same text (the narration cache is keyed by text, and
+the audits replay the recordings); two consecutive cards that use the same template never share a
+phrasing, because the index steps with the ply; and different templates on one card start at different
+offsets. The second sentence of a praised move says "This ..." or "It ..." and never repeats the move the
+lead just named. No randomness, no clock, no game-level state: the text stays a pure function of the
+annotation and the viewer's side (§7.1), and `regenerate` is byte-identical with the analysis-time text.
+
+**Tone follows the class.** A blunder or a mate gets short sentences ("Kb1 throws a big chunk of the
+position away."); an inaccuracy a calmer register ("Be3 is not the most precise."); a mistake sits between
+("b5 goes wrong."). Each "wrong" wording is a reading of the loss band that defines its class (§2: at least
+5, 10 and 20 win-percent) and of the severity words of §9 ("real ground" is a loss of 10 or more, "a big
+chunk" 18 or more).
+
+**The evaluation in words.** An error (INACCURACY, MISTAKE, BLUNDER, MISS) that moved the mover's
+win-percent across one of the bands of §9 (`NarrationVocabulary.standing`) says so, mover-relative, with
+the same words the narrated video uses: decisively winning (95 and up), winning (82), clearly better (68),
+slightly better (57), about level (43), slightly worse (32), clearly worse (18), losing (5), decisively
+lost. "That takes White from winning to about level." / "The position swings from winning to about level
+for White." / "From winning to about level in one move: that is what this cost White." No sentence when the
+move stayed inside one band, never on a move the engine approved of, and never a band the numbers do not
+give. The sentence has no verb that agrees with its subject, so the "you" form is the colour form with the
+subject word changed (§7 rule 4). The MISS wording keeps "a winning position" below 95 and "a decisive
+advantage" from 95 (a MISS needs 90 win-percent or a mate before the move, §2).
 
 ---
 
@@ -756,6 +813,21 @@ A run is coloured by its most extreme member: the **worst** classification in a 
 
 Overlaps are resolved longest-first, then earliest-first; a ply belongs to at most one
 sequence, so no UI ever has to draw two bands over one move.
+
+### 9.3a Material and evaluation words in the narration (C1)
+
+The narrated video names material the way the card text and the walkthrough do (§6.1): a unit only
+within 40 cp of its value (`NarrationVocabulary.materialGain`: queen 900, rook 500, piece 325, pawn 100;
+"material" otherwise), "the exchange" when a line's settled boards show a minor piece given for a rook
+and nothing else (`materialGainAlong`, `MaterialGain.EXCHANGE`), and a tactic's advertised swing by the
+same tolerance (`materialPayoff`: "serious material" from 200 and "material" from 100 when no unit
+fits). Before C1 "a rook in the bank" was said for any swing of 500 or more and "a pawn up" for a
+settled +170 (the exchange). The evaluation words (`Standing`) are the card's: "decisively winning",
+"winning", "clearly better", "slightly better", "about level", "slightly worse", "clearly worse",
+"losing", "decisively lost" (§7.3). The spoken motif sentences (`Sentence.TacticPoint`) carry the
+professional terms of §7.2 with the same proofs behind them, in two or three phrasings each, and say what
+the detector proved and no more ("is attacked", "is exposed", never "falls" for a piece the opponent may
+still save).
 
 ### 9.4 Score display
 

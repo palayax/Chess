@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Claim-by-claim audit of the generated card texts and walkthroughs (docs/COMMENTARY_AUDIT.md).
 
-    python scripts/audit_commentary.py after core/build/commentary_audit/after.jsonl
+    python scripts/audit_commentary.py after  core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
-    python scripts/audit_commentary.py lines core/build/commentary_audit/best_lines.jsonl
+    python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
+    python scripts/audit_commentary.py mutate core/build/commentary_audit/after.jsonl
 
 For every sentence of every annotation text, and every intro / step / payoff of every walkthrough, the
 claim it makes is re-derived from the recorded position and the recorded engine data with python-chess
@@ -13,17 +14,33 @@ claim it makes is re-derived from the recorded position and the recorded engine 
     F  harmless flavour  true, and asserts nothing beyond the classification it follows
     W  WRONG             false, attributed to the wrong move or side, or not provable from the data
 
+``after`` reads the JSON lines written by core's test ``CommentaryAuditDumpTest`` (the Immortal Game, the
+Opera Game and game01, for no side, White and Black). Every template and every term of
+docs/COMMENTARY_STYLE.md (C1) has a verifier here: a "fork" must show the moved piece attacking every
+named target, a "pin" its slider, front and rear piece on one line (an "absolute pin" with the king at the
+rear), "wins the exchange" a minor piece taking a rook for a net of rook-minus-minor, a "zwischenzug" a
+forcing move whose postponed capture the engine's line still makes, an "overloaded" defender the sole
+guard of two attacked pieces, a "desperado" a piece that was lost where it stood, a back-rank "threat" a
+heavy-piece mate if the opponent could pass, "forced mate in N" the engine's own distance, an "only move"
+the MultiPV gap, and the evaluation words the win-percent bands.
+
+``mutate`` is the negative control: it breaks one template or term at a time in the recorded texts (a
+wrong fork square, "a rook" for the exchange, an absolute pin that is relative, "en prise" for a
+defended piece, mate in N+1, a shifted evaluation band, a zwischenzug on a quiet move, ...) and shows
+that every mutation is flagged WRONG. It exits non-zero when one is not.
+
 ``lines`` (V2, ANALYSIS_SPEC 6.2) audits every engine line the Board's "Show the best line" can display and
 every line the narrated video plays, for the two recorded games plus game01 (written by core's test
 ``CommentaryAuditDumpTest.dumpBestLines``): each move is replayed and must be legal, its SAN must be
 python-chess's, the line must be a prefix of the recorded engine PV cut by the rule (depth / 2, at most 8,
 and nothing after a checkmate), alternatives must be within 2 win-percent and not the move played, and each
 sentence of the caption is re-derived (the engine's score as recorded, checkmate from the board, a material
-gain settled with python-chess's own exchange evaluation and named by the 40 cp rule).
+gain settled with python-chess's own exchange evaluation and named by the 40 cp rule, "the exchange" by
+the count of pieces).
 
-The recordings (core/src/test/resources/pacing/*.analysis.json) are the engine data. ``after`` reads the
-JSON lines written by core's test ``CommentaryAuditDumpTest``; ``before`` reads the text dump of the
-generator as it was before R1b, kept in docs/audit/ so the "before" table can be reproduced.
+The recordings (core/src/test/resources/pacing/*.analysis.json) are the engine data. ``before`` reads the
+text dump of the generator as it was before R1b, kept in docs/audit/ so the "before" table can be
+reproduced.
 """
 import json
 import math
@@ -36,12 +53,14 @@ import chess
 ROOT = __file__.replace("\\", "/").rsplit("/scripts/", 1)[0]
 VALUE = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330, chess.ROOK: 500, chess.QUEEN: 900, chess.KING: 20000}
 NAME = {chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop", chess.ROOK: "rook", chess.QUEEN: "queen", chess.KING: "king"}
+TYPE = {v: k for k, v in NAME.items()}
 GAME_FILES = {
     "immortal": ROOT + "/core/src/test/resources/pacing/immortal.analysis.json",
     "chesscom": ROOT + "/core/src/test/resources/pacing/chesscom_style_game.analysis.json",
     "game01": ROOT + "/core/src/test/resources/pacing/game01.analysis.json",
 }
 GAIN_WORDS = {"a queen": 900, "a rook": 500, "a piece": 325, "a pawn": 100}
+EXCHANGE_MIN, EXCHANGE_MAX = 500 - 330 - 40, 500 - 320 + 40
 _analysis = {}
 
 
@@ -176,9 +195,81 @@ def material(board, color):
     return sum(VALUE[p.piece_type] for p in board.piece_map().values() if p.color == color and p.piece_type != chess.KING)
 
 
+def pass_turn(board):
+    """The same position with the other side to move (a null move), or None while in check."""
+    if board.is_check():
+        return None
+    b = board.copy()
+    b.push(chess.Move.null())
+    return b
+
+
+def best_capture_on(board, square):
+    """The most the side to move nets by capturing on [square], or None without a legal capture there."""
+    nets = [see(board, m) for m in board.legal_moves if board.is_capture(m) and m.to_square == square]
+    return max(nets) if nets else None
+
+
+def count(board, color, piece_type):
+    return len(board.pieces(piece_type, color))
+
+
+def wins_the_exchange(start, end, winner):
+    """Winner gave exactly one minor and took exactly one rook; queens, pawns, the rest unchanged."""
+    loser = not winner
+
+    def minors(b, c):
+        return count(b, c, chess.KNIGHT) + count(b, c, chess.BISHOP)
+    return (minors(end, winner) - minors(start, winner) == -1 and minors(end, loser) - minors(start, loser) == 0
+            and count(end, loser, chess.ROOK) - count(start, loser, chess.ROOK) == -1
+            and count(end, winner, chess.ROOK) == count(start, winner, chess.ROOK)
+            and count(end, winner, chess.QUEEN) == count(start, winner, chess.QUEEN)
+            and count(end, loser, chess.QUEEN) == count(start, loser, chess.QUEEN)
+            and count(end, winner, chess.PAWN) == count(start, winner, chess.PAWN)
+            and count(end, loser, chess.PAWN) == count(start, loser, chess.PAWN))
+
+
+def is_exchange_capture(board, move):
+    mover = board.piece_at(move.from_square)
+    victim = board.piece_at(move.to_square)
+    return (not board.is_en_passant(move) and move.promotion is None and mover is not None and victim is not None
+            and victim.piece_type == chess.ROOK and mover.piece_type in (chess.KNIGHT, chess.BISHOP))
+
+
+def standing_words(wp):
+    """The evaluation bands of ANALYSIS_SPEC 9 (NarrationVocabulary.standing), in the card's words."""
+    if wp >= 95:
+        return "decisively winning"
+    if wp >= 82:
+        return "winning"
+    if wp >= 68:
+        return "clearly better"
+    if wp >= 57:
+        return "slightly better"
+    if wp >= 43:
+        return "about level"
+    if wp >= 32:
+        return "slightly worse"
+    if wp >= 18:
+        return "clearly worse"
+    if wp >= 5:
+        return "losing"
+    return "decisively lost"
+
+
 # ---------------------------------------------------------------------------------------------
 # Phrase verification (the AFTER texts)
 # ---------------------------------------------------------------------------------------------
+
+PIECE_ON = r"the (\w+) on ([a-h][1-8])"
+
+
+def named_piece(board, piece, sq, color):
+    """True when a [color] [piece] stands on [sq]."""
+    s = chess.parse_square(sq)
+    pc = board.piece_at(s)
+    return pc is not None and pc.color == color and NAME[pc.piece_type] == piece
+
 
 def verify_phrase(phrase, before, move, after, rec, context):
     """Return (verdict, note) for a verb phrase said about [move] from [before] to [after]."""
@@ -186,20 +277,28 @@ def verify_phrase(phrase, before, move, after, rec, context):
     them = not us
     p = phrase.strip().rstrip(".")
 
-    if p == "is checkmate":
+    if p in ("is checkmate", "is mate", "delivers checkmate"):
         return ("S", "checkmate on the board") if after.is_checkmate() else ("W", "not checkmate")
-    if p == "starts a forced mate":
+
+    m = re.match(r"(?:starts|begins) a forced mate(?: in (\d+))?$|sets a forced mate in (\d+) in motion$", p)
+    if m:
+        n = int(m.group(1) or m.group(2)) if (m.group(1) or m.group(2)) else None
         if context == "found":
             mm = mover_mate_after(rec)
-            return ("S", "engine: mate for the mover after the move") if (mm is not None and mm > 0) else ("W", "no engine mate for the mover")
+            ok = mm is not None and mm > 0 and (n is None or mover_mate_before(rec) == n)
+            return ("S", "engine: mate for the mover (in %s before the move)" % mover_mate_before(rec)) if ok else ("W", "no engine mate for the mover, or the wrong distance")
         if context == "allowed":
-            return ("S", "engine: mate for the opponent after the move") if (mover_mate_after(rec) or 0) < 0 else ("W", "no engine mate against the mover")
+            mm = mover_mate_after(rec) or 0
+            ok = mm < 0 and (n is None or -mm == n)
+            return ("S", "engine: mate in %d for the opponent after the move" % -mm) if ok else ("W", "no engine mate against the mover, or the wrong distance")
         mm = mover_mate_before(rec)
-        return ("S", "engine: mate for the mover before the move") if (mm is not None and mm > 0) else ("W", "no engine mate")
-    if p == "is a back-rank mate":
+        ok = mm is not None and mm > 0 and (n is None or mm == n)
+        return ("S", "engine: mate in %s for the mover before the move" % mm) if ok else ("W", "no engine mate, or the wrong distance")
+
+    if p in ("is a back-rank mate", "is mate on the back rank"):
         k = after.king(them)
         return ("S", "mate, king on the back rank") if after.is_checkmate() and chess.square_rank(k) in (0, 7) else ("W", "not a back-rank mate")
-    if p == "is a smothered mate":
+    if p in ("is a smothered mate", "is a smothered mate: the king is boxed in by its own pieces"):
         if not after.is_checkmate():
             return ("W", "not mate")
         ks = after.king(them)
@@ -207,126 +306,181 @@ def verify_phrase(phrase, before, move, after, rec, context):
         ok = len(checkers) == 1 and after.piece_at(checkers[0]).piece_type == chess.KNIGHT and all(
             after.piece_at(n) is not None and after.piece_at(n).color == them for n in after.attacks(ks))
         return ("S", "a lone knight mates a king boxed in by its own pieces") if ok else ("W", "not a smothered mate")
-    if p == "gives double check":
+    if p in ("gives double check", "is a double check: only a king move can answer it"):
         return ("S", "two checkers") if len(after.checkers()) >= 2 else ("W", "not a double check")
 
-    m = re.match(r"forks (.+)$", p)
+    m = re.match(r"(?:forks (.+?)(?: with a pawn)?|is a (?:pawn )?fork, hitting (.+?)(?: at once)?|lands a fork on (.+))$", p)
     if m:
-        targets = re.findall(r"the (\w+) on ([a-h][1-8])", m.group(1))
+        pawn = "with a pawn" in p or "pawn fork" in p
+        targets = re.findall(PIECE_ON, m.group(1) or m.group(2) or m.group(3))
         ok = len(targets) >= 2
         for piece, sq in targets:
             s = chess.parse_square(sq)
-            pc = after.piece_at(s)
-            ok = ok and pc is not None and pc.color == them and NAME[pc.piece_type] == piece and move.to_square in after.attackers(us, s)
-        return ("S", "the moved piece attacks every named piece") if ok else ("W", "fork not borne out")
+            ok = ok and named_piece(after, piece, sq, them) and move.to_square in after.attackers(us, s)
+        if pawn:
+            ok = ok and after.piece_at(move.to_square).piece_type == chess.PAWN
+        return ("S", "the moved piece attacks every named piece%s" % (", and is a pawn" if pawn else "")) if ok else ("W", "fork not borne out")
 
-    m = re.match(r"attacks (.+) at once$", p)
+    m = re.match(r"(?:attacks (.+) at once|creates a double attack on (.+))$", p)
     if m:
-        targets = re.findall(r"the (\w+) on ([a-h][1-8])", m.group(1))
-        ok = len(targets) >= 2 and all(
-            after.piece_at(chess.parse_square(sq)) is not None and after.piece_at(chess.parse_square(sq)).color == them
-            and after.attackers(us, chess.parse_square(sq)) for _, sq in targets)
+        targets = re.findall(PIECE_ON, m.group(1) or m.group(2))
+        ok = len(targets) >= 2 and all(named_piece(after, piece, sq, them) and after.attackers(us, chess.parse_square(sq)) for piece, sq in targets)
         return ("S", "each target attacked") if ok else ("W", "double attack not borne out")
 
-    m = re.match(r"pins the (\w+) on ([a-h][1-8]) to the (\w+) on ([a-h][1-8])$", p)
+    m = re.match(r"(?:pins the (\w+) on ([a-h][1-8]) to the (\w+) on ([a-h][1-8])"
+                 r"|puts the (\w+) on ([a-h][1-8]) in an absolute pin against the (king) on ([a-h][1-8])"
+                 r"|ties the (\w+) on ([a-h][1-8]) to the (\w+) on ([a-h][1-8]) with a relative pin)$", p)
     if m:
-        front = chess.parse_square(m.group(2))
-        rear = chess.parse_square(m.group(4))
-        fp, rp = after.piece_at(front), after.piece_at(rear)
-        ok = bool(fp and rp and fp.color == them and rp.color == them and NAME[fp.piece_type] == m.group(1) and NAME[rp.piece_type] == m.group(3))
+        g = [x for x in m.groups() if x is not None]
+        fpiece, fsq, rpiece, rsq = g
+        front = chess.parse_square(fsq)
+        rear = chess.parse_square(rsq)
+        ok = named_piece(after, fpiece, fsq, them) and named_piece(after, rpiece, rsq, them)
         ok = ok and any(after.piece_at(s).piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN) and on_line_beyond(after, s, front, rear)
                         for s in after.attackers(us, front))
+        if "absolute pin" in p:
+            ok = ok and rpiece == "king"
+        if "relative pin" in p:
+            ok = ok and rpiece != "king" and VALUE[TYPE[rpiece]] > VALUE[TYPE[fpiece]]
         return ("S", "slider, front and rear on one line") if ok else ("W", "pin not borne out")
 
-    m = re.match(r"skewers the (\w+) on ([a-h][1-8]), with the (\w+) on ([a-h][1-8]) behind it$", p)
+    m = re.match(r"(?:skewers the (\w+) on ([a-h][1-8]), with the (\w+) on ([a-h][1-8]) behind it"
+                 r"|is a skewer: it attacks the (\w+) on ([a-h][1-8]), and the (\w+) on ([a-h][1-8]) stands behind it on the same line)$", p)
     if m:
-        front = chess.parse_square(m.group(2))
-        rear = chess.parse_square(m.group(4))
-        ok = any(after.piece_at(s).piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN) and on_line_beyond(after, s, front, rear)
-                 for s in after.attackers(us, front))
+        fpiece, fsq, rpiece, rsq = [x for x in m.groups() if x is not None]
+        front = chess.parse_square(fsq)
+        rear = chess.parse_square(rsq)
+        ok = named_piece(after, fpiece, fsq, them) and named_piece(after, rpiece, rsq, them)
+        ok = ok and any(after.piece_at(s).piece_type in (chess.BISHOP, chess.ROOK, chess.QUEEN) and on_line_beyond(after, s, front, rear)
+                        for s in after.attackers(us, front))
         return ("S", "line verified") if ok else ("W", "skewer not borne out")
 
-    m = re.match(r"uncovers the (\w+) on ([a-h][1-8]), which now attacks the (\w+) on ([a-h][1-8])$", p)
+    m = re.match(r"(?:uncovers the (\w+) on ([a-h][1-8]), which now attacks the (\w+) on ([a-h][1-8])"
+                 r"|is a discovered attack: the (\w+) on ([a-h][1-8]) is unmasked against the (\w+) on ([a-h][1-8]))$", p)
     if m:
-        a = chess.parse_square(m.group(2))
-        t = chess.parse_square(m.group(4))
-        ok = a in after.attackers(us, t) and a not in before.attackers(us, t) and a != move.to_square
+        apiece, asq, tpiece, tsq = [x for x in m.groups() if x is not None]
+        a = chess.parse_square(asq)
+        t = chess.parse_square(tsq)
+        ok = named_piece(after, apiece, asq, us) and named_piece(after, tpiece, tsq, them)
+        ok = ok and a in after.attackers(us, t) and a not in before.attackers(us, t) and a != move.to_square
         return ("S", "new attack through the vacated square") if ok else ("W", "discovery not borne out")
 
-    m = re.match(r"gives check by uncovering the (\w+) on ([a-h][1-8])$", p)
+    m = re.match(r"(?:gives check by uncovering the (\w+) on ([a-h][1-8])|is a discovered check from the (\w+) on ([a-h][1-8]))$", p)
     if m:
-        a = chess.parse_square(m.group(2))
-        return ("S", "discovered check") if a in after.checkers() and a != move.to_square else ("W", "not a discovered check")
+        apiece, asq = [x for x in m.groups() if x is not None]
+        a = chess.parse_square(asq)
+        ok = named_piece(after, apiece, asq, us) and a in after.checkers() and a != move.to_square
+        return ("S", "discovered check") if ok else ("W", "not a discovered check")
 
-    m = re.match(r"attacks the undefended (\w+) on ([a-h][1-8])$", p)
+    m = re.match(r"(?:attacks the undefended (\w+) on ([a-h][1-8])|hits the loose (\w+) on ([a-h][1-8])|attacks the (\w+) on ([a-h][1-8]), which is en prise)$", p)
     if m:
-        s = chess.parse_square(m.group(2))
-        pc = after.piece_at(s)
-        ok = pc is not None and pc.color == them and NAME[pc.piece_type] == m.group(1) and move.to_square in after.attackers(us, s) and not after.attackers(them, s)
+        piece, sq = [x for x in m.groups() if x is not None]
+        s = chess.parse_square(sq)
+        ok = named_piece(after, piece, sq, them) and move.to_square in after.attackers(us, s) and not after.attackers(them, s)
         return ("S", "attacked by the moved piece, nothing defends it") if ok else ("W", "undefended attack not borne out")
 
-    m = re.match(r"leaves the (\w+) on ([a-h][1-8]) undefended, with the (\w+) on ([a-h][1-8]) attacking it$", p)
+    m = re.match(r"(?:leaves the (\w+) on ([a-h][1-8]) undefended, with the (\w+) on ([a-h][1-8]) attacking it"
+                 r"|leaves the (\w+) on ([a-h][1-8]) en prise to the (\w+) on ([a-h][1-8]))$", p)
     if m:
-        s = chess.parse_square(m.group(2))
-        a = chess.parse_square(m.group(4))
-        pc = after.piece_at(s)
-        ok = pc is not None and pc.color == them and NAME[pc.piece_type] == m.group(1) and a in after.attackers(us, s) and not after.attackers(them, s)
+        piece, sq, apiece, asq = [x for x in m.groups() if x is not None]
+        s = chess.parse_square(sq)
+        a = chess.parse_square(asq)
+        ok = named_piece(after, piece, sq, them) and named_piece(after, apiece, asq, us) and a in after.attackers(us, s) and not after.attackers(them, s)
         return ("S", "attacked by the named piece, nothing defends it") if ok else ("W", "not borne out")
 
-    m = re.match(r"attacks the (\w+) on ([a-h][1-8]) with a (\w+)$", p)
+    m = re.match(r"(?:attacks|hits) the (\w+) on ([a-h][1-8]) with an? (\w+)$", p)
     if m:
         s = chess.parse_square(m.group(2))
         pc = after.piece_at(s)
         att = attackers(after, us, s)
-        ok = pc is not None and pc.color == them and NAME[pc.piece_type] == m.group(1) and bool(att) \
+        ok = named_piece(after, m.group(1), m.group(2), them) and bool(att) \
             and NAME[after.piece_at(att[0]).piece_type] == m.group(3) and VALUE[after.piece_at(att[0]).piece_type] < VALUE[pc.piece_type]
         return ("S", "attacked by a cheaper piece") if ok else ("W", "not borne out")
 
-    m = re.match(r"attacks the (\w+) on ([a-h][1-8]) more often than it is defended$", p)
+    m = re.match(r"(?:attacks the (\w+) on ([a-h][1-8]) more often than it is defended|piles up on the (\w+) on ([a-h][1-8]): more attackers than defenders)$", p)
     if m:
-        s = chess.parse_square(m.group(2))
-        pc = after.piece_at(s)
-        ok = pc is not None and pc.color == them and NAME[pc.piece_type] == m.group(1) and len(after.attackers(us, s)) > len(after.attackers(them, s))
+        piece, sq = [x for x in m.groups() if x is not None]
+        s = chess.parse_square(sq)
+        ok = named_piece(after, piece, sq, them) and len(after.attackers(us, s)) > len(after.attackers(them, s))
         return ("S", "more attackers than defenders") if ok else ("W", "not borne out")
 
-    m = re.match(r"leaves the (\w+) on ([a-h][1-8]) attacked by a (\w+)$", p)
+    m = re.match(r"leaves the (\w+) on ([a-h][1-8]) attacked by an? (\w+)$", p)
     if m:
         s = chess.parse_square(m.group(2))
-        pc = after.piece_at(s)
         att = attackers(after, us, s)
-        ok = pc is not None and pc.color == them and bool(att) and NAME[after.piece_at(att[0]).piece_type] == m.group(3)
+        ok = named_piece(after, m.group(1), m.group(2), them) and bool(att) and NAME[after.piece_at(att[0]).piece_type] == m.group(3)
         return ("S", "attacked by the named piece") if ok else ("W", "not borne out")
 
     m = re.match(r"leaves the (\w+) on ([a-h][1-8]) attacked more often than it is defended$", p)
     if m:
         s = chess.parse_square(m.group(2))
-        pc = after.piece_at(s)
-        ok = pc is not None and pc.color == them and len(after.attackers(us, s)) > len(after.attackers(them, s))
+        ok = named_piece(after, m.group(1), m.group(2), them) and len(after.attackers(us, s)) > len(after.attackers(them, s))
         return ("S", "more attackers than defenders") if ok else ("W", "not borne out")
 
-    m = re.match(r"leaves the (\w+) on ([a-h][1-8]) with no safe square$", p)
+    m = re.match(r"(?:leaves the (\w+) on ([a-h][1-8]) with no safe square|traps the (\w+) on ([a-h][1-8]): every square it can reach loses material)$", p)
     if m:
-        s = chess.parse_square(m.group(2))
-        pc = after.piece_at(s)
-        if not (pc is not None and pc.color == them and not after.is_check()):
+        piece, sq = [x for x in m.groups() if x is not None]
+        s = chess.parse_square(sq)
+        if not (named_piece(after, piece, sq, them) and not after.is_check()):
             return ("W", "no such piece, or in check")
         moves = [mv for mv in after.legal_moves if mv.from_square == s]
         ok = bool(moves) and all(see(after, mv) < 0 for mv in moves)
         return ("S", "every legal move of the piece loses material by exchange") if ok else ("W", "the piece has a safe move")
 
-    m = re.match(r"wins (a queen|a rook|a piece|a pawn)$", p)
+    m = re.match(r"(?:wins|picks up) (a queen|a rook|a piece|a pawn|the exchange)$", p)
     if m:
         cp = see(before, move)
+        if m.group(1) == "the exchange":
+            ok = is_exchange_capture(before, move) and EXCHANGE_MIN <= cp <= EXCHANGE_MAX
+            return ("S", "a minor piece takes a rook, net %d by exchange" % cp) if ok else ("W", "not a minor piece taking a rook for rook-minus-minor (nets %d)" % cp)
         ok = before.is_capture(move) and abs(cp - GAIN_WORDS[m.group(1)]) <= 40
         return ("S", "capture nets %d by exchange" % cp) if ok else ("W", "capture nets %d" % cp)
 
-    m = re.match(r"promotes the pawn to (a|an) (\w+)$", p)
+    m = re.match(r"promotes (?:the pawn )?to (a|an) (\w+)$", p)
     if m:
         return ("S", "promotion") if move.promotion and NAME[move.promotion] == m.group(2) else ("W", "no such promotion")
-    m = re.match(r"underpromotes to (a|an) (\w+)$", p)
+    m = re.match(r"(?:underpromotes to|is an underpromotion, to) (a|an) (\w+)$", p)
     if m:
         ok = move.promotion and move.promotion != chess.QUEEN and NAME[move.promotion] == m.group(2)
         return ("S", "underpromotion") if ok else ("W", "no such underpromotion")
+
+    m = re.match(r"is a desperado: the (\w+) was lost anyway, so it takes the (\w+) on ([a-h][1-8]) on the way out$", p)
+    if m:
+        mover = before.piece_at(move.from_square)
+        victim = before.piece_at(move.to_square)
+        ok = (mover is not None and NAME[mover.piece_type] == m.group(1) and VALUE[mover.piece_type] >= 300
+              and victim is not None and NAME[victim.piece_type] == m.group(2) and chess.parse_square(m.group(3)) == move.to_square
+              and before.is_capture(move) and not before.is_en_passant(move) and see(before, move) < 0)
+        passed = pass_turn(before)
+        ok = ok and passed is not None and (best_capture_on(passed, move.from_square) or -1) >= 0
+        ok = ok and (best_capture_on(after, move.to_square) or -1) >= 0
+        return ("S", "lost where it stood, loses material by exchange, still lost where it landed") if ok else ("W", "not a desperado")
+
+    m = re.match(r"(?:threatens (\S+), mate on the back rank|sets up a back-rank mate: (\S+) is the threat)$", p)
+    if m:
+        san = m.group(1) or m.group(2)
+        if after.is_check():
+            return ("W", "the opponent is in check: no threat can be tested")
+        k = after.king(them)
+        back = 0 if them == chess.WHITE else 7
+        fwd = 1 if them == chess.WHITE else -1
+        escapes = [chess.square(chess.square_file(k) + df, chess.square_rank(k) + fwd)
+                   for df in (-1, 0, 1) if 0 <= chess.square_file(k) + df < 8 and 0 <= chess.square_rank(k) + fwd < 8]
+        boxed = (chess.square_rank(k) == back and escapes
+                 and all(after.piece_at(e) is not None and after.piece_at(e).color == them for e in escapes)
+                 and any(after.piece_at(e).piece_type == chess.PAWN for e in escapes))
+        passed = pass_turn(after)
+        try:
+            threat = passed.parse_san(san) if passed is not None else None
+        except Exception:
+            threat = None
+        ok = boxed and threat is not None and chess.square_rank(threat.to_square) == back \
+            and passed.piece_at(threat.from_square).piece_type in (chess.ROOK, chess.QUEEN)
+        if ok:
+            b = passed.copy()
+            b.push(threat)
+            ok = b.is_checkmate()
+        return ("S", "king boxed in by its own pawns; the named heavy-piece move mates after a pass") if ok else ("W", "back-rank threat not borne out")
 
     return ("W", "unrecognised claim [%s]" % p)
 
@@ -359,7 +513,7 @@ def verify_engine_line(rest, position, move, rec, context, game, ply):
     for f in re.findall(r"([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|O-O(?:-O)?)(?= (?:can|follows))", rest):
         if f not in sans[1:5]:
             return ("W", "the follow-up %s is not in the engine's line %s" % (f, sans[:5]))
-    for piece, sq in re.findall(r"the (\w+) on ([a-h][1-8])", rest):
+    for piece, sq in re.findall(PIECE_ON, rest):
         b2 = position.copy()
         found = False
         for u in [None] + pv[:2]:
@@ -398,10 +552,80 @@ def verify_engine_line(rest, position, move, rec, context, game, ply):
             return ("W", "the line's follow-up is %s, not %s" % (b4.san(follow_mv), m.group(2)))
         uses = vacated in chess.SquareSet(chess.between(follow_mv.from_square, follow_mv.to_square)) or follow_mv.to_square == vacated
         return ("S", "engine line: another piece uses the vacated line") if uses else ("W", "the follow-up does not use the vacated square")
+    m = re.match(r"is a zwischenzug: it comes first, and (\S+) follows$", rest)
+    if m:
+        # C1: the move is forcing (check, or takes something worth more than the mover), a capture that
+        # does not lose material was available on some enemy piece worth a minor or more, and the
+        # engine's line makes that capture on its 2nd or 3rd own move (plies 2 and 4).
+        b = position.copy()
+        mover = b.piece_at(move.from_square)
+        victim = b.piece_at(move.to_square)
+        b.push(move)
+        forcing = b.is_check() or (victim is not None and VALUE[victim.piece_type] > VALUE[mover.piece_type])
+        if not forcing:
+            return ("W", "the move is neither check nor a capture of something bigger: not a zwischenzug")
+        later = None
+        b5 = position.copy()
+        for i, u in enumerate(pv[:5]):
+            mv = chess.Move.from_uci(u)
+            if i in (2, 4) and b5.is_capture(mv) and b5.san(mv) == m.group(1):
+                later = (b5.copy(), mv)
+                break
+            b5.push(mv)
+        if later is None:
+            return ("W", "the engine's line does not make the postponed capture %s" % m.group(1))
+        pending = later[1].to_square
+        pc = position.piece_at(pending)
+        caps = [c for c in position.legal_moves if c.to_square == pending and position.is_capture(c)]
+        cheapest = min(caps, key=lambda c: VALUE[position.piece_at(c.from_square).piece_type]) if caps else None
+        ok = pc is not None and pc.color != position.turn and pc.piece_type != chess.KING and VALUE[pc.piece_type] >= 300 \
+            and cheapest is not None and see(position, cheapest) >= 0
+        return ("S", "forcing move first; the capture on %s was available and the line makes it" % chess.square_name(pending)) if ok \
+            else ("W", "no profitable capture was waiting on %s" % chess.square_name(pending))
+    m = re.match(r"exploits the overloaded (\w+) on ([a-h][1-8]), which cannot guard ([a-h][1-8]) and ([a-h][1-8]) at once$", rest)
+    if m:
+        # C1: on the position BEFORE the move, the named piece is the opponent's and the sole defender of
+        # both squares, each holding an opponent's piece the mover attacks; the engine's line (our 2nd
+        # move, ply 2) lands on one of them.
+        us = position.turn
+        them = not us
+        ov = chess.parse_square(m.group(2))
+        if not named_piece(position, m.group(1), m.group(2), them):
+            return ("W", "no such defender")
+        for sq in (m.group(3), m.group(4)):
+            s = chess.parse_square(sq)
+            pc = position.piece_at(s)
+            if pc is None or pc.color != them or pc.piece_type == chess.KING:
+                return ("W", "no opponent's piece on %s" % sq)
+            if not position.attackers(us, s):
+                return ("W", "%s is not attacked" % sq)
+            if list(position.attackers(them, s)) != [ov]:
+                return ("W", "%s has other defenders" % sq)
+        if len(pv) < 3 or chess.Move.from_uci(pv[2]).to_square not in (chess.parse_square(m.group(3)), chess.parse_square(m.group(4))):
+            return ("W", "the engine's follow-up does not land on either square")
+        return ("S", "sole defender of two attacked pieces; the line cashes one")
     return ("S", "engine line replays legally; text consistent with it")
 
 
-SENT_SPLIT = re.compile(r"(?<=\.)\s+(?=[A-Z])")
+SENT_SPLIT = re.compile(r"(?<=\.)\s+")
+
+WHO = r"(you|your opponent|White|Black)"
+SAN = r"(\S+)"
+
+LEADS = [
+    # (regex, kind): the first sentence of a class, with the proof each needs.
+    (r"^(\S+) follows known opening theory\.$|^(\S+) is still opening theory\.$|^(\S+) stays in book\.$", "book"),
+    (r"^(\S+) was the only legal move\.$|^(\S+) was forced: the only legal move\.$|^No choice here: (\S+) was the only legal move\.$", "forced"),
+    (r"^(\S+) matches the engine's top choice\.$|^(\S+) is the engine's first choice\.$|^(\S+) is the top engine move here\.$", "best"),
+    (r"^(\S+) is very close to the best move\.$|^(\S+) is nearly the engine's top choice\.$|^(\S+) comes within a whisker of the best move\.$", "excellent"),
+    (r"^(\S+) is a sound move\.$|^(\S+) is a reasonable move\.$|^(\S+) is a solid choice\.$", "good"),
+    (r"^(\S+) was the only move that kept things on track\.$|^(\S+) is the only move here: the next-best option gives up real ground\.$"
+     r"|^(\S+) is an only move, and nothing else keeps the position on track\.$", "great"),
+    (r"^(\S+) gives back ground\.$|^(\S+) is not the most precise\.$|^(\S+) concedes a little ground\.$", "wrong-inaccuracy"),
+    (r"^(\S+) gives up real ground\.$|^(\S+) goes wrong\.$|^(\S+) lets the position slip\.$", "wrong-mistake"),
+    (r"^(\S+) gives up a big chunk of the position\.$|^(\S+) is a serious slip\.$|^(\S+) throws a big chunk of the position away\.$", "wrong-blunder"),
+    (r"^(\S+) is among the engine's best moves here\.$", "among-best"),
+]
 
 
 def audit_text_after(rec):
@@ -411,100 +635,165 @@ def audit_text_after(rec):
     after = board.copy()
     after.push(move)
     cls, loss, san, game, ply = rec["cls"], rec["loss"], rec["san"], rec["game"], rec["ply"]
+    bare_san = board.san(move)
     out = []
     for sent in SENT_SPLIT.split(rec["text"]):
         s = sent.strip()
         v = None
-        if re.match(r"^(\S+) follows known opening theory\.$", s):
-            v = ("S", "BOOK classification") if cls == "BOOK" else ("W", "not a book move")
-        elif re.match(r"^(\S+) was the only legal move\.$", s):
-            v = ("S", "one legal move") if board.legal_moves.count() == 1 else ("W", "several legal moves")
-        elif re.match(r"^(\S+) matches the engine's top choice\.$", s):
-            v = ("S", "played move equals the engine's top move") if rec["best"] == san else ("W", "not the engine's top move")
-        elif re.match(r"^(\S+) is very close to the best move\.$", s):
-            v = ("S", "loss %.1f < 2" % loss) if loss < 2 else ("W", "loss %.1f" % loss)
-        elif re.match(r"^(\S+) is a sound move\.$", s):
-            v = ("F", "loss %.1f < 5" % loss) if loss < 5 else ("W", "loss %.1f" % loss)
-        elif re.match(r"^(\S+) was the only move that kept things on track\.$", s):
-            gap = great_gap(game, ply)
-            v = ("S", "MultiPV gap %.1f >= 10 win%%" % gap) if gap is not None and gap >= 10 and rec["best"] == san else ("W", "gap %s" % gap)
-        elif re.match(r"^(\S+) gives back ground\.$", s):
-            v = ("F", "loss %.1f" % loss) if loss >= 5 else ("W", "loss %.1f is not giving back ground" % loss)
-        elif re.match(r"^(\S+) is among the engine's best moves here\.$", s):
-            v = ("S", "loss %.1f <= 2" % loss) if loss <= 2 else ("W", "loss %.1f" % loss)
-        elif s == "This allows a forced mate.":
-            ok = (mover_mate_after(rec) or 0) < 0 and cls in ("INACCURACY", "MISTAKE", "BLUNDER")
-            v = ("S", "engine: the opponent mates after the move") if ok else ("W", "no engine mate against the mover")
-        else:
-            m = re.match(r"^(\S+) is a sacrifice: it offers the (\w+) on ([a-h][1-8])\.$", s)
-            if m:
-                target = chess.parse_square(m.group(3))
-                nets = [see(after, c) for c in after.legal_moves if after.is_capture(c) and c.to_square == target and not after.is_en_passant(c)]
-                best = max(nets) if nets else None
-                pc = after.piece_at(target)
-                ok = pc is not None and pc.color == board.turn and NAME[pc.piece_type] == m.group(2) and best is not None and best >= 200
-                v = ("S", "the opponent can take it for a net %s" % best) if ok else ("W", "no real sacrifice (best capture nets %s)" % best)
-            m = re.match(r"^(\S+) leaves the (\w+) on ([a-h][1-8]) open to capture, and the engine still rates it among the best moves\.$", s)
-            if m:
-                target = chess.parse_square(m.group(3))
-                legal = any(after.is_capture(c) and c.to_square == target for c in after.legal_moves)
-                v = ("S", "a legal capture exists; loss %.1f" % loss) if legal and loss <= 2 else ("W", "no legal capture, or not near-best")
-            m = re.match(r"^This lets (you|your opponent|White|Black) play (\S+), which (.+)\.$", s)
-            engine_allowed = False
+        for regex, kind in LEADS:
+            m = re.match(regex, s)
             if not m:
-                m = re.match(r"^This lets (you|your opponent|White|Black) play (\S+); in the engine's line it (.+)\.$", s)
-                engine_allowed = m is not None
-            if m:
-                try:
-                    reply = after.parse_san(m.group(2))
-                except Exception:
-                    reply = None
-                if cls not in ("INACCURACY", "MISTAKE", "BLUNDER"):
-                    v = ("W", "a charge against a move rated %s" % cls)
-                elif reply is None:
-                    v = ("W", "the reply %s is not a legal move" % m.group(2))
+                continue
+            named = next(x for x in m.groups() if x is not None)
+            if named.rstrip("+#") != san.rstrip("+#"):
+                v = ("W", "names a move that was not played")
+            elif kind == "book":
+                v = ("S", "BOOK classification") if cls == "BOOK" else ("W", "not a book move")
+            elif kind == "forced":
+                v = ("S", "one legal move") if board.legal_moves.count() == 1 else ("W", "several legal moves")
+            elif kind == "best":
+                v = ("S", "played move equals the engine's top move") if rec["best"] == san else ("W", "not the engine's top move")
+            elif kind == "excellent":
+                v = ("S", "loss %.1f < 2" % loss) if loss < 2 else ("W", "loss %.1f" % loss)
+            elif kind == "good":
+                v = ("F", "loss %.1f < 5" % loss) if loss < 5 else ("W", "loss %.1f" % loss)
+            elif kind == "great":
+                gap = great_gap(game, ply)
+                v = ("S", "MultiPV gap %.1f >= 10 win%% (every other move gives up real ground)" % gap) if gap is not None and gap >= 10 and rec["best"] == san else ("W", "gap %s" % gap)
+            elif kind == "wrong-inaccuracy":
+                v = ("F", "loss %.1f >= 5" % loss) if loss >= 5 else ("W", "loss %.1f is not giving back ground" % loss)
+            elif kind == "wrong-mistake":
+                v = ("F", "loss %.1f >= 10 (real ground)" % loss) if loss >= 10 else ("W", "loss %.1f is not real ground" % loss)
+            elif kind == "wrong-blunder":
+                v = ("F", "loss %.1f >= 20 (a big chunk)" % loss) if loss >= 20 else ("W", "loss %.1f is not a big chunk" % loss)
+            elif kind == "among-best":
+                v = ("S", "loss %.1f <= 2" % loss) if loss <= 2 else ("W", "loss %.1f" % loss)
+            break
+        if v is not None:
+            out.append((s, v[0], v[1]))
+            continue
+
+        m = re.match(r"^This allows a forced mate(?: in (\d+))?\.$|^This walks into a forced mate in (\d+)\.$|^After this, %s has a forced mate in (\d+)\.$" % WHO, s)
+        if m:
+            n = m.group(1) or m.group(2) or m.group(4)
+            mm = mover_mate_after(rec) or 0
+            ok = mm < 0 and cls in ("INACCURACY", "MISTAKE", "BLUNDER") and (n is None or -mm == int(n))
+            if ok and m.group(3) is not None:
+                ok = m.group(3) == who_word(rec, rec["color"] != "WHITE")
+            v = ("S", "engine: the opponent mates in %d after the move" % -mm) if ok else ("W", "no engine mate against the mover, or the wrong distance")
+        m = re.match(r"^(\S+) is a sacrifice: it offers the (\w+) on ([a-h][1-8])\.$|^(\S+) sacrifices the (\w+) on ([a-h][1-8])\.$"
+                     r"|^(\S+) offers the (\w+) on ([a-h][1-8]): a sacrifice the engine rates among the best moves here\.$", s)
+        if m and v is None:
+            msan, piece, sq = [x for x in m.groups() if x is not None]
+            target = chess.parse_square(sq)
+            nets = [see(after, c) for c in after.legal_moves if after.is_capture(c) and c.to_square == target and not after.is_en_passant(c)]
+            best = max(nets) if nets else None
+            ok = msan.rstrip("+#") == san.rstrip("+#") and named_piece(after, piece, sq, board.turn) and best is not None and best >= 200
+            if "rates among the best" in s:
+                ok = ok and loss <= 2
+            v = ("S", "the opponent can take it for a net %s" % best) if ok else ("W", "no real sacrifice (best capture nets %s)" % best)
+        m = re.match(r"^(\S+) leaves the (\w+) on ([a-h][1-8]) open to capture, and the engine still rates it among the best moves\.$", s)
+        if m and v is None:
+            target = chess.parse_square(m.group(3))
+            legal = any(after.is_capture(c) and c.to_square == target for c in after.legal_moves)
+            v = ("S", "a legal capture exists; loss %.1f" % loss) if legal and loss <= 2 else ("W", "no legal capture, or not near-best")
+        m = re.match(r"^(?:This lets %s play %s|Now %s can play %s|This hands %s %s)(?:, which (.+)|; in the engine's line it (.+))\.$" % (WHO, SAN, WHO, SAN, WHO, SAN), s)
+        if m and v is None:
+            who = m.group(1) or m.group(3) or m.group(5)
+            reply_san = m.group(2) or m.group(4) or m.group(6)
+            engine_allowed = m.group(8) is not None
+            phrase = m.group(7) or m.group(8)
+            try:
+                reply = after.parse_san(reply_san)
+            except Exception:
+                reply = None
+            if cls not in ("INACCURACY", "MISTAKE", "BLUNDER"):
+                v = ("W", "a charge against a move rated %s" % cls)
+            elif reply is None:
+                v = ("W", "the reply %s is not a legal move" % reply_san)
+            elif who != who_word(rec, rec["color"] != "WHITE"):
+                v = ("W", "the beneficiary is not the opponent")
+            else:
+                after_reply = after.copy()
+                after_reply.push(reply)
+                if engine_allowed:
+                    v = verify_engine_line(phrase, after, reply, rec, "allowed", game, ply)
                 else:
-                    after_reply = after.copy()
-                    after_reply.push(reply)
-                    if engine_allowed:
-                        v = verify_engine_line(m.group(3), after, reply, rec, "allowed", game, ply)
-                    else:
-                        v = verify_phrase(m.group(3), after, reply, after_reply, rec, "allowed")
-            m = re.match(r"^Better was (\S+), forcing mate in (\d+)\.$", s)
-            if m:
-                ok = m.group(1) == rec["best"] and (mover_mate_before(rec) or 0) == int(m.group(2))
-                v = ("S", "engine: mate in %s for the mover" % m.group(2)) if ok else ("W", "mate claim not in the data")
-            m = re.match(r"^Better was (\S+), keeping a decisive advantage\.$", s)
-            if m:
-                ok = m.group(1) == rec["best"] and cls == "MISS"
-                v = ("S", "MISS: win percent before >= 90; the engine's top move") if ok else ("W", "not provable")
-            m = re.match(r"^Better was (\S+)(?:, which (.+)|; in the engine's line it (.+))?\.$", s)
-            if m and v is None:
-                bsan = m.group(1)
-                if bsan != rec["best"]:
-                    v = ("W", "not the engine's top move")
-                elif not m.group(2) and not m.group(3):
-                    v = ("S", "the engine's top move")
+                    v = verify_phrase(phrase, after, reply, after_reply, rec, "allowed")
+        m = re.match(r"^That takes %s from (.+) to (.+)\.$|^The position swings from (.+) to (.+) for %s\.$|^From (.+) to (.+) in one move: that is what this cost %s\.$" % (WHO, WHO, WHO), s)
+        if m and v is None:
+            g = m.groups()
+            who = g[0] or g[5] or g[8]
+            before_w = g[1] or g[3] or g[6]
+            after_w = g[2] or g[4] or g[7]
+            ok = (cls in ("INACCURACY", "MISTAKE", "BLUNDER", "MISS") and who == who_word(rec, rec["color"] == "WHITE")
+                  and before_w == standing_words(rec["wpBefore"]) and after_w == standing_words(rec["wpAfter"]) and before_w != after_w)
+            v = ("S", "bands of the mover's win-percent %.1f -> %.1f" % (rec["wpBefore"], rec["wpAfter"])) if ok else ("W", "evaluation words not borne out by the win-percent bands")
+        m = re.match(r"^Better was (\S+), forcing mate in (\d+)\.$|^Better was (\S+), with a forced mate in (\d+)\.$|^Better was (\S+): mate in (\d+) was on the board\.$", s)
+        if m and v is None:
+            bsan, n = [x for x in m.groups() if x is not None]
+            ok = bsan == rec["best"] and cls == "MISS" and (mover_mate_before(rec) or 0) == int(n)
+            v = ("S", "engine: mate in %s for the mover" % n) if ok else ("W", "mate claim not in the data")
+        m = re.match(r"^Better was (\S+), keeping (a decisive advantage|a winning position)\.$|^Better was (\S+), which holds on to (a decisive advantage|a winning position)\.$"
+                     r"|^Better was (\S+): it keeps (a decisive advantage|a winning position)\.$", s)
+        if m and v is None:
+            bsan, kept = [x for x in m.groups() if x is not None]
+            wp = rec["wpBefore"]
+            band_ok = (wp >= 95) if kept == "a decisive advantage" else (82 <= wp < 95)
+            ok = bsan == rec["best"] and cls == "MISS" and band_ok
+            v = ("S", "MISS; the mover's win-percent before, %.1f, is in the band" % wp) if ok else ("W", "not provable, or the wrong band for %.1f" % wp)
+        m = re.match(r"^A forced mate in (\d+) was on the board\.$", s)
+        if m and v is None:
+            v = ("S", "engine mate for the mover") if cls == "MISS" and (mover_mate_before(rec) or 0) == int(m.group(1)) else ("W", "mate claim not in the data")
+        if s == "A decisive advantage was on the board." and v is None:
+            v = ("S", "MISS: win percent before >= 90, or a mate") if cls == "MISS" else ("W", "not a MISS")
+        m = re.match(r"^Better was (\S+)(?:, which (.+)|: it (.+)|; in the engine's line it (.+)|: in the engine's line it (.+))?\.$", s)
+        if m and v is None:
+            bsan = m.group(1)
+            plain = m.group(2) or m.group(3)
+            engine = m.group(4) or m.group(5)
+            if bsan != rec["best"]:
+                v = ("W", "not the engine's top move")
+            elif cls not in ("INACCURACY", "MISTAKE", "BLUNDER", "MISS"):
+                v = ("W", "a better move offered on a move rated %s" % cls)
+            elif not plain and not engine:
+                v = ("S", "the engine's top move")
+            else:
+                bm = board.parse_san(bsan)
+                ab = board.copy()
+                ab.push(bm)
+                if engine:
+                    v = verify_engine_line(engine, board, bm, rec, "better", game, ply)
                 else:
-                    bm = board.parse_san(bsan)
-                    ab = board.copy()
-                    ab.push(bm)
-                    if m.group(3):
-                        v = verify_engine_line(m.group(3), board, bm, rec, "better", game, ply)
-                    else:
-                        v = verify_phrase(m.group(2), board, bm, ab, rec, "better")
-            m = re.match(r"^In the engine's line, (\S+) (.+)\.$", s)
-            if m and v is None:
-                v = verify_engine_line(m.group(2), board, move, rec, "found", game, ply)
+                    v = verify_phrase(plain, board, bm, ab, rec, "better")
+        m = re.match(r"^In the engine's line, (\S+) (.+)\.$|^The engine's line shows it: (\S+) (.+)\.$", s)
+        if m and v is None:
+            msan = m.group(1) or m.group(3)
+            rest = m.group(2) or m.group(4)
+            if msan.rstrip("+#") != bare_san.rstrip("+#"):
+                v = ("W", "the engine-line claim names another move")
+            else:
+                v = verify_engine_line(rest, board, move, rec, "found", game, ply)
                 if v[0] == "S" and (mover_mate_after(rec) or 0) < 0:
                     v = ("W", "the opponent has a forced mate after this move")
-            m = re.match(r"^This (.+)\.$", s)
-            if m and v is None:
-                v = verify_phrase(m.group(1), board, move, after, rec, "found")
+        m = re.match(r"^(This|It|%s) (.+)\.$" % re.escape(bare_san), s)
+        if m and v is None:
+            v = verify_phrase(m.group(2), board, move, after, rec, "found")
+            if v[0] == "S" and (mover_mate_after(rec) or 0) < 0:
+                v = ("W", "the opponent has a forced mate after this move")
         if v is None:
             v = ("W", "unrecognised sentence")
         out.append((s, v[0], v[1]))
     return out
+
+
+def who_word(rec, is_white):
+    """"you" / "your opponent" / the colour, for the side that is White when [is_white], as [rec]'s viewer sees it."""
+    side = rec["side"]
+    colour = "White" if is_white else "Black"
+    if side is None:
+        return colour
+    return "you" if side == ("WHITE" if is_white else "BLACK") else "your opponent"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -576,7 +865,7 @@ def audit_sim_after(rec):
                 verdict = "W"
                 notes.append("wrong captured piece")
         recapture = prev_move is not None and prev_move.to_square == mv.to_square and before.is_capture(mv) and prev_capture
-        mm = re.search(r"winning (a queen|a rook|a piece|a pawn|material)", head)
+        mm = re.search(r"winning (a queen|a rook|a piece|a pawn|the exchange|material)", head)
         if mm:
             want = GAIN_WORDS.get(mm.group(1))
             if recapture:
@@ -585,7 +874,11 @@ def audit_sim_after(rec):
             else:
                 net = see(before, mv)
                 label = "capture"
-            if not (net >= 100 and (want is None or abs(net - want) <= 40)):
+            if mm.group(1) == "the exchange":
+                if not (not recapture and is_exchange_capture(before, mv) and EXCHANGE_MIN <= net <= EXCHANGE_MAX):
+                    verdict = "W"
+                    notes.append("claims the exchange but the capture is not a minor piece taking a rook for rook-minus-minor (nets %d)" % net)
+            elif not (net >= 100 and (want is None or abs(net - want) <= 40)):
                 verdict = "W"
                 notes.append("claims %s but the %s nets %d" % (mm.group(1), label, net))
         if "an even trade" in head and not recapture:
@@ -599,7 +892,7 @@ def audit_sim_after(rec):
         am = re.search(r"attacking (.+?)(?:, with check| — checkmate|, which nothing defends|\.$)", head)
         if am:
             mover_color = b.piece_at(mv.to_square).color
-            for pcs, sq in re.findall(r"the (\w+) on ([a-h][1-8])", am.group(1)):
+            for pcs, sq in re.findall(PIECE_ON, am.group(1)):
                 s = chess.parse_square(sq)
                 pc = b.piece_at(s)
                 if not (pc is not None and NAME[pc.piece_type] == pcs and mv.to_square in b.attackers(mover_color, s)):
@@ -643,9 +936,13 @@ def audit_sim_after(rec):
             net = material(b, winner) - material(b, not winner) - (material(board, winner) - material(board, not winner))
             if b.turn != winner:  # settled: charge the loser's best take-back
                 net -= max([0] + [see(b, c) for c in b.legal_moves if b.is_capture(c)])
-            want = {"wins " + k[2:]: v for k, v in GAIN_WORDS.items()}.get(pay)
-            ok = net >= 100 and (want is None or abs(net - want) <= 40)
-            rows.append(("payoff", pay, "S" if ok else "W", ("settled net material %d" % net) if ok else ("settled net material is %d" % net)))
+            if pay == "wins the exchange":
+                ok = wins_the_exchange(board, b, winner) and EXCHANGE_MIN <= net <= EXCHANGE_MAX
+                rows.append(("payoff", pay, "S" if ok else "W", ("a minor piece for a rook, settled net %d" % net) if ok else ("not the exchange: settled net %d, or the wrong pieces changed" % net)))
+            else:
+                want = {"wins " + k[2:]: v for k, v in GAIN_WORDS.items()}.get(pay)
+                ok = net >= 100 and (want is None or abs(net - want) <= 40)
+                rows.append(("payoff", pay, "S" if ok else "W", ("settled net material %d" % net) if ok else ("settled net material is %d" % net)))
         elif re.search(r"invested material|decisive advantage|king under fire|mating net", pay):
             rows.append(("payoff", pay, "W", "a payoff the data cannot back"))
         else:
@@ -699,6 +996,9 @@ def parse_before(path):
     return recs
 
 
+BEFORE_SPLIT = re.compile(r"(?<=\.)\s+(?=[A-Z])")
+
+
 def audit_text_before(rec):
     board = chess.Board(rec["fenBefore"])
     move = board.parse_san(rec["san"])
@@ -706,7 +1006,7 @@ def audit_text_before(rec):
     after.push(move)
     cls, loss, game, ply, san = rec["cls"], rec["loss"], rec["game"], rec["ply"], rec["san"]
     out = []
-    for sent in SENT_SPLIT.split(rec["text"]):
+    for sent in BEFORE_SPLIT.split(rec["text"]):
         s = sent.strip()
         v = None
         if re.match(r"^\S+ follows known opening theory\.$", s):
@@ -865,10 +1165,6 @@ def audit_sim_before(rec):
 
 
 # ---------------------------------------------------------------------------------------------
-# Driver
-# ---------------------------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------------------------
 # V2: the displayed engine lines (ANALYSIS_SPEC 6.2)
 # ---------------------------------------------------------------------------------------------
 
@@ -997,7 +1293,11 @@ def audit_line_record(rec):
             gain = settled_gain(start, b, mover)
             if gain >= 100:
                 subject = who(mover, rec["side"])
-                expected.append("In this line %s %s %s." % (subject, "win" if subject == "you" else "wins", gain_words(gain) or "material"))
+                if wins_the_exchange(start, b, mover) and EXCHANGE_MIN <= gain <= EXCHANGE_MAX:
+                    what = "the exchange"
+                else:
+                    what = gain_words(gain) or "material"
+                expected.append("In this line %s %s %s." % (subject, "win" if subject == "you" else "wins", what))
         if sentences == expected:
             for x in sentences:
                 out.append((tag + " caption", "S", x))
@@ -1042,9 +1342,10 @@ def main_lines(path):
     lines = sum(len(r["lines"]) for r in recs)
     alts = sum(1 for r in recs for l in r["lines"] if l["multiPv"] > 1)
     video = sum(1 for r in recs if r.get("video"))
+    exchange = sum(1 for r in recs for l in r["lines"] if "the exchange" in l["caption"])
     print("### Displayed engine lines (ANALYSIS_SPEC 6.2)\n")
-    print("%d moves x sides, %d lines (%d alternatives), %d video lines. %d checks: %d supported, %d WRONG.\n" % (
-        len(recs), lines, alts, video, sum(counts.values()), counts["S"], counts["W"]))
+    print("%d moves x sides, %d lines (%d alternatives), %d video lines, %d captions say 'the exchange'. %d checks: %d supported, %d WRONG.\n" % (
+        len(recs), lines, alts, video, exchange, sum(counts.values()), counts["S"], counts["W"]))
     print("| Game | Checks | Supported | WRONG |")
     print("|---|---|---|---|")
     for g, c in sorted(per_game.items()):
@@ -1054,12 +1355,114 @@ def main_lines(path):
         print("- %s (%s) ply %d %s [%s]: %s" % (g, side, ply, san, what, note))
     if not wrong:
         print("(none)")
+    return 1 if wrong else 0
+
+
+# ---------------------------------------------------------------------------------------------
+# Negative controls: break one template or term and show that the verifier flags it
+# ---------------------------------------------------------------------------------------------
+
+def _sub(pattern, repl):
+    def f(text):
+        return re.sub(pattern, repl, text, count=1) if re.search(pattern, text) else None
+    return f
+
+
+def _append(sentence):
+    def f(text):
+        return text + " " + sentence
+    return f
+
+
+def _swap_bands(text):
+    m = re.search(r"from (.+?) to (.+?)\.", text)
+    if not m or " from " not in text:
+        return None
+    return text[:m.start()] + "from %s to %s." % (m.group(2), m.group(1)) + text[m.end():]
+
+
+MUTATIONS = [
+    # (name, which record it applies to (a predicate on the record), how the text is broken)
+    ("a fork with a wrong target square", lambda r: re.search(r"forks? .*the \w+ on [a-h][1-8] and the \w+ on [a-h][1-8]", r["text"]),
+     lambda t: re.sub(r"(and the \w+ on )([a-h])([1-8])", lambda m: m.group(1) + ("a" if m.group(2) != "a" else "h") + m.group(3), t, count=1)),
+    ("a fork claimed on pieces the moved piece does not attack", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1,
+     lambda t: t + " This forks the king on e8 and the queen on d8."),
+    ("a pawn fork claimed for a piece that is not a pawn", lambda r: r["cls"] == "BEST" and r["san"][0] in "NBRQK" and r["text"].count(".") == 1,
+     lambda t: t + " This is a pawn fork, hitting the king on e8 and the queen on d8."),
+    ("a skewer whose rear piece is not on the line", lambda r: re.search(r"skewers the \w+ on [a-h][1-8], with the \w+ on [a-h][1-8] behind it", r["text"]),
+     _sub(r"(with the \w+ on )([a-h])([1-8]) behind it", lambda m: m.group(1) + ("a" if m.group(2) != "a" else "h") + m.group(3) + " behind it")),
+    ("a discovered check claimed for a direct check", lambda r: r["cls"] == "BEST" and r["san"].endswith("+") and r["text"].count(".") == 1,
+     lambda t: t + " This is a discovered check from the rook on a1."),
+    ("a trapped piece that has a safe square", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1,
+     lambda t: t + " This traps the queen on d8: every square it can reach loses material."),
+    ("'wins the exchange' said as 'wins a rook'", lambda r: "the exchange" in r["text"], _sub(r"(wins|picks up) the exchange", r"\1 a rook")),
+    ("'wins a rook' said as 'wins the exchange'", lambda r: re.search(r"(wins|picks up) a rook", r["text"]), _sub(r"(wins|picks up) a rook", r"\1 the exchange")),
+    ("a relative pin called an absolute pin", lambda r: re.search(r"pins the \w+ on [a-h][1-8] to the (?!king)\w+ on [a-h][1-8]", r["text"]),
+     _sub(r"pins (the \w+ on [a-h][1-8]) to (the \w+ on [a-h][1-8])", r"puts \1 in an absolute pin against \2")),
+    ("'en prise' for a piece that is defended", lambda r: re.search(r"attacks the \w+ on [a-h][1-8] with an? \w+", r["text"]),
+     _sub(r"attacks (the \w+ on [a-h][1-8]) with an? \w+", r"attacks \1, which is en prise")),
+    ("'loose' for a piece attacked more often than defended (it has defenders)", lambda r: "more often than it is defended" in r["text"],
+     _sub(r"attacks the (\w+) on ([a-h][1-8]) more often than it is defended", r"hits the loose \1 on \2")),
+    ("forced mate in N said as N+1", lambda r: re.search(r"forced mate in (\d+)", r["text"]),
+     lambda t: re.sub(r"forced mate in (\d+)", lambda m: "forced mate in %d" % (int(m.group(1)) + 1), t, count=1)),
+    ("the evaluation bands swapped", lambda r: re.search(r"^That takes|swings from|in one move: that is what", r["text"], re.M) and " from " in r["text"], _swap_bands),
+    ("a zwischenzug claimed on a quiet move", lambda r: r["cls"] == "BEST" and not r["san"].endswith("+") and "x" not in r["san"] and r["text"].count(".") == 1,
+     lambda t: t + " In the engine's line, %s is a zwischenzug: it comes first, and Qxd8 follows." % t.split()[0]),
+    ("an overloaded defender that is not the sole guard", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1,
+     lambda t: t + " In the engine's line, %s exploits the overloaded king on e8, which cannot guard d7 and f7 at once." % t.split()[0]),
+    ("an 'only move' lead on a move that is not an only move", lambda r: r["cls"] == "BEST" and "matches the engine's top choice" in r["text"],
+     _sub(r"matches the engine's top choice", "was the only move that kept things on track")),
+    ("a desperado claimed for an ordinary capture", lambda r: r["cls"] == "BEST" and "x" in r["san"] and r["text"].count(".") == 1,
+     lambda t: t + " This is a desperado: the bishop was lost anyway, so it takes the pawn on e5 on the way out."),
+    ("a back-rank mate threat that is not there", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1,
+     lambda t: t + " This threatens Rd8, mate on the back rank."),
+    ("'Better was' naming the wrong move", lambda r: "Better was " in r["text"], _sub(r"Better was (\S+)", r"Better was Zz9")),
+    ("a charge against a move the engine approved of", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1,
+     lambda t: t + " This lets White play Qxd8, which wins a queen."),
+    ("'a decisive advantage' kept on a MISS below the band", lambda r: r["cls"] == "MISS" and "a winning position" in r["text"],
+     _sub(r"a winning position", "a decisive advantage")),
+    ("a sacrifice on a piece nobody can take", lambda r: re.search(r"is a sacrifice: it offers the \w+ on [a-h][1-8]", r["text"]),
+     _sub(r"it offers the \w+ on ([a-h][1-8])", r"it offers the king on \1")),
+    ("a smothered mate that is a plain mate", lambda r: re.search(r"(This|It|\S+) (is checkmate|is mate|delivers checkmate)\.", r["text"]),
+     _sub(r"(is checkmate|is mate|delivers checkmate)\.", "is a smothered mate.")),
+    ("'is mate' on a move that is not mate", lambda r: r["cls"] == "BEST" and r["text"].count(".") == 1 and not r["san"].endswith("#"),
+     lambda t: t + " This delivers checkmate."),
+]
+
+
+def main_mutate(path):
+    recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip() and json.loads(l)["side"] is None]
+    print("### Negative controls: one template or term broken at a time\n")
+    print("| Mutation | Record | Mutated sentence | Flagged |")
+    print("|---|---|---|---|")
+    missed = 0
+    for name, applies, mutate in MUTATIONS:
+        rec = next((r for r in recs if applies(r)), None)
+        if rec is None:
+            print("| %s | (no record to apply it to) | | n/a |" % name)
+            continue
+        mutated = mutate(rec["text"])
+        if mutated is None or mutated == rec["text"]:
+            print("| %s | %s %d %s | (mutation did not apply) | n/a |" % (name, rec["game"], rec["ply"], rec["san"]))
+            continue
+        rows = audit_text_after(dict(rec, text=mutated))
+        changed = [(s, v, n) for (s, v, n) in rows if s not in SENT_SPLIT.split(rec["text"])]
+        flagged = any(v == "W" for _, v, _ in changed) or any(v == "W" for _, v, _ in rows)
+        sentence = (changed[0][0] if changed else mutated).replace("|", "\\|")
+        note = next((n for _, v, n in rows if v == "W"), "")
+        print("| %s | %s %d %s | %s | %s |" % (name, rec["game"], rec["ply"], rec["san"], sentence, ("WRONG: " + note) if flagged else "**NOT FLAGGED**"))
+        if not flagged:
+            missed += 1
+    print("\n%d mutations not flagged." % missed)
+    return 1 if missed else 0
 
 
 def main():
     mode, path = sys.argv[1], sys.argv[2]
     if mode == "lines":
         return main_lines(path)
+    if mode == "mutate":
+        return main_mutate(path)
     if mode == "after":
         recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
         text_audit, sim_audit = audit_text_after, audit_sim_after
@@ -1134,7 +1537,8 @@ def main():
     print("\n### Every WRONG claim\n")
     for g, p, san, s, n in wrong:
         print("- %s ply %d %s: \"%s\" - %s" % (g, p, san, s, n))
+    return 1 if wrong or bad_sides else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

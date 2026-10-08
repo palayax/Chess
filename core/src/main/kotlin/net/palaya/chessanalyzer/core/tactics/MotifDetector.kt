@@ -1505,8 +1505,11 @@ class MotifDetector(private val see: SeeEvaluator = StaticExchangeEvaluator()) :
                     targetSquares = listOf(pending),
                     involvedSquares = listOf(c.landing),
                     materialSwing = maxOf(0, bestCaptureSee(c.before, pending, c.us)),
-                    description = "${c.san} comes first; ${posBefore.moveToSan(later)} on $pending " +
-                        "is still there afterwards.",
+                    // Opens with the move's SAN, like every engine-line description, so the commentary
+                    // can say it as the engine's line (ANALYSIS_SPEC 7.2, C1): "In the engine's line,
+                    // Nxe5+ is a zwischenzug: it comes first, and Bxd7 follows."
+                    description = "${c.san} is a zwischenzug: it comes first, and " +
+                        "${posBefore.moveToSan(later)} follows.",
                     confidence = PV_CONFIDENCE
                 )
             )

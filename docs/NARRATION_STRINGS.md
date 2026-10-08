@@ -26,6 +26,7 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `CaptionMove` | moveNumber=12, color=BLACK, san=Nf6, glyph=? | 12... Nf6 ? |  |
 | `CaptionMissed` | bestSan=Nf3, playedSan=e4 | Missed: Nf3 (played e4) |  |
 | `CaptionMissedLine` | sans=[Nf3, e5, Nxe5] | Missed line — Nf3 e5 Nxe5 |  |
+| `CaptionBestLine` | firstMoveNumber=18, firstColor=BLACK, sans=[Nf5, Qd2, Nd4] | Best line — 18... Nf5 19. Qd2 Nd4 |  |
 | `CaptionBackToGame` | moveNumber=12, color=WHITE, san=Nf3 | Back to the game — 12. Nf3 |  |
 | `CaptionPuzzle` | side=WHITE | White to play — can you find it? |  |
 | `CaptionTurningPoint` | moveNumber=23, san=Qh5, lossPercent=31.5 | Turning point — move 23 Qh5 (31.5% swing) |  |
@@ -87,7 +88,7 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `MateFinish` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE) | You finish it off. |  |
 | `MateOnReceivingEnd` | *(empty)* | And that's you on the receiving end of it. |  |
 | `JustTheTrade` | *(empty)* | That's just the trade going through.<br>Taking back, nothing more.<br>Even trade, and we move on. |  |
-| `NothingDefendingIt` | *(empty)* | Nothing was defending it.<br>It was sitting there with no defender.<br>Completely undefended. |  |
+| `NothingDefendingIt` | *(empty)* | Nothing was defending it.<br>It was sitting there with no defender.<br>Completely undefended.<br>It was en prise, with nothing defending it. |  |
 | `MaterialInTheBank` | payoff=ROOK | That's a rook in the bank.<br>A rook, just like that.<br>So that's a rook. |  |
 | `PressureNoMaterialYet` | *(empty)* | It doesn't win material yet, but the pressure is real. |  |
 | `GoodSolid` | *(empty)* | Good, solid stuff. |  |
@@ -96,7 +97,7 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `ErrorOpener` | classification=MISTAKE | Careful.<br>This is where it slips.<br>Hang on. | This is a mistake.<br>The position takes a turn here. |
 | `ConsequenceUnchanged` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), standing=WINNING, severity=REAL_GROUND | You are still winning, but that gave away real ground. |  |
 | `ConsequenceChanged` | subject=Subject(color=BLACK, person=THIRD, gender=UNSPECIFIED), before=WINNING, after=ABOUT_LEVEL | Black was winning before that. Now Black is about level.<br>That's winning turning into about level in a single move.<br>Black has gone from winning to about level. |  |
-| `BetterWas` | move=SpokenMove(color=WHITE, piece=KNIGHT, from=g1, to=f3, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE) | Knight to f three was the move.<br>Instead, knight to f three, and everything holds.<br>The move was knight to f three. |  |
+| `BetterWas` | move=SpokenMove(color=WHITE, piece=KNIGHT, from=g1, to=f3, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE) | Knight to f three was the move.<br>Instead, knight to f three, which gives nothing away.<br>The move was knight to f three. |  |
 | `MateWasAvailable` | mateIn=3, move=SpokenMove(color=WHITE, piece=QUEEN, from=d1, to=h5, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE) | There was mate in three on the board, starting with queen to h five. |  |
 | `ThreatLetIn` | *(empty)* | and that's the move that lets it in.<br>and now look what's available.<br>and the reply is unpleasant. |  |
 | `InaccuracyNote` | *(empty)* | It's not losing, it's just loose.<br>That's an inaccuracy — playable, but it gives something back.<br>Slightly off. |  |
@@ -126,8 +127,13 @@ order, or ignore ones its grammar does not need. Where a `Subject` is second per
 | `PivotOut` | *(empty)* | Back in the real game, though, that got played instead —<br>But that is the line that never was. In the real game, this went on the board —<br>So, back to reality. What actually happened was this — | Returning to the game as played, the move actually chosen was this —<br>Back to the main line. What was played instead was this — |
 | `ChanceGone` | *(empty)* | And the chance is gone. It does not come back.<br>The moment passes, and that is that.<br>And with that, the window shuts. | The opportunity does not recur.<br>That continuation is no longer available. |
 | `InsteadPlayed` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), move=SpokenMove(color=WHITE, piece=KNIGHT, from=g1, to=f3, castle=null, isCapture=false, captured=null, enPassant=false, promotion=null, ambiguous=false, outcome=NONE), recapture=false | Instead, you play knight to f three, and it's gone.<br>What actually happened: you play knight to f three. The chance never comes back.<br>But no — you play knight to f three, and the moment passes. |  |
-| `TacticPoint` | type=HANGING_PIECE, target=f3, victim=KNIGHT, second=null | The knight on f three has nothing defending it. |  |
-| `TacticPoint` | type=FORK, target=c7, victim=ROOK, second=e8 | It hits two things at once, on c seven and on e eight. |  |
+| `TacticPoint` | type=HANGING_PIECE, target=f3, victim=KNIGHT, second=null | The knight on f three has nothing defending it.<br>The knight on f three is en prise: nothing defends it.<br>The knight on f three is loose, with no defender at all. |  |
+| `TacticPoint` | type=FORK, target=c7, victim=ROOK, second=e8 | It hits two things at once, on c seven and on e eight.<br>That's a fork: c seven and e eight are both attacked, and only one of them can get away.<br>A fork. Two targets, on c seven and on e eight, and only one can be saved. |  |
+| `TacticPoint` | type=PIN_ABSOLUTE, target=c6, victim=KNIGHT, second=null | The piece on c six is pinned to the king, so it cannot leave that line.<br>That's an absolute pin: the piece on c six is tied to its own king and cannot step off the line. |  |
+| `TacticPoint` | type=SKEWER, target=d5, victim=QUEEN, second=a8 | The piece on d five has to step aside, and the one behind it on a eight is exposed.<br>That's a skewer: the piece on d five is attacked, and whatever stands behind it on a eight is next. |  |
+| `TacticPoint` | type=ZWISCHENZUG, target=d4, victim=KNIGHT, second=null | A zwischenzug, an in-between move: something forcing goes in first, and the capture is still there afterwards.<br>The in-between move comes first. The capture is not going anywhere. |  |
+| `PayoffMaterial` | subject=Subject(color=WHITE, person=SECOND, gender=FEMININE), gain=EXCHANGE | You come out of it the exchange up. |  |
+| `MaterialInTheBank` | payoff=MATERIAL | That's material in the bank.<br>Material, just like that.<br>So that's material. |  |
 | `TacticLesson` | type=FORK | Any time two of your opponent's big pieces sit a knight's jump apart, stop and hunt for the fork square. |  |
 | `TextbookOffer` | type=FORK | There's a clean textbook fork waiting in the game report if you want to see the pattern on its own. |  |
 | `PuzzlePrompt` | side=WHITE, prize=WINS_PIECE | White to play. There is a move here that wins a whole piece. Pause the video. Can you find it?<br>White to play, and there's a move here that wins a whole piece. Stop the video and have a proper look.<br>Right, White to play. Something here wins a whole piece. Pause it. See if you spot it. |  |

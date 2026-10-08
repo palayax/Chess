@@ -85,9 +85,25 @@ class SideCommentaryMappingTest {
         return generator.regenerate(report(), null)
     }
 
-    private val neutralText = "This lets White play Qxf7#, which is checkmate. Better was g6."
+    /**
+     * The blunder card's text for a viewer, as `:core` writes it (the wording rotates per template since
+     * C1, so the test asks the generator rather than pinning one phrasing; what is pinned is the shape:
+     * the charge names the mate, the beneficiary follows the viewer, "Better was g6" is last).
+     */
+    private fun blunderText(side: Color?): String =
+        net.palaya.chessanalyzer.core.analysis.CommentaryGenerator().regenerate(report(), side).annotations.first { it.ply == 6 }.text
+
+    private val neutralText = blunderText(null)
 
     private fun blunderCard(game: ImportedGame) = game.moves.first { it.ply == 6 }.annotation
+
+    @Test
+    fun theNeutralBlunderTextHasTheExpectedShape() {
+        assertTrue(neutralText, Regex("^(This lets White play|Now White can play|This hands White) Qxf7#, which (is checkmate|is mate|delivers checkmate)\\. ").containsMatchIn(neutralText))
+        assertTrue(neutralText, neutralText.endsWith(" Better was g6."))
+        assertEquals(neutralText.replace("White", "you").replace("Black", "your opponent"), blunderText(Color.WHITE))
+        assertEquals(neutralText.replace("White", "your opponent").replace("Black", "you"), blunderText(Color.BLACK))
+    }
 
     @Test
     fun beforeASideIsChosenTheCardNamesColours() {
@@ -101,8 +117,9 @@ class SideCommentaryMappingTest {
     fun choosingWhiteTurnsTheCardAndTheKeyMomentIntoYouAndYourOpponent() {
         val (core, mapped) = applySideToCommentary(game, neutral(), Color.WHITE)
         // Black's blunder, seen by White: White (you) now has the reply.
-        assertEquals("This lets you play Qxf7#, which is checkmate. Better was g6.", blunderCard(mapped))
-        assertEquals("This lets you play Qxf7#, which is checkmate. Better was g6.", core.keyMoments.single().summary)
+        assertEquals(blunderText(Color.WHITE), blunderCard(mapped))
+        assertTrue(blunderCard(mapped).orEmpty(), blunderCard(mapped).orEmpty().contains("you"))
+        assertEquals(blunderText(Color.WHITE), core.keyMoments.single().summary)
         for (m in mapped.moves) assertFalse("ply ${m.ply}: ${m.annotation}", Regex("\\b(White|Black)\\b").containsMatchIn(m.annotation.orEmpty()))
     }
 
@@ -110,8 +127,9 @@ class SideCommentaryMappingTest {
     fun choosingBlackSaysYourOpponentAndNotMeGoesBackToColours() {
         val white = applySideToCommentary(game, neutral(), Color.WHITE)
         val (black, blackGame) = applySideToCommentary(white.second, white.first, Color.BLACK)
-        assertEquals("This lets your opponent play Qxf7#, which is checkmate. Better was g6.", blunderCard(blackGame))
-        assertEquals("This lets your opponent play Qxf7#, which is checkmate. Better was g6.", black.keyMoments.single().summary)
+        assertEquals(blunderText(Color.BLACK), blunderCard(blackGame))
+        assertTrue(blunderCard(blackGame).orEmpty(), blunderCard(blackGame).orEmpty().contains("your opponent"))
+        assertEquals(blunderText(Color.BLACK), black.keyMoments.single().summary)
 
         // "Not me": no side is the user's, so the neutral wording returns - from the already rewritten report.
         val (_, notMeGame) = applySideToCommentary(blackGame, black, null)
@@ -122,7 +140,7 @@ class SideCommentaryMappingTest {
     fun theUiReportBuiltFromTheRewrittenCoreReportCarriesTheSameWordingInItsBrilliancyAndKeyMomentCards() {
         val (core, _) = applySideToCommentary(game, neutral(), Color.BLACK)
         val ui = core.toUiReport(GameHeader("w", "b"), net.palaya.chessanalyzer.ui.model.PieceColor.BLACK)
-        assertEquals("This lets your opponent play Qxf7#, which is checkmate. Better was g6.", ui.keyMoments.single { it.ply == 6 }.description)
+        assertEquals(blunderText(Color.BLACK), ui.keyMoments.single { it.ply == 6 }.description)
     }
 
     @Test
@@ -134,7 +152,8 @@ class SideCommentaryMappingTest {
         assertEquals(game.id, mapped.id)
         assertEquals(game.sequences, mapped.sequences)
         // The mating move is a GOOD thing for the side that made it, whoever the viewer is.
-        assertEquals("Qxf7# was the only move that kept things on track. This is checkmate.", mapped.moves.last().annotation)
+        val mate = mapped.moves.last().annotation.orEmpty()
+        assertTrue(mate, Regex("^Qxf7# (was the only move that kept things on track|is the only move here: the next-best option gives up real ground|is an only move, and nothing else keeps the position on track)\\. (This|It) (is checkmate|is mate|delivers checkmate)\\.$").matches(mate))
         assertTrue(mapped.moves.size == game.moves.size)
     }
 }

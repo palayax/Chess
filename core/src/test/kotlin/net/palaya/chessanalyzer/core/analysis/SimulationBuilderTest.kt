@@ -273,16 +273,20 @@ class SimulationBuilderTest {
     }
 
     @Test
-    fun `an exchange of a rook for a bishop is not described as winning a pawn`() {
-        // Bxg7 takes a rook and the king takes the bishop back: +170, which is neither a pawn nor a piece.
+    fun `an exchange of a rook for a bishop is the exchange, never a pawn`() {
+        // Bxg7 takes a rook and the king takes the bishop back: +170, which is neither a pawn nor a piece,
+        // and is exactly what a player calls winning the exchange (C1).
         val start = Position.fromFen("4k3/6R1/7K/8/3b4/8/8/8 b - - 0 1")
         val tactic = TacticInstance(
             type = TacticType.HANGING_PIECE, byColor = Color.BLACK, moveUci = "d4g7",
             targetSquares = listOf(sq("g7")), materialSwing = 170, confidence = 0.6
         )
-        val first = builder.build(start, listOf("d4g7"), tactic).perPlyExplanation.first()
-        assertTrue(first, first.contains("winning material"))
+        val sim = builder.build(start, listOf("d4g7"), tactic)
+        val first = sim.perPlyExplanation.first()
+        assertTrue(first, first.contains("winning the exchange"))
         assertFalse(first, first.contains("winning a pawn"))
+        // The line stops after Bxg7 with the king to take back: settled, Black is the exchange up.
+        assertEquals("wins the exchange", sim.payoffDescription)
     }
 
     @Test

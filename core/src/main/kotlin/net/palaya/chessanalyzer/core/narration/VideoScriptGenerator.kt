@@ -1232,7 +1232,12 @@ private class ScriptBuilder(
             } else {
                 sb.append(say(NarrationVocabulary.tacticPoint(tactic, pos))).append(' ')
             }
-            if (tactic.materialSwing >= 100) {
+            // A mating motif carries the mate's saturated swing, which is not material: the point
+            // sentence has said "forced mate", and nothing is "in the bank" (C1; before it, "So that's a
+            // whole queen" followed every found mate).
+            if (tactic.type in MATING_MOTIFS) {
+                Unit
+            } else if (tactic.materialSwing >= 100) {
                 sb.append(say(Sentence.MaterialInTheBank(NarrationVocabulary.materialPayoff(tactic.materialSwing))))
             } else {
                 sb.append(say(Sentence.PressureNoMaterialYet))
@@ -1494,7 +1499,7 @@ private class ScriptBuilder(
             taken >= MIN_PAYOFF_CP -> say(Sentence.MaterialTaken(NarrationVocabulary.materialGain(taken)))
             p.uci == tactic.moveUci && index > 0 -> say(NarrationVocabulary.tacticPoint(tactic, p.before))
             p.after.isInCheck() -> say(Sentence.CheckMustBeAnswered)
-            running >= MIN_PAYOFF_CP -> say(Sentence.AlreadyUp(subj(winner), NarrationVocabulary.materialGain(running)))
+            running >= MIN_PAYOFF_CP -> say(Sentence.AlreadyUp(subj(winner), NarrationVocabulary.materialGainAlong(start, p.after, winner, running)))
             else -> say(Sentence.QuietMove)
         }
     }
@@ -1532,7 +1537,8 @@ private class ScriptBuilder(
         // top", which nothing in the data supports; it now says only that the line ends (spec 6.1).
         when {
             last.after.isCheckmate() -> sb.append(say(Sentence.PayoffMate((plies.size + 1) / 2)))
-            gain >= MIN_PAYOFF_CP -> sb.append(say(Sentence.PayoffMaterial(subj(winner), NarrationVocabulary.materialGain(gain))))
+            gain >= MIN_PAYOFF_CP ->
+                sb.append(say(Sentence.PayoffMaterial(subj(winner), NarrationVocabulary.materialGainAlong(start, last.after, winner, gain))))
             else -> sb.append(say(Sentence.PayoffOutcome(subj(winner), payoffKind(tactic, last.after, gain))))
         }
         val mate = a.mateInBefore
