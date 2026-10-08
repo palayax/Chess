@@ -40,3 +40,6 @@ pc/tts/models/
 
 # Agent worktrees (isolated checkouts)
 .claude/worktrees/
+
+# Local evidence WAVs from device checks (C1-device); large, kept out of git
+docs/voice_samples/c1_terms/

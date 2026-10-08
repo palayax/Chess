@@ -58,9 +58,11 @@ class NeuralTtsProvider(
      * a different speaker id or `length_scale` is *different audio*, so leaving those out would
      * serve stale clips from [NarrationStore] after the default voice or pacing is retuned. The voice
      * files' id ([voiceVersionId]) is in it too (D2e): an updated voice never reuses the old voice's WAVs.
+     * So is the id of the spoken respelling table ([SpokenRespelling.tableId], C1-device): the cache key stays
+     * the real sentence, and an edit to the table moves it, so audio made from an old spelling is never reused.
      */
     val cacheFingerprint: String get() =
-        "${tier.name}@${voiceVersionId ?: "unknown"}/sid$speakerId/ls${"%.2f".format(java.util.Locale.ROOT, lengthScale)}"
+        "${tier.name}@${voiceVersionId ?: "unknown"}/sid$speakerId/ls${"%.2f".format(java.util.Locale.ROOT, lengthScale)}/pr${SpokenRespelling.tableId}"
 
     /** Speakers the loaded model reports — 11 for Kokoro v0.19. -1 until [prepare]. */
     val speakerCount: Int get() = tts?.numSpeakers() ?: -1
@@ -117,7 +119,17 @@ class NeuralTtsProvider(
         }
     }
 
-    override suspend fun synthesize(text: String, outFile: File): SynthesisResult = synthesizeAs(speakerId, text, outFile)
+    /** The text last handed to the engine (after any respelling); tests only, to prove what the voice was given. */
+    @Volatile internal var lastEngineText: String? = null
+        private set
+
+    /**
+     * The narration path: [text] is the real sentence (the one on screen and in the cache key); the engine is
+     * given [SpokenRespelling.apply] of it, so a term espeak-ng reads wrongly is said right ("zwischenzug",
+     * "en prise"). [synthesizeAs] takes its text as given.
+     */
+    override suspend fun synthesize(text: String, outFile: File): SynthesisResult =
+        synthesizeAs(speakerId, SpokenRespelling.apply(text), outFile)
 
     /**
      * [synthesize] with another of the loaded model's speakers. The model holds all eleven, so the voice
@@ -125,6 +137,7 @@ class NeuralTtsProvider(
      * A sid outside the loaded model fails instead of returning sherpa-onnx's silence.
      */
     suspend fun synthesizeAs(sid: Int, text: String, outFile: File): SynthesisResult = withContext(Dispatchers.IO) {
+        lastEngineText = text
         if (text.isBlank()) return@withContext SynthesisResult.Failure("empty narration")
         val engine = tts ?: return@withContext SynthesisResult.Failure("neural voice model not loaded")
         if (sid !in 0 until engine.numSpeakers().coerceAtLeast(1)) {

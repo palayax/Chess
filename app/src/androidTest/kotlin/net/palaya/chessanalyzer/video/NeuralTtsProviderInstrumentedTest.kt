@@ -128,6 +128,34 @@ class NeuralTtsProviderInstrumentedTest {
         }
     }
 
+    /**
+     * C1-device: the narration path ([NeuralTtsProvider.synthesize]) hands the engine the respelled text
+     * ([SpokenRespelling]) while the caller keeps the real sentence; [NeuralTtsProvider.synthesizeAs] takes its
+     * text as given. Kokoro is not bit-exact between two runs of one text (the duration predictor is stochastic,
+     * seen in C1-device), so the WAVs cannot be compared byte for byte: the test reads what the engine was given
+     * ([NeuralTtsProvider.lastEngineText]) and that a WAV came out. What the audio then says is in RUN_LOG.
+     */
+    @Test
+    fun theNarrationPathHandsTheEngineTheRespelledTermNotTheRealOne(): Unit = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val provider = NeuralTtsProvider(NeuralVoiceTier.KOKORO, TestApp.installedVoiceDir())
+        try {
+            assertTrue(provider.prepare())
+            val dir = freshDir(context, "neural_respell")
+            val real = "The queen on c six is en prise: nothing defends it."
+            assertEquals("The queen on c six is on preez: nothing defends it.", SpokenRespelling.apply(real))
+            assertTrue(provider.synthesize(real, File(dir, "narration.wav")) is SynthesisResult.Success)
+            assertEquals(SpokenRespelling.apply(real), provider.lastEngineText)
+            assertTrue(provider.synthesizeAs(NeuralVoiceTier.KOKORO.speakerId, real, File(dir, "real.wav")) is SynthesisResult.Success)
+            assertEquals(real, provider.lastEngineText)
+            val plain = "White plays knight to f three."
+            assertTrue(provider.synthesize(plain, File(dir, "plain.wav")) is SynthesisResult.Success)
+            assertEquals(plain, provider.lastEngineText)
+        } finally {
+            provider.release()
+        }
+    }
+
     @Test
     fun prepareFailsCleanlyWhenModelDirectoryIsAbsent(): Unit = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

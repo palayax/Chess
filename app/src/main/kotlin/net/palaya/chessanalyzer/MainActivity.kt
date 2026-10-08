@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import net.palaya.chessanalyzer.ui.navigation.ChessAnalyzerNavHost
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import net.palaya.chessanalyzer.util.extractPgnFromIntent
@@ -61,22 +64,27 @@ class MainActivity : ComponentActivity() {
             var openSetup by openSetupState
 
             ChessAnalyzerTheme(darkTheme = true) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    // Edge to edge is enforced from targetSdk 35, and the window then also extends into
-                    // the display cutout. Every screen's Scaffold/TopAppBar handles the system bars,
-                    // but not a cutout on the SIDE (a phone in landscape), so the whole UI is kept out
-                    // of it here, once. windowInsetsPadding consumes what it pads, so a navigation bar
-                    // on the same side is not counted twice by the Scaffolds below. The Surface still
-                    // paints the background into the cutout area.
-                    ChessAnalyzerNavHost(
-                        pendingImportPgn = pendingImportPgn,
-                        onPendingImportConsumed = { pendingImportPgn = null },
-                        openSetupRequested = openSetup,
-                        onOpenSetupConsumed = { openSetup = false },
-                        modifier = Modifier.windowInsetsPadding(
-                            WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
-                        ),
-                    )
+                // Left to right on every device for this version (owner, 2026-10-08: Hebrew and RTL wait for a
+                // later version). The manifest's supportsRtl="false" covers the platform views; Compose takes
+                // its first direction from the configuration, so it is pinned here too.
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        // Edge to edge is enforced from targetSdk 35, and the window then also extends into
+                        // the display cutout. Every screen's Scaffold/TopAppBar handles the system bars,
+                        // but not a cutout on the SIDE (a phone in landscape), so the whole UI is kept out
+                        // of it here, once. windowInsetsPadding consumes what it pads, so a navigation bar
+                        // on the same side is not counted twice by the Scaffolds below. The Surface still
+                        // paints the background into the cutout area.
+                        ChessAnalyzerNavHost(
+                            pendingImportPgn = pendingImportPgn,
+                            onPendingImportConsumed = { pendingImportPgn = null },
+                            openSetupRequested = openSetup,
+                            onOpenSetupConsumed = { openSetup = false },
+                            modifier = Modifier.windowInsetsPadding(
+                                WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal),
+                            ),
+                        )
+                    }
                 }
             }
         }

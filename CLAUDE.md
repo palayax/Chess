@@ -341,3 +341,6 @@ never imply affiliation. Draw our own art and write our own words.
   owner-approved and untouched (text in a class colour goes through `legibleTextColor`, the badge glyph is near-black).
 - **Landscape** is `isLandscape()` (the activity handles `orientation|screenSize`, so state survives rotation): Board, Practise,
   Walkthrough and Video put the picture on the left and controls on the right; the rest scroll.
+- **RTL is switched off for this version** (owner, 2026-10-08: Hebrew deferred). `supportsRtl="false"` and a root
+  `LocalLayoutDirection provides Ltr` in `MainActivity`; the per-component Ltr pins (board, move list, eval bar) stay for
+  when it comes back. Do not spend device time on he-IL / RTL until the owner reopens it (RUN_PLAN "H0").

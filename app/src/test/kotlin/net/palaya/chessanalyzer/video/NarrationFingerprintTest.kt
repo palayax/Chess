@@ -16,7 +16,7 @@ class NarrationFingerprintTest {
         val a = provider("7190c4801645")
         val b = provider("0123456789ab")
         assertEquals(
-            "KOKORO@7190c4801645/sid${NeuralVoiceTier.KOKORO.speakerId}/ls${"%.2f".format(java.util.Locale.ROOT, NeuralVoiceTier.KOKORO.lengthScale)}",
+            "KOKORO@7190c4801645/sid${NeuralVoiceTier.KOKORO.speakerId}/ls${"%.2f".format(java.util.Locale.ROOT, NeuralVoiceTier.KOKORO.lengthScale)}/pr${SpokenRespelling.tableId}",
             a.cacheFingerprint,
         )
         assertNotEquals(a.cacheFingerprint, b.cacheFingerprint)

@@ -221,3 +221,13 @@ to four back. Every game is inside its §9.7 budget as before; the Immortal Game
 trims (its plan overran and was cut to 420 s). The protected tiers, the FULL cap and the 15 percent pace cap
 hold (`PacingTiersTest`, `PaceTimingTest`, unchanged). The recap card, the "about N min left" estimate and the
 "N of M" count are untouched: no segment was added, and the card text is not spoken.
+
+## 6. Spoken respellings (C1-device)
+
+The card text keeps the real term. Two terms are misread by the Kokoro voice (espeak-ng's English rules, measured on a device and
+with the phonemizer shipped in sherpa-onnx 1.13.8): "zwischenzug" came out "ZWISH-un-zug" (`zwˈɪʃənzˌʌɡ`) and "en prise" "en PRIZE"
+(`ˈɛn pɹˈaɪz`). The narration therefore hands the voice a respelling and nowhere else: "zwischenzug" -> "zwishentsuuk"
+(`zwˈɪʃəntsˌuːk`), "en prise" -> "on preez" (`ˌɔn pɹˈiːz`). The table is `SpokenRespelling` (app, `video/`), applied by
+`NeuralTtsProvider.synthesize`; the narration cache key stays the real sentence, and the provider fingerprint carries the table's id so an
+edit to the table never reuses older audio. Desperado, skewer, decisively and "the exchange up" are read correctly and are not respelled. A new
+entry needs the phonemes of the term and of the respelling, pinned in `SpokenRespellingTest`. The device voice is not respelled.

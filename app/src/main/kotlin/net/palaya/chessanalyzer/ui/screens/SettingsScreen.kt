@@ -192,7 +192,9 @@ fun SettingsScreen(
                 }
             }
 
-            item(key = "language") {
+            // Hidden while English is the only language (owner, 2026-10-08: Hebrew and RTL wait for a later
+            // version); it comes back by itself once AppLanguage has a second language.
+            if (AppLanguage.entries.size > 2) item(key = "language") {
                 SettingsCard {
                     LanguageRow(
                         selected = settings.language,
