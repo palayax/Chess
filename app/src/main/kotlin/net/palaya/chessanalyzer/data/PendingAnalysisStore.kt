@@ -28,6 +28,13 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
         /** The name used to detect the user's side ("Your name" in Settings when it started). */
         val username: String,
         val startedAtMs: Long,
+        /**
+         * The side the game opens with when the user has not answered "Which side were you?" yet, in the
+         * form `GameRepository.StoredGame.userColorName` holds (`SideChoice.storedName`): `NOT_ME` for a
+         * game from the Famous games library (G1-device). Null (a share, a paste, a file): the username
+         * detection decides, as before.
+         */
+        val initialSide: String? = null,
     )
 
     private val file = File(filesDir, fileName)
@@ -42,6 +49,7 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
             put("multiPv", request.multiPv)
             put("username", request.username)
             put("startedAtMs", request.startedAtMs)
+            request.initialSide?.let { put("initialSide", it) }
         }
         // Temp file then rename: a kill mid-write must not leave a half-written request.
         tmp.writeText(json.toString())
@@ -62,6 +70,8 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
                 multiPv = json.getInt("multiPv"),
                 username = json.optString("username", ""),
                 startedAtMs = json.optLong("startedAtMs", 0L),
+                // Absent in files written before G1-device: no initial side, as then.
+                initialSide = if (json.isNull("initialSide")) null else json.getString("initialSide"),
             )
         } catch (e: Exception) {
             file.delete()

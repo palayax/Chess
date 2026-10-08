@@ -40,6 +40,7 @@ import net.palaya.chessanalyzer.ui.model.initialPuzzleIndex
 import net.palaya.chessanalyzer.ui.model.keyMomentPlies
 import net.palaya.chessanalyzer.ui.model.practiceEntryState
 import net.palaya.chessanalyzer.ui.model.practicePlies
+import net.palaya.chessanalyzer.ui.model.SideChoice
 import net.palaya.chessanalyzer.ui.model.sideChoice
 import net.palaya.chessanalyzer.ui.screens.AboutScreen
 import net.palaya.chessanalyzer.ui.screens.AnalysisProgressScreen
@@ -127,15 +128,16 @@ fun ChessAnalyzerNavHost(
         if (navController.previousBackStackEntry != null) navController.popBackStack() else goHome()
     }
 
-    fun startAnalysis(pgnText: String) {
+    /** [initialSide]: the side the game opens with (a famous game: "Not me"); UNKNOWN lets the username decide. */
+    fun startAnalysis(pgnText: String, initialSide: SideChoice = SideChoice.UNKNOWN) {
         val id = viewModel.newGameId()
         if (!setupViewModel.netReady()) {
             // D2c: no engine data yet. The game waits on disk and is analysed once setup has the net in.
-            viewModel.holdGameForSetup(id, pgnText)
+            viewModel.holdGameForSetup(id, pgnText, initialSide)
             goToSetup()
             return
         }
-        viewModel.registerPendingImport(id, pgnText)
+        viewModel.registerPendingImport(id, pgnText, initialSide)
         navController.navigate(Destination.AnalysisProgress.createRoute(id))
     }
 
@@ -242,7 +244,9 @@ fun ChessAnalyzerNavHost(
                 state = state,
                 onBack = { navController.popBackStack() },
                 // Exactly as if the game had been shared: analysed now, or kept for Setup while the net is missing.
-                onReview = { pgnText -> startAnalysis(pgnText) },
+                // One difference (G1-device): nobody in a famous game is the user, so it opens as "Not me"
+                // (real names, no "you" wording); the Summary's chooser can still change it.
+                onReview = { pgnText -> startAnalysis(pgnText, SideChoice.NOT_ME) },
             )
         }
 

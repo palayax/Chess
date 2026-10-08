@@ -259,7 +259,13 @@ class SetupFlowInstrumentedTest {
         s.onActivity { activity ->
             activity.startService(Intent(activity, ModelDownloadService::class.java).setAction(ModelDownloadService.ACTION_CANCEL))
         }
-        val terminal = awaitStopped()
+        awaitStopped()
+        // The run's tail clears `running` BEFORE it publishes the terminal snapshot (null for a cancel), so the
+        // last progress snapshot (the voice "Paused") can still be read for an instant after `running` turns
+        // false (G1-device: 2 of 3 runs on chess34 read it). Wait for the terminal value; a cancel that ended as
+        // a pause would keep its PAUSED snapshot and still fail here.
+        val terminal = runCatching { withTimeout(5_000) { ModelDownloadService.progress.first { it == null } } }
+            .getOrElse { ModelDownloadService.progress.value }
         assertNull("a cancelled setup leaves no snapshot", terminal)
         assertFalse("Cancel deletes the voice part", voiceStore.partFile.exists())
         assertFalse(voiceStore.isInstalled())

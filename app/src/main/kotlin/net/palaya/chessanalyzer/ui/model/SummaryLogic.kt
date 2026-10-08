@@ -167,7 +167,12 @@ fun groupClassificationRows(
 
 /**
  * The side to use when a game is (re)opened: an answer the user gave on the Summary earlier wins,
- * because it was explicit and per game; otherwise whatever the username auto-detection found.
+ * because it was explicit and per game; then the side the game was opened with ([initial]: "Not me"
+ * for a game from the Famous games library, G1-device, since nobody in it is the user); otherwise
+ * whatever the username auto-detection found. The user can still change it on the Summary.
  */
-fun resolveSide(stored: SideChoice, detected: PieceColor?): SideChoice =
-    if (stored != SideChoice.UNKNOWN) stored else SideChoice.of(detected)
+fun resolveSide(stored: SideChoice, detected: PieceColor?, initial: SideChoice = SideChoice.UNKNOWN): SideChoice = when {
+    stored != SideChoice.UNKNOWN -> stored
+    initial != SideChoice.UNKNOWN -> initial
+    else -> SideChoice.of(detected)
+}

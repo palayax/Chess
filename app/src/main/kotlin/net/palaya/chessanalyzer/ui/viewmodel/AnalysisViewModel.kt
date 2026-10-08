@@ -255,6 +255,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     /** Pending PGN text keyed by the gameId already navigated to, consumed by the progress screen. */
     private val pendingPgnByGameId = mutableMapOf<String, String>()
 
+    /** The side a registered game opens with, when it is not [SideChoice.UNKNOWN] (a famous game: "Not me"). */
+    private val pendingSideByGameId = mutableMapOf<String, SideChoice>()
+
     private var analysisJob: Job? = null
     private val idCounter = AtomicInteger(1)
 
@@ -266,9 +269,10 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     /**
      * A game shared (or opened) while the engine net is missing (D2c): kept on disk instead of being
      * analysed now, so neither "Not now" nor a killed process loses it. One game waits at a time; a later
-     * share replaces it. [takeGameWaitingForSetup] starts it once the net is in.
+     * share replaces it. [takeGameWaitingForSetup] starts it once the net is in. [initialSide] is kept
+     * with it (a famous game opens as "Not me", see [registerPendingImport]).
      */
-    fun holdGameForSetup(gameId: String, pgnText: String) {
+    fun holdGameForSetup(gameId: String, pgnText: String, initialSide: SideChoice = SideChoice.UNKNOWN) {
         _gameWaitingForSetup.value = true
         _error.value = null
         viewModelScope.launch(Dispatchers.IO) {
@@ -281,6 +285,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     multiPv = current.multiPv,
                     username = current.username,
                     startedAtMs = System.currentTimeMillis(),
+                    initialSide = initialSide.storedName,
                 ),
             )
             diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "game $gameId kept until setup has installed the engine data")
@@ -295,16 +300,23 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val request = withContext(Dispatchers.IO) { waitingStore.load() } ?: return null
         withContext(Dispatchers.IO) { waitingStore.clear() }
         _gameWaitingForSetup.value = false
-        registerPendingImport(request.gameId, request.pgnText)
+        registerPendingImport(request.gameId, request.pgnText, SideChoice.fromStored(request.initialSide))
         diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "setup installed the engine data: analysing the waiting game ${request.gameId}")
         return request.gameId
     }
 
     fun newGameId(): String = "imported-${idCounter.getAndIncrement()}-${System.currentTimeMillis()}"
 
-    /** Registers PGN text to be analyzed once the caller navigates to the AnalysisProgress route. */
-    fun registerPendingImport(gameId: String, pgnText: String) {
+    /**
+     * Registers PGN text to be analyzed once the caller navigates to the AnalysisProgress route.
+     * [initialSide] is the side the game opens with until the user answers "Which side were you?":
+     * [SideChoice.NOT_ME] for a game from the Famous games library (G1-device: nobody in it is the user,
+     * so no "you" wording and the real names); [SideChoice.UNKNOWN] (a share, a paste, a file) leaves it
+     * to the username detection, as before. It travels in the request on disk, so a resume keeps it.
+     */
+    fun registerPendingImport(gameId: String, pgnText: String, initialSide: SideChoice = SideChoice.UNKNOWN) {
         pendingPgnByGameId[gameId] = pgnText
+        if (initialSide == SideChoice.UNKNOWN) pendingSideByGameId.remove(gameId) else pendingSideByGameId[gameId] = initialSide
         // A new game must not open on the previous game's error state.
         _error.value = null
     }
@@ -348,6 +360,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 multiPv = current.multiPv,
                 username = current.username,
                 startedAtMs = System.currentTimeMillis(),
+                initialSide = pendingSideByGameId[gameId]?.storedName,
             )
         }
         return withContext(Dispatchers.IO) { pendingStore.load() }
@@ -412,10 +425,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     val header = outcome.game.toHeader()
                     // The username auto-detection only covers a user who set a name. An answer to the
                     // Summary's "Which side were you?" from an earlier visit to this game wins over
-                    // it (explicit, per game), so reopening a game keeps "you" / "Not me".
+                    // it (explicit, per game), so reopening a game keeps "you" / "Not me". A famous
+                    // game opens as "Not me" (the request's initial side) unless answered otherwise.
                     val side = resolveSide(
                         stored = SideChoice.fromStored(app.gameRepository.load(gameId)?.userColorName),
                         detected = outcome.userColor?.toUiColor(),
+                        initial = SideChoice.fromStored(request.initialSide),
                     )
                     val sideColor = side.color?.toCoreColor()
                     // The analysis wrote the card texts for the side it detected; the side that wins

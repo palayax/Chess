@@ -62,6 +62,20 @@ class SummaryLogicTest {
         assertEquals(SideChoice.UNKNOWN, resolveSide(SideChoice.UNKNOWN, null))
     }
 
+    @Test
+    fun aFamousGameOpensAsNotMeUnlessTheUserAnsweredOtherwise() {
+        // G1-device: the library hands the analysis an initial side of "Not me".
+        assertEquals(SideChoice.NOT_ME, resolveSide(SideChoice.UNKNOWN, null, initial = SideChoice.NOT_ME))
+        // Even when the Settings name happens to match one of the players: nobody in a famous game is the user.
+        assertEquals(SideChoice.NOT_ME, resolveSide(SideChoice.UNKNOWN, PieceColor.WHITE, initial = SideChoice.NOT_ME))
+        // The user can still change it on the Summary, and that answer is stored per game and wins on reopen.
+        assertEquals(SideChoice.WHITE, resolveSide(SideChoice.WHITE, null, initial = SideChoice.NOT_ME))
+        assertEquals(SideChoice.BLACK, resolveSide(SideChoice.BLACK, PieceColor.WHITE, initial = SideChoice.NOT_ME))
+        // A shared or pasted game has no initial side: today's behaviour, the detection decides.
+        assertEquals(SideChoice.WHITE, resolveSide(SideChoice.UNKNOWN, PieceColor.WHITE, initial = SideChoice.UNKNOWN))
+        assertEquals(SideChoice.UNKNOWN, resolveSide(SideChoice.UNKNOWN, null, initial = SideChoice.UNKNOWN))
+    }
+
     // ---- Username written by the chooser ----
 
     private val header = GameHeader(white = "MorphyFan1857", black = "DukeAndCount")

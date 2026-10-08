@@ -122,6 +122,14 @@ Adding a game: add an entry to `games_list.py`, run `python curate.py <repo root
   a shared game goes through: analysed at once when the engine net is installed, otherwise kept in
   `setup_waiting_game.json` and the Setup screen opened ("Your game is kept ..."), exactly as in D2c. Back from
   Analysing or from the Summary returns to the library.
+- **A famous game opens as "Not me"** (G1-device): nobody in it is the user, so the Summary's "Which side were
+  you?" starts on **Not me**: the real names, no "you" / "your opponent" wording, no Practise section. The user
+  can still pick White or Black. It goes through the normal per-game side plumbing: the library hands
+  `startAnalysis` an initial side (`SideChoice.NOT_ME`), which travels in the analysis request
+  (`PendingAnalysisStore.Request.initialSide`, so a game kept for Setup or resumed after a process kill keeps it),
+  and `resolveSide(stored, detected, initial)` ranks an answer stored for the game first, then the initial side,
+  then the username detection. The result is stored per game (`userColorName = NOT_ME`) as if the user had
+  answered. Shared, pasted and opened files have no initial side: unchanged.
 - The library is read from the APK's assets once per process (`FamousGamesStore`, off the main thread). No
   network: nothing in it can open a connection (`NetworkCallSitesTest` still passes).
 - **Reference (owner rule, chess.com as design reference):** chess.com's master-games library: a searchable list
@@ -262,3 +270,29 @@ Generated from the assets (moves = full moves; second source as in `docs/famous_
 | 89 | Humans against computers | Kasparov vs Deep Blue, 1996, game 6 | Garry Kasparov - Deep Blue | 1996 | 1-0 | 43 | same-moves (ca) |
 | 90 | Humans against computers | Kasparov vs Deep Blue, 1997, game 1 | Garry Kasparov - Deep Blue | 1997 | 1-0 | 45 | same-moves (ca) |
 | 91 | Humans against computers | Deep Blue vs Kasparov, 1997, game 6 | Deep Blue - Garry Kasparov | 1997 | 1-0 | 19 | same-moves (ru) |
+
+## 9. On a device (G1-device, 2026-10-08)
+
+Run on chess36 (API 36) and chess34 (API 34). Details in RUN_LOG "G1-device".
+
+- **Instrumented:** `FamousGamesInstrumentedTest` 3/3 on both devices (the two G1 cases plus
+  `aReviewedFamousGameOpensAsNotMeWithTheRealNames`: Réti - Tartakower reviewed at Quick through to the Summary,
+  with the Settings name set to White's name on purpose; "Not me" is selected, both real names are shown, no
+  "(you)" and no "Your key moments", and the stored game holds `NOT_ME`). The two G1 cases also check the initial
+  side in `pending_analysis.json` and `setup_waiting_game.json`, and the TalkBack semantics: the screen title,
+  the era titles and the sheet's title are headings, and a row is one clickable node carrying the title, the
+  players and "year · result". The full `:app` connected suite: **176 / 0 failed / 0 skipped on each device**.
+- **Manual, release build** (fresh install of `app-x86_64-release.apk` on chess36, the models downloaded from the
+  live GitHub release in about 50 s): Home with the card; the library; search ("reti" finds both Réti games,
+  accents folded; "Kramnik 1851" says "No famous game matches ..."); the sheet; landscape (the list scrolls, the
+  sheet's button is reachable); font 2.0 (titles and names wrap, nothing clipped); he-IL (per-app locale; the
+  layout mirrors, the player names and "year · result" stay left to right and in order). The Immortal Game was
+  reviewed at Standard in about 50 s: the Summary opened on **Not me** with "Adolf Anderssen vs Lionel
+  Kieseritzky", "Key moments" and no Practise section; choosing White switched it to "(you)" / "Your key moments"
+  and back. "Show the best line" on 11... cxb5 played "11... h5 12. h4 Qg6 13. Ba4 hxg4 14. Bxf4 d5" (-0.5, depth
+  14). Back from the Summary returned to the library.
+- **Screenshots:** `docs/screenshots/g1_*.png` (17, each viewed).
+- **Found:** nothing wrong in the library. Two cosmetic notes: in he-IL a players line that wraps is
+  left-aligned while a short one sits on the right (the line is `TextDirection.Ltr` on purpose, so White's name
+  stays first); and the sheet's facts read "11 moves · 1910 · 1-0" from the left in RTL, which is the correct
+  right-to-left order of the same two parts.

@@ -11,6 +11,20 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
+## G1 DONE (2026-10-08): THE FAMOUS GAMES LIBRARY
+
+Home has a **Famous games** card: 91 classic games inside the app (the Immortal Game, the Opera Game, Byrne - Fischer
+1956, Fischer - Spassky 1972, Kasparov - Topalov 1999, Deep Blue - Kasparov, the world-championship games up to
+Ding - Gukesh 2024), grouped by era, searchable by player, year or name, each with a short description in our own
+words and one button, **Review this game**, which runs the normal analysis. Nothing is downloaded. A famous game's
+Summary opens on **"Not me"** (real names, no "you"); the user can still pick a side. Verified on chess36 and chess34
+(RUN_LOG "G1" and "G1-device"; design, sources and device results in `docs/FAMOUS_GAMES.md`). Nothing committed.
+
+**Note for the upload:** the P1 kit below was built at `e3843d7`, before G1. To ship the library, the AAB/APKs have to
+be rebuilt from the commit that has G1 (same versionCode 2 is fine if nothing was uploaded yet).
+
+---
+
 ## P1 DONE (2026-10-07): THE GOOGLE PLAY KIT. OWNER: START HERE
 
 The kit is ready.

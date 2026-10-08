@@ -3879,3 +3879,104 @@ Run `FamousGamesInstrumentedTest` on chess36 and chess34 (check `skipped="0"`); 
 library (portrait, landscape, font 2.0, RTL with Hebrew), the sheet, the no-match line; TalkBack over a row and the sheet;
 review one famous game end to end (Summary). Note for the owner: the Summary still asks "Which side were you?" for a
 famous game; "Not me" answers it.
+
+## G1-device (2026-10-08): famous games on chess36 and chess34, and "Not me" by default
+
+Baseline `807768f` (G1 merged), main checkout. Nothing committed. Another agent (C1) worked in `.claude/worktrees/`
+with host builds only; that tree was not touched, and every Gradle run here used `--max-workers=2`. The session was
+cut once by an API rate limit (the emulator and Gradle stopped); it resumed from the files on disk.
+
+### The fix: a famous game opens as "Not me"
+- **Before:** a game reviewed from the library asked "Which side were you?" like a shared game.
+- **Now:** the Summary starts on **Not me**: the real names, no "you" / "your opponent", no Practise section. The
+  user can still pick White or Black (checked on the device, and back).
+- **How (the existing per-game side plumbing):** `ChessAnalyzerNavHost.startAnalysis(pgn, initialSide)`; the library
+  passes `SideChoice.NOT_ME`, everything else the default `UNKNOWN`. `AnalysisViewModel.registerPendingImport` /
+  `holdGameForSetup` carry it into `PendingAnalysisStore.Request.initialSide` (a new optional JSON field holding
+  `SideChoice.storedName`; files from older builds read as null), so a game kept for Setup or resumed after a process
+  kill keeps it. On success `resolveSide(stored, detected, initial)` ranks: an answer stored for this game, then the
+  initial side, then the username detection; the result is saved as `userColorName` like any answer. A famous game
+  is "Not me" even when the Settings name equals a player's name (nobody in a famous game is the user). Shares,
+  pastes and files are unchanged.
+- **Tests:** host `SummaryLogicTest.aFamousGameOpensAsNotMeUnlessTheUserAnsweredOtherwise` and the new
+  `PendingAnalysisStoreTest` (3: the round trip keeps `NOT_ME`, a shared game has none, an old file reads as none).
+  Instrumented, `FamousGamesInstrumentedTest`: both G1 cases now also assert the initial side in
+  `pending_analysis.json` / `setup_waiting_game.json`, and a third case,
+  `aReviewedFamousGameOpensAsNotMeWithTheRealNames`, reviews Réti - Tartakower (21 plies) at Quick with the Settings
+  name set to "Richard Réti", then asserts on the Summary: "Not me" selected, no help line, both names, no "(you)",
+  no "Your key moments", and the stored game's `userColorName` = `NOT_ME` (settings restored and the game file
+  deleted in `@After`).
+- **TalkBack (semantics, in the same test):** the screen title, the era titles and the sheet's title are headings;
+  a row is one clickable node carrying the title, the players and "year · result". The uiautomator dump agrees: each
+  row is a single clickable View holding the three texts; the side chooser's segments are checkable, "Not me"
+  checked. (The dump does not expose headings, hence the Compose assertions.)
+
+### Instrumented results (XML)
+| Run | Device | Tests | Failed | Skipped |
+|---|---|---|---|---|
+| `FamousGamesInstrumentedTest` (before the TalkBack assertions) | chess36 | 3 | 0 | 0 |
+| full `:app` connected | chess36 (API 36) | **176** | **0** | **0** |
+| `FamousGamesInstrumentedTest` (final file) | chess36 | 3 | 0 | 0 |
+| full `:app` connected, 1st | chess34 (API 34) | 176 | 1 | 0 |
+| `SetupFlowInstrumentedTest` alone, before the test fix, 2 runs | chess34 | 6 each | 1, then 0 | 0 |
+| `SetupFlowInstrumentedTest` alone, after the test fix, 3 runs | chess34 | 6 each | 0 | 0 |
+| full `:app` connected, final | chess34 | **176** | **0** | **0** |
+
+176 = 173 (main) + 2 (G1's FamousGames cases) + 1 (new). `:engine` connected not run: nothing in `:engine` changed.
+
+**The chess34 failure (not G1, a test race):** `SetupFlowInstrumentedTest.cancelFromTheNotification...` read the
+setup snapshot right after `ModelDownloadService.running` turned false and found the voice "Paused" snapshot
+instead of null. The service's tail clears `running` first and publishes the terminal snapshot (null for a cancel)
+on the next line, on purpose (comment there); the test read in between. 2 of 3 runs on chess34 hit it. The test now
+waits up to 5 s for the terminal value; a cancel that really ended as a pause would keep its PAUSED snapshot and
+still fail. With that, 3/3 class runs and the full suite passed. Product code unchanged.
+
+### Host gate (XML)
+`:core` 522/0/0 (forced rerun), `:engine` unit 32/0/0 (forced rerun), `:app` unit **495**/0/0 (491 + 1 + 3), all 0
+skipped. `:app:lintDebug` 0 errors / 69 warnings (unchanged). `:app:assembleRelease` OK (x86_64 40,227,813 B, arm64
+35,969,818 B, universal 97,213,366 B; x86_64 SHA-256 `b77c89a5…d575`).
+
+### Manual pass (chess36, release build)
+- Started with **`-gpu host`** and captured with `adb emu screenrecord screenshot` (P1's route); SystemUI demo mode
+  for the status bar (it dropped out once after the font change: the two font-2.0 shots show the real clock).
+- Models: `app-x86_64-release.apk` installed fresh, Setup's Download from the live GitHub release, verified (about
+  90 s on the first install, about 50 s on the second after the session cut). The notification permission was
+  answered "Don't allow" (the download runs anyway).
+- Home with the card -> library (portrait) -> search "reti" (both Réti games, accents folded) -> "Kramnik 1851"
+  (the no-match line) -> the Immortal Game's sheet -> Review: Standard, about 50 s -> Summary on **Not me**, White
+  80 % / Black 70 %, "White won, even after a blunder on move 18." -> 11... cxb5 on the Board -> "Show the best line":
+  "11... h5 12. h4 Qg6 13. Ba4 hxg4 14. Bxf4 d5", -0.5, depth 14 -> back to the Summary -> White chosen ("Adolf
+  Anderssen (you)", "Your key moments", "You won ...") -> Not me again -> Back: the library.
+- Landscape (`user_rotation 1`): the list scrolls, the sheet's button is reachable. Font 2.0: titles and names wrap,
+  nothing clipped, the sheet's button visible. he-IL (per-app locale): mirrored layout; names, results and notation
+  stay left to right.
+
+Screenshots (`docs/screenshots/`, 1080x2400 or 2400x1080, each viewed): `g1_home`, `g1_library_portrait`,
+`g1_search`, `g1_search_no_match`, `g1_sheet`, `g1_analysing`, `g1_summary_not_me`, `g1_summary_changed_to_white`,
+`g1_board_key_moment`, `g1_best_line`, `g1_library_landscape`, `g1_sheet_landscape` (both rotated upright from the
+console's portrait framebuffer), `g1_library_font2`, `g1_sheet_font2`, `g1_library_rtl`, `g1_search_rtl`,
+`g1_sheet_rtl`.
+
+### Found
+- **Library:** nothing wrong. Cosmetic: in he-IL a players line that wraps is left-aligned while a short one sits on
+  the right (the line is `TextDirection.Ltr` by design so White stays first); the sheet's facts show as "11 moves ·
+  1910 · 1-0" from the left in RTL, which is the right-to-left order of the same two parts.
+- Not library: the Analysing screen said "About 2 min left" at 0:20 for a run that finished at about 0:50 (the
+  estimate is pessimistic early on); `SetupFlowInstrumentedTest`'s race above.
+
+### Device state restored
+- chess36: demo mode exited, `sysui_demo_allowed 0`, font 1.0, `user_rotation 0`, `accelerometer_rotation 1` (as
+  found), per-app locale cleared, airplane 0 (never changed), our app uninstalled, `/data/local/tmp/ui.xml` deleted,
+  no adb reverse, emulator shut down (`-no-snapshot-save`).
+- chess34: only Gradle's install/uninstall; font 1.0, rotation 0, airplane 0, locale default; emulator shut down. It
+  already had `net.palaya.chessanalyzer.engine.test` installed before this task (an earlier `:engine` run); left
+  as found.
+- No host servers were started (the release build downloads from GitHub; no model server, no adb reverse).
+
+### Deviations
+1. chess36 ran with `-gpu host` (as in P1), not `-gpu swangle_indirect`; screenshots via the emulator console.
+2. The full chess36 suite ran before the TalkBack assertions were added to `FamousGamesInstrumentedTest`; that class
+   was re-run on chess36 with the final file (3/3), and chess34's full suite ran the final file.
+3. `SetupFlowInstrumentedTest` changed (a test-only wait, above) to get chess34 to 0 failed.
+4. TalkBack itself was not switched on (it would change the device's accessibility settings); headings and row
+   content were checked through the Compose semantics tree in the instrumented test plus the uiautomator dump.
