@@ -146,7 +146,7 @@ numbers, term and outcome-verb counts, band order, names, negations, alternative
 moves/outcomes/check of the two texts, plus count rules for hedges, praise and judgement words. A rewording that
 fails any rule is not shown; the original is.
 
-**Negative controls** (`ClaimCheckerTest`, `audit_commentary.py mutate-rephrase`): 25 mutation kinds (a square, a
+**Negative controls** (`ClaimCheckerTest`, `audit_commentary.py mutate-rephrase`): 24 mutation kinds (a square, a
 piece, a side, "Better was" dropped/moved/renamed, a number, swapped bands, a term added or weakened, an outcome verb
 added, a hedge, praise, doubled text, a list, a preamble, padding, the classification name, you -> White, a negation
 dropped, an alternative marker dropped, an effect moved onto the played move, the first person, notation in
