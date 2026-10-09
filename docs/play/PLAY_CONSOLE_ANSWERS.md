@@ -30,7 +30,7 @@ Related documents: `docs/PUBLISHING.md` (the reasoning behind these answers), `d
 - [ ] **The models are live.** They are live since 2026-10-07 (`models-2026.10` release and the signed `models` manifest
       on https://github.com/palayax/Chess). Never delete or replace those assets.
 
-Upload files (`dist/play-kit/`, rebuilt 2026-10-08 at commit `af7b274` (famous games, C1 commentary, Hebrew hidden); AAB SHA-256 `cfac2ae8d8e7f627d0c885b599003026dbe782e656cd8a74002a35aa56aa21e2`):
+Upload files (`dist/play-kit/`, rebuilt 2026-10-09 at commit `21f0d6a` (famous games, C1 commentary, Hebrew hidden, privacy link in About); AAB SHA-256 `a646f94e535b47471ad4c14d49b064e07edd0bf49f41ade56e2a9eeb27245f02`):
 
 | File | What it is |
 |---|---|
@@ -137,7 +137,7 @@ Palaya Chess is not affiliated with, endorsed by or connected to Chess.com or Li
 | 5 | `phone_05_video_review.png` | Video review player on a key moment |
 | 6 | `phone_06_setup.png` | First-run Setup screen (the one-time download, stated honestly) |
 | 7 | `phone_07_board_blunder.png` | Board with a Blunder badge and its explanation |
-| 8 | `phone_08_settings_voice.png` | Settings: Narrator voice and Pace |
+| 8 | `phone_08_famous_games.png` | Famous games library (owner, 2026-10-09; replaces `phone_08_settings_voice.png`) |
 
 The minimum is 2 and the maximum is 8. With 4 or more at 1080 px or larger, the app can be featured. **7-inch and
 10-inch tablet screenshots:** optional. None were made (see RUN_LOG P1). Leave them empty.
