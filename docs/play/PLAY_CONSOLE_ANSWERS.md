@@ -267,6 +267,21 @@ Then the **Store listing preview** should say **"No data collected"** and **"No 
   matches Google's "processed ephemerally" exemption, and the developer receives none of it.
 - The diagnostic log leaves the phone only through the Android share sheet, when the user chooses to share it.
 - Android Auto Backup goes to the user's own Google account; the developer never receives it.
+- **The optional wording model (C2, "Natural wording")** does not change this: it is a third data file, downloaded from
+  GitHub only on the user's tap, and run on the phone by llama.cpp. No prompt, text or result leaves the device and no SDK
+  is involved (Gemini Nano was dropped on 2026-10-09 because ML Kit's analytics upload would have made the answer "Yes").
+
+### 3.7b AI-generated content (C2): the reading, recorded 2026-10-09
+
+Google Play's AI-Generated Content policy (https://support.google.com/googleplay/android-developer/answer/14094294)
+covers "content that is created by generative AI models based on user prompts" and, "at this time", lists as out of
+scope "productivity apps that use AI to improve an existing feature". **Reading: the reporting requirement does not
+apply to Palaya Chess.** There is no user prompt; the model only rewords the app's own, already verified commentary; it
+cannot add a fact (the claim checker rejects any rewording whose moves, squares, pieces, sides, numbers, terms,
+evaluation words or outcome verbs differ from the original, and the original is shown instead); the feature is off
+unless the user downloads the model. The exclusions are "at this time": re-read the policy page before every
+submission. Cheap insurance, not built yet (a design option, docs/LLM_REPHRASE_DESIGN.md §9.2): a "Report this wording"
+item on a card that shares the original/rewording pair through the share sheet. [not confirmed: Google's reading]
 
 ### 3.8 Government apps
 

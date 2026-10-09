@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.ChessAnalyzerApplication
 import net.palaya.chessanalyzer.data.models.ModelDownloadService
 import net.palaya.chessanalyzer.data.models.ModelSetup
+import net.palaya.chessanalyzer.rephrase.RephraseSupport
 import net.palaya.chessanalyzer.data.models.SetupState
 import net.palaya.chessanalyzer.ui.model.SetupPrecheck
 import net.palaya.chessanalyzer.ui.model.SetupSizes
@@ -33,11 +34,27 @@ class SetupViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as ChessAnalyzerApplication
     private val setup: ModelSetup get() = app.modelSetup
 
+    /**
+     * C2 (owner decision §12.3): the Setup screen offers the wording model as an optional third download, on a phone
+     * that can run it. Decided once per screen visit (cheap: ABI, RAM, CPU flags).
+     */
+    val rephraseOffered: Boolean =
+        setup.rephraseSpec != null && app.rephraseAvailability() == RephraseSupport.Availability.AVAILABLE
+
     val sizes = SetupSizes(
         netBytes = setup.netSpec.sizeBytes,
         voiceBytes = setup.voiceSpec.sizeBytes,
         voiceInstalledBytes = setup.voiceUnpackedBytes,
+        rephraseBytes = if (rephraseOffered) setup.rephraseSpec?.sizeBytes ?: 0L else 0L,
     )
+
+    /** The optional download's check box: the request lives on disk (`rephrase/wanted`), so a resume keeps it. */
+    fun setRephraseWanted(wanted: Boolean) {
+        if (!rephraseOffered) return
+        app.rephraseModelStore.setWanted(wanted)
+        app.diagnostics.log.log(ModelSetup.TAG, "wording model ${if (wanted) "added to" else "removed from"} the setup download")
+        refresh()
+    }
 
     private val _disk = MutableStateFlow(setup.state())
 

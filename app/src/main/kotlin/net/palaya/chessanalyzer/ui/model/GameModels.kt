@@ -132,6 +132,13 @@ data class RecentGameSummary(
 enum class AnalysisPhase {
     PREPARING_ENGINE,
     ANALYZING_MOVES,
+
+    /**
+     * C2: the analysis is done and the key moments' texts are being reworded by the on-device model
+     * ("Polishing the commentary (on-device AI)… 2 of 5", skippable). [AnalysisProgress.currentMoveIndex] /
+     * [AnalysisProgress.totalMoves] count texts here, not positions.
+     */
+    POLISHING_COMMENTARY,
     DONE,
 }
 

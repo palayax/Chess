@@ -12,6 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,7 @@ import net.palaya.chessanalyzer.data.mapper.toMoveRecord
 import net.palaya.chessanalyzer.data.mapper.toSequenceViews
 import net.palaya.chessanalyzer.data.mapper.toUiColor
 import net.palaya.chessanalyzer.data.mapper.toUiReport
+import net.palaya.chessanalyzer.rephrase.RephraseService
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
@@ -174,6 +176,78 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     private val coreArtifacts = HashMap<String, CoreArtifacts>()
     private val videoScripts = HashMap<String, VideoScript>()
 
+    // ---- C2: the on-device wording model on the cards (docs/LLM_REPHRASE_DESIGN.md §6.2) ----
+
+    /**
+     * The core report of [gameId] with the cached rewordings swapped in. [coreArtifacts] keeps the verified
+     * originals (side changes and the narrated video are written from them); only the UI copies show this.
+     */
+    private val wordedReports = HashMap<String, CoreGameReport>()
+
+    @Volatile private var polishJob: Job? = null
+    @Volatile private var backgroundWording: Job? = null
+
+    /** The Analysing screen's Skip during "Polishing the commentary": the originals stay, the rest goes on lazily. */
+    fun skipPolishing() {
+        polishJob?.cancel()
+    }
+
+    /**
+     * Swaps every cached rewording of [gameId]'s card texts into the UI copies (file reads only, no model). A card
+     * already on screen keeps its words until it is composed again (design §6.2).
+     */
+    private suspend fun applyCachedWording(gameId: String) {
+        val artifacts = coreArtifacts[gameId] ?: return
+        val worded = withContext(Dispatchers.IO) { app.rephraseService.applyCached(artifacts.report) }
+        if (worded === artifacts.report) {
+            wordedReports.remove(gameId)
+            return
+        }
+        wordedReports[gameId] = worded
+        games[gameId]?.let { g -> games[gameId] = g.copy(moves = worded.annotations.map { it.toMoveRecord() }) }
+        val threshold = reports[gameId]?.tacticThresholdCp ?: 0
+        reports[gameId] = worded.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), threshold, artifacts.sideNotMe, narrationStrings())
+            .copy(cappedPositions = artifacts.cappedPositions)
+    }
+
+    /**
+     * The blocking phase at the end of an analysis: the key moments of the current side, with progress and Skip.
+     * Nothing happens when the feature is off, no model is installed, or every text is already cached.
+     */
+    private suspend fun polishKeyMoments(report: CoreGameReport) {
+        val items = RephraseService.keyMomentTexts(report)
+        val pending = app.rephraseService.pending(items)
+        if (pending == 0) return
+        _progress.value = AnalysisProgress(phase = AnalysisPhase.POLISHING_COMMENTARY, totalMoves = items.size, fractionComplete = 0f)
+        val job = viewModelScope.launch(Dispatchers.Default) {
+            app.rephraseService.polish(items) { done, total ->
+                _progress.value = AnalysisProgress(
+                    phase = AnalysisPhase.POLISHING_COMMENTARY, currentMoveIndex = done, totalMoves = total,
+                    fractionComplete = if (total > 0) done.toFloat() / total else 1f,
+                )
+            }
+        }
+        polishJob = job
+        job.join()
+        polishJob = null
+        if (job.isCancelled) diagnostics.log(RephraseService.TAG, "polishing skipped by the user")
+    }
+
+    /**
+     * The lazy part (§6.2): every other card text of [gameId], key moments first then by distance from [aroundPly],
+     * one worker, only while a screen of ours is in the foreground; the cards pick the rewordings up when next drawn.
+     */
+    fun startBackgroundWording(gameId: String, aroundPly: Int = 0) {
+        val artifacts = coreArtifacts[gameId] ?: return
+        backgroundWording?.cancel()
+        backgroundWording = viewModelScope.launch(Dispatchers.Default) {
+            val items = RephraseService.cardOrder(artifacts.report, aroundPly)
+            if (app.rephraseService.pending(items) == 0) return@launch
+            app.rephraseService.polish(items)
+            applyCachedWording(gameId)
+        }
+    }
+
     /**
      * The narration language for text written into a report (`GameReport.summarySentence`): the
      * same resolution the narrated video uses, so the two never disagree.
@@ -190,7 +264,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val artifacts = coreArtifacts[gameId] ?: return reports[gameId]
         val cached = reports[gameId]
         if (cached != null && cached.tacticThresholdCp == tacticThresholdCp) return cached
-        return artifacts.report.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), tacticThresholdCp, artifacts.sideNotMe, narrationStrings())
+        return (wordedReports[gameId] ?: artifacts.report).toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), tacticThresholdCp, artifacts.sideNotMe, narrationStrings())
             .copy(cappedPositions = artifacts.cappedPositions)
             .also { reports[gameId] = it }
     }
@@ -223,6 +297,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         if (rebuilt != null) games[gameId] = rebuilt
         val updated = artifacts.copy(report = report, userColor = sideColor, sideNotMe = choice == SideChoice.NOT_ME)
         coreArtifacts[gameId] = updated
+        // C2: the texts for the new side are different strings, so new cache keys: the originals show now, the
+        // cached rewordings of this side (if any) are swapped in, and the background job refills the rest.
+        wordedReports.remove(gameId)
         // The video script is written "to you" or "to White" depending on the side, and its cache
         // key does not include it, so a cached script for this game would now be stale.
         videoScripts.keys.removeAll { it.startsWith("$gameId:") }
@@ -230,6 +307,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         reports[gameId] = updated.report.toUiReport(updated.header, updated.userColor?.toUiColor(), threshold, updated.sideNotMe, narrationStrings())
             .copy(cappedPositions = updated.cappedPositions)
         viewModelScope.launch {
+            applyCachedWording(gameId)
+            startBackgroundWording(gameId)
             app.gameRepository.load(gameId)?.let { stored ->
                 app.gameRepository.save(stored.copy(userColorName = choice.storedName))
             }
@@ -474,6 +553,16 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     activeRequest = null
                     refreshRecentGames()
                     _pasteDraft.value = ""
+                    // C2: the key moments are reworded now (skippable), the rest lazily in the background.
+                    try {
+                        polishKeyMoments(sidedReport)
+                        applyCachedWording(gameId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        diagnostics.error(RephraseService.TAG, "polishing failed; the original texts stay", e)
+                    }
+                    startBackgroundWording(gameId)
                     // The analysis loop runs on Dispatchers.Default, but [onComplete] drives
                     // NavController, and NavController touches LifecycleRegistry, which throws
                     // "setCurrentState must be called on the main thread" off the main thread.
@@ -600,6 +689,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     }
 
     override fun onCleared() {
+        backgroundWording?.cancel()
         releaseVoiceSamples()
         super.onCleared()
     }
@@ -709,6 +799,54 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val script = VideoScriptGenerator(artifacts.userColor, strings).generate(artifacts.report, artifacts.game, options)
         videoScripts[cacheKey] = script
         return script
+    }
+
+    // ---- C2: the narration post-pass (docs/LLM_REPHRASE_DESIGN.md §6.2) ----
+    //
+    // V4 INTEGRATION HOOK (to wire after V4 merges; nothing in the video pipeline calls these yet):
+    //  1. ChessAnalyzerNavHost, the Video route: `viewModel.videoScriptFor(gameId)` -> `viewModel.rephrasedVideoScriptFor(gameId)`
+    //     (the VideoScreen, the player, NarrationCoordinator and the exporter then all see the reworded beats; the narration
+    //     WAV cache is keyed by sentence text, so the originals' WAVs stay valid for the setting-off case).
+    //  2. VideoScreen, before "Prepare narration" and before "Save video": when `narrationPolishPending(gameId) > 0`, show
+    //     "Polishing the narration… N of M" with Skip, running `polishNarration(gameId) { done, total -> }` in a coroutine
+    //     the Skip button cancels; then reload the script with `rephrasedVideoScriptFor(gameId)`. The export never calls the
+    //     model: it reads what this pass cached.
+
+    /**
+     * The finished, paced script of [gameId] with every cached narration rewording applied by the pure
+     * [net.palaya.chessanalyzer.core.text.RephrasedScript] post-pass (allowlisted prose beats only, speech re-estimated,
+     * lead-ins/holds/boards untouched, the story capped at 1.10x and the §9.7 budget). Reads files only. Cached per
+     * rephraser id, so turning the feature off or a model update shows the right words at once.
+     */
+    suspend fun rephrasedVideoScriptFor(gameId: String): VideoScript? {
+        val base = videoScriptFor(gameId) ?: return null
+        val id = app.rephraseService.activeId() ?: return base
+        val options = narrationOptionsForCurrentVoice()
+        val key = "rephrased:$gameId:${options}:$id:${base.hashCode()}"
+        videoScripts[key]?.let { return it }
+        val fullMoves = ((coreArtifacts[gameId]?.report?.annotations?.size ?: 0) + 1) / 2 // ScriptBuilder.budgetMs
+        val worded = withContext(Dispatchers.IO) {
+            app.rephraseService.applyCachedScript(base, options.speechWpm, VideoScriptGenerator.budgetMs(fullMoves))
+        }
+        videoScripts[key] = worded
+        return worded
+    }
+
+    /** How many narration beats of [gameId] still need the model: 0 = no "Polishing the narration" step to show. */
+    suspend fun narrationPolishPending(gameId: String): Int {
+        val base = videoScriptFor(gameId) ?: return 0
+        return app.rephraseService.pending(RephraseService.narrationOrder(base))
+    }
+
+    /**
+     * The Video screen's "Polishing the narration… N of M" pass: rewords every eligible beat that is not cached yet,
+     * one request per beat (the sentences of a beat refer to each other). Cancel the calling coroutine to Skip.
+     */
+    suspend fun polishNarration(gameId: String, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): RephraseService.Stats? {
+        val base = videoScriptFor(gameId) ?: return null
+        val stats = app.rephraseService.polish(RephraseService.narrationOrder(base), onProgress)
+        videoScripts.keys.removeAll { it.startsWith("rephrased:$gameId:") }
+        return stats
     }
 
     private fun refreshRecentGames() {

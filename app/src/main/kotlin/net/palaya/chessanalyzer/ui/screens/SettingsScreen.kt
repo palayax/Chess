@@ -131,6 +131,8 @@ fun SettingsScreen(
     onStopVoiceSample: () -> Unit = {},
     /** The picker closed: stop the sample and free the voice engine. */
     onVoicePickerClosed: () -> Unit = {},
+    /** C2: the "Commentary" section (Natural wording), placed between the name and Video; null hides it. */
+    commentarySection: (@Composable () -> Unit)? = null,
 ) {
     var advanced by rememberSaveable(stateSaver = AdvancedExpanderSaver) { mutableStateOf(AdvancedExpander()) }
 
@@ -190,6 +192,10 @@ fun SettingsScreen(
                         )
                     }
                 }
+            }
+
+            if (commentarySection != null) item(key = "commentary") {
+                SettingsCard { commentarySection() }
             }
 
             // Hidden while English is the only language (owner, 2026-10-08: Hebrew and RTL wait for a later

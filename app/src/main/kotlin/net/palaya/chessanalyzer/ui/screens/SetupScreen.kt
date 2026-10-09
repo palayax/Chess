@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -29,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -82,6 +85,7 @@ import net.palaya.chessanalyzer.ui.model.aboutMegabytes
 import net.palaya.chessanalyzer.ui.model.downloadTotalBytes
 import net.palaya.chessanalyzer.ui.model.installedFootprintBytes
 import net.palaya.chessanalyzer.ui.model.megabytesLabel
+import net.palaya.chessanalyzer.ui.model.gigabytesLabel
 import net.palaya.chessanalyzer.ui.model.percentOf
 import net.palaya.chessanalyzer.ui.model.progressMegabytes
 import net.palaya.chessanalyzer.ui.model.setupView
@@ -146,6 +150,8 @@ fun SetupScreen(
         precheckError = precheckError.takeIf { !running },
         storageNeededBytes = viewModel.storageNeededBytes(),
         gameWaiting = gameWaiting,
+        rephraseOffered = viewModel.rephraseOffered,
+        onRephraseWanted = { viewModel.setRephraseWanted(it) },
         onPrimary = { action ->
             if (action == SetupAction.CONTINUE) {
                 onContinue()
@@ -209,6 +215,9 @@ fun SetupScreenContent(
     onCancel: () -> Unit,
     onLeave: () -> Unit,
     modifier: Modifier = Modifier,
+    /** C2: the optional wording model is offered on this phone (the check box below the files). */
+    rephraseOffered: Boolean = false,
+    onRephraseWanted: (Boolean) -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -276,6 +285,14 @@ fun SetupScreenContent(
 
                 FileRowsCard(view.rows)
                 Spacer(Modifier.height(16.dp))
+                if (rephraseOffered && view.phase == SetupPhase.INTRO && !disk.rephraseInstalled) {
+                    RephraseOfferRow(
+                        checked = disk.rephraseWanted,
+                        sizeBytes = sizes.rephraseBytes,
+                        onCheckedChange = onRephraseWanted,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                }
 
                 StatusBlock(view = view, sizes = sizes, disk = disk, precheckError = precheckError, storageNeededBytes = storageNeededBytes)
 
@@ -332,6 +349,43 @@ fun SetupScreenContent(
     }
 }
 
+/**
+ * C2 (owner decision §12.3): the optional third download, off unless ticked. Reference (owner's rule): Google Play's
+ * optional add-on pattern and chess.com's gated-feature card: what you get, its size, and that it is optional, in one
+ * row; the check box and its words are one 48 dp target and one TalkBack stop.
+ */
+@Composable
+private fun RephraseOfferRow(checked: Boolean, sizeBytes: Long, onCheckedChange: (Boolean) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(value = checked, role = Role.Checkbox, onValueChange = onCheckedChange)
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(checked = checked, onCheckedChange = null)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.setup_rephrase_offer, gigabytesLabel(sizeBytes)),
+                    style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content),
+                )
+                Text(
+                    text = stringResource(R.string.setup_rephrase_offer_help),
+                    style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 /** The two files, each with its size (before) or its progress (during) or a check (installed). */
 @Composable
 private fun FileRowsCard(rows: List<SetupFileRow>) {
@@ -348,7 +402,13 @@ private fun FileRowsCard(rows: List<SetupFileRow>) {
 
 @Composable
 private fun FileRowItem(row: SetupFileRow) {
-    val label = stringResource(if (row.file == ModelFile.NET) R.string.setup_file_net else R.string.setup_file_voice)
+    val label = stringResource(
+        when (row.file) {
+            ModelFile.NET -> R.string.setup_file_net
+            ModelFile.VOICE -> R.string.setup_file_voice
+            ModelFile.REPHRASE -> R.string.setup_file_rephrase
+        },
+    )
     val value = when {
         row.installed -> stringResource(R.string.setup_file_done)
         row.active || row.bytesDone > 0 -> {

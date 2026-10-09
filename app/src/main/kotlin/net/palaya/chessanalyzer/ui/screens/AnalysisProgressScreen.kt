@@ -83,6 +83,8 @@ fun AnalysisProgressScreen(
     onShareDetails: (() -> Unit)? = null,
     /** D2c: "Set up" on the SETUP_REQUIRED error, to the Setup screen (the game waits for it). */
     onSetUp: (() -> Unit)? = null,
+    /** C2: Skip during "Polishing the commentary (on-device AI)": the original texts stay. */
+    onSkipPolishing: (() -> Unit)? = null,
 ) {
     if (error != null) {
         AnalysisErrorState(error = error, onRetry = onRetry, onBack = onBack, onShareDetails = onShareDetails, onSetUp = onSetUp, modifier = modifier)
@@ -143,7 +145,13 @@ fun AnalysisProgressScreen(
 
             AnalysisTimeBar(progress = progress)
 
-            if (onCancel != null) {
+            if (progress.phase == AnalysisPhase.POLISHING_COMMENTARY && onSkipPolishing != null) {
+                // C2: the analysis is done; this step only rewords the key moments, so it is skipped, not cancelled.
+                Spacer(modifier = Modifier.height(24.dp))
+                OutlinedButton(onClick = onSkipPolishing, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(text = stringResource(R.string.progress_polishing_skip))
+                }
+            } else if (onCancel != null) {
                 Spacer(modifier = Modifier.height(24.dp))
                 OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(text = stringResource(R.string.progress_cancel))
@@ -161,7 +169,7 @@ fun AnalysisProgressScreen(
  */
 @Composable
 private fun AnalysisTimeBar(progress: AnalysisProgress) {
-    if (progress.runStartedAtMs <= 0L || progress.phase == AnalysisPhase.DONE) return
+    if (progress.runStartedAtMs <= 0L || progress.phase == AnalysisPhase.DONE || progress.phase == AnalysisPhase.POLISHING_COMMENTARY) return
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -298,6 +306,8 @@ private fun statusText(progress: AnalysisProgress): String = when (progress.phas
         val (done, total) = wholeMoveCounter(progress.currentMoveIndex, progress.totalMoves)
         stringResource(R.string.progress_analyzing_moves, done, total)
     }
+    AnalysisPhase.POLISHING_COMMENTARY ->
+        stringResource(R.string.progress_polishing, progress.currentMoveIndex.coerceAtMost(progress.totalMoves), progress.totalMoves)
     AnalysisPhase.DONE -> stringResource(R.string.progress_title)
 }
 

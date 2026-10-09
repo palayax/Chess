@@ -4,6 +4,8 @@ Conventions and hard-won gotchas for this project. Read before changing the buil
 
 ## Layout
 
+- `:rephrase` — Android library (C2): llama.cpp built from source via NDK/CMake + JNI (`librephrase.so`), `LlamaRephraser`,
+  `GgufHeader`. The weights are downloaded, never in the APK.
 - `:core` — pure Kotlin/JVM. Chess rules, PGN, and the whole analysis model. **No Android imports.**
   All of it is host-testable; keep it that way, it is why the analysis logic has real tests.
 - `:engine` — Android library. Stockfish compiled via NDK/CMake + JNI bridge + `NetStore` (the downloaded NNUE net in `filesDir/nets/`).
@@ -187,6 +189,48 @@ conflict.
 - `assembleRelease` writes per-ABI APKs (`app-arm64-v8a-release.apk`, ...) plus
   `app-universal-release.apk`; the ABI split is only enabled when an `assembleRelease` task is requested,
   so debug builds still produce the single `app-debug.apk`.
+
+## On-device wording model gotchas (C2, docs/LLM_REPHRASE_DESIGN.md)
+
+- **The model only rewords; the claim checker decides.** `core.text.ClaimChecker` is a comparator over the facts of
+  the verified C1 text (moves with their check marks, squares, piece-on-square pairs, pieces, the order of sides,
+  numbers, term and outcome-verb COUNTS, band order, names, negations, alternative-move markers, and the order of
+  moves/outcomes/check), plus count rules for hedges, praise and judgement words. Any doubt is a rejection and the
+  original is shown. Every backend's output goes through `RephraseVerdicts.judge`; nothing may bypass it.
+  `scripts/rephrase_check.py` (`audit_commentary.py rephrase` / `mutate-rephrase`) is the independent Python twin;
+  the two must agree on every line of `core/build/rephrase/mutations.jsonl` and of every `measure_*.jsonl`. A rule
+  added to one is added to the other in the same change, with a mutation in both tables that proves it bites.
+- **Narration is heard**: a candidate that writes a square as notation ("h5") is refused (SHAPE_FORMAT);
+  `RephrasePrompt.cleanOutput(raw, NARRATION)` first turns bare squares back into the spoken form ("h five").
+- **llama.cpp is built from source** (`scripts/fetch_llama_cpp.sh`, tag in `vendor/LLAMA_CPP_VERSION.txt` =
+  `rephrase.runtime.tag` in MODELS.lock; `:rephrase`'s `generateRephraseRuntime` fails the build if they differ or
+  the checkout is missing). One static `librephrase.so` per ABI (arm64-v8a with `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16`,
+  x86_64 with AVX2/FMA/F16C), `BUILD_SHARED_LIBS=OFF`, no `GGML_BACKEND_DL`/`ALL_VARIANTS` (their dlopen'ed .so files
+  escape the 16 KB link flag), no OpenMP/llamafile, **no KleidiAI** (its CMake downloads sources at configure time).
+  `-Wl,--exclude-libs,ALL` keeps only the six JNI symbols exported. **The debug variant is compiled -O3 too**
+  (`CMAKE_C/CXX_FLAGS_DEBUG` forced in the CMakeLists): an -O0 llama.cpp is unusably slow even on an emulator.
+  armeabi-v7a gets no library (`RephraseSupport` says UNSUPPORTED_ABI); an x86_64 CPU without AVX2/FMA/F16C says
+  UNSUPPORTED_CPU instead of dying on an illegal instruction.
+- **R8**: `rephrase/consumer-rules.pro` keeps `NativeRephrase` and its natives (symbols
+  `Java_net_palaya_chessanalyzer_rephrase_NativeRephrase_native*`). The bridge returns the generated text as a
+  `byte[]` (UTF-8; a token can split a multi-byte character, and `NewStringUTF` would choke on it).
+- **One model per process** (`RephraseBackend`): the 1.1 GB GGUF is mmap'ed (file-backed for the low-memory killer),
+  the fixed prompt prefix (~700 tokens) stays in the KV cache (`llama_memory_seq_rm` from the prefix boundary),
+  n_ctx 2048 (about 57 MB of f16 KV on the 1.5B). It is freed on `onTrimMemory(RUNNING_LOW+)` and a minute after a
+  job. A load is journaled (`rephrase/loading.json`): found at start, the file is re-hashed before its next use; two
+  deaths in a row turn the feature off (the low-memory killer is a likelier cause than a bad file, so one crash does
+  not delete 1.1 GB).
+- **The GGUF is checked in Kotlin before llama.cpp sees it** (`GgufHeader`: magic, version 3, counts, known tensor
+  types, every tensor inside the file, `general.architecture`) on install, on update activation and once per
+  process with the full SHA-256. llama.cpp b11190 refused a truncated and a corrupted file cleanly on the emulator
+  (load returns 0), but the app never relies on that.
+- **The wording model is setup's optional third file** (`ModelFile.REPHRASE`, only while `rephrase/wanted` exists;
+  it never makes setup incomplete) on its OWN release tag `rephrase.release.tag` (the net and the voice stay on
+  `release.tag`). Downloading it at setup switches the feature on (owner decision §12.3). The cache lives in
+  `filesDir/rephrase/cache/<model>/` (NOT `rephrase/<model>/`: `rephrase/models/` holds the GGUF and a model switch
+  purges every other cache folder). `rephrase/` is excluded from backup in all three rule sets.
+- **The narration post-pass is not wired yet** (V4 owned the video files when C2 landed): see the "V4 INTEGRATION
+  HOOK" comment in `AnalysisViewModel` and the TODO in `ChessAnalyzerNavHost`'s Video route.
 
 ## Emulator gotchas
 

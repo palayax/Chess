@@ -727,3 +727,67 @@ Answers to §11, given in chat on 2026-10-09. They override the recommendations 
    pre-approved:** switching the runtime from llama.cpp to LiteRT-LM; if the NDK build of llama.cpp stalls, stop
    and report.
 5. The §5.5 decision bars stand as written.
+
+---
+
+## 13. As built (C2 agent, 2026-10-09)
+
+What the implementation does where it differs from §1-§10 (the owner decisions of §12 included). RUN_LOG "C2-P1",
+"C2-P2a", "C2-P2b" and "C2-P4" hold the evidence and the numbers.
+
+**Checker (§5), stricter than designed, each rule added because a real model output or a mutation needed it:**
+- Moves keep their check marks (`Nxg7+` and `Nxg7` are different claims).
+- Terms and outcome verbs are **counted**, not sets: "which is en prise" said twice is two claims, and "...with no safe
+  square and wins it" added a second WIN to a card that already had one (a mutation the set rule accepted).
+- Sides are compared as the **ordered sequence of mentions, consecutive repeats collapsed** (not a multiset): a swap
+  inside one sentence ("White's bishop takes Black's rook" -> "Black's bishop takes White's rook") keeps the
+  multiset and is still caught; legitimate merging of sentences ("White ... White ...") is not punished.
+- New fact classes: names (proper nouns, and any capitalised word the original does not have), negations (count),
+  **alternative-move markers** ("Instead", "was the move", "line", "would", "if", ...; the P2a run had "Rook takes the
+  pawn on h seven was the move" reworded into a move that was never played), and the **order** of moves, squares,
+  outcome classes and check/mate words ("This hands White d4, which hits the loose bishop on c5" reworded as "This
+  hits the loose bishop on c5, giving White d4" changed who hits the bishop).
+- The banned list is a count rule against the original (the original's own words are proven) and covers judgement
+  words (good, strong, mistake, best, ...), any form of "allow" and "set up", and "a rook up"-style material claims.
+- Narration: a candidate that writes notation is refused; bare squares are folded back to the spoken form first.
+- Charges: the beneficiary is checked as "the side named right before the move" in the candidate, so any wording of
+  the charge passes and a changed beneficiary does not.
+- The Python twin (`scripts/rephrase_check.py`) was written by a separate agent from a prose spec without reading
+  the Kotlin; every later rule was added to both with a mutation in both tables.
+
+**Prompt v1 (§4):** the system prompt adds "keep every not and no", "never change who does what" and the narration
+squares rule; four few-shot pairs (a praised card, an error card with charge, bands and "Better was", a narration
+beat, a card left unchanged); ChatML for Qwen2.5 and Qwen3 (Qwen3 gets the empty think block). Prefix about 700
+tokens, so **n_ctx is 2048**, not 1024 (2048 x 28 KB of f16 KV on the 1.5B = 57 MB).
+
+**Runtime (§2):** llama.cpp **b11190** (commit fcc8915), the tag of the host binaries P2a measured with. KleidiAI is
+**off** (its CMake downloads sources at configure time; K-quants do not use it anyway). x86_64 is built with AVX2/FMA/F16C
+and gated at run time on /proc/cpuinfo. The debug variant is compiled -O3. One static library, six exported symbols.
+
+**Download (§1.4, §12.3):** the Setup screen offers the model as an unticked third download (owner decision; this
+supersedes "the Setup screen is untouched"); Settings has the same download. It goes on **its own release tag**
+(`rephrase.release.tag`, `models-2026.11`) instead of re-uploading the net and the voice to a new tag:
+publishing is one new release with one file and its LICENSE, and installs of 1.1 keep their URLs. The cache lives in
+`filesDir/rephrase/cache/<model>/` (the model in `rephrase/models/`).
+
+**Crash journal (§6.4):** a journal left at start does not delete the file at once (the low-memory killer is a likelier
+cause of a death while loading 1.1 GB than a bad file): the file is re-hashed before its next use, and a second death in
+a row turns the feature off.
+
+**Update path (§1.4):** kind `rephrase-qwen` / compat `{"kind":"gguf","arch":...}` / runtime `llama.cpp bNNNN..bMMMM`;
+offered **only to a phone that has the model installed** (an update never pushes an optional 1.1 GB file). Activation:
+journal swapped -> trial (load + one checked rephrase) -> committed, rollback at once or at the next start, the old
+model's cache folder purged. No manifest entry is published yet (there is no newer model).
+
+**Integration (§6.2):** cards: the key moments of the current side at the end of the analysis ("Polishing the
+commentary (on-device AI)… 2 of 5", Skip), then every other card in a background job (key moments first, then by ply);
+a card on screen keeps its words until it is drawn again. The narration post-pass is implemented and tested in `:core`
+(`RephrasedScript`) and exposed by `AnalysisViewModel` (`rephrasedVideoScriptFor`, `polishNarration`,
+`narrationPolishPending`), but **not wired into the Video screen** (V4 owned those files): see the "V4 INTEGRATION
+HOOK" comment. The "Report this wording" item (§9.2) is not built.
+
+**Measurement (§5.5):** host CPU only (llama.cpp b11190, the corpus = every distinct card text of the three audited
+games for three sides, 190, and every eligible narration beat of the five pacing games, 388). The other candidates
+ran on all cards and every 4th beat. Their raw outputs are committed (`docs/audit/rephrase/raw_*.jsonl`) and
+`RephraseMeasurementDumpTest` judges them on every build. The Pixel 8 numbers are the owner's to collect
+(`RephraseMeasurementInstrumentedTest`, RUN_LOG "C2-P2b").

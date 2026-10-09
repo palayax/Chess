@@ -316,6 +316,28 @@ fun AboutScreen(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(stringResource(R.string.about_license_neural_view))
                     }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 8.dp))
+
+                    // --- C2: the optional wording model (Qwen2.5, Apache 2.0) and llama.cpp (MIT) ---
+                    Text(
+                        text = stringResource(R.string.about_license_rephrase_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.asHeading(),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stringResource(R.string.about_license_rephrase_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { licenseDialog = LicenseDialog.REPHRASE_ATTRIBUTION }) {
+                        Icon(Icons.Filled.Gavel, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.about_license_rephrase_view))
+                    }
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -341,12 +363,15 @@ fun AboutScreen(
                     ?: "PIECES_LICENSE.txt not found in this build."
                 LicenseDialog.NEURAL_VOICE_ATTRIBUTION -> readAssetText(context, "NEURAL_VOICE_LICENSE.txt")
                     ?: "NEURAL_VOICE_LICENSE.txt not found in this build."
+                LicenseDialog.REPHRASE_ATTRIBUTION -> readAssetText(context, "REPHRASE_MODEL_LICENSE.txt")
+                    ?: "REPHRASE_MODEL_LICENSE.txt not found in this build."
             }
         }
         val dialogTitle = when (dialog) {
             LicenseDialog.STOCKFISH_GPL -> stringResource(R.string.about_license_stockfish_view)
             LicenseDialog.PIECES_ATTRIBUTION -> stringResource(R.string.about_license_pieces_view)
             LicenseDialog.NEURAL_VOICE_ATTRIBUTION -> stringResource(R.string.about_license_neural_view)
+            LicenseDialog.REPHRASE_ATTRIBUTION -> stringResource(R.string.about_license_rephrase_view)
         }
         AlertDialog(
             onDismissRequest = { licenseDialog = null },
@@ -369,7 +394,7 @@ fun AboutScreen(
     }
 }
 
-private enum class LicenseDialog { STOCKFISH_GPL, PIECES_ATTRIBUTION, NEURAL_VOICE_ATTRIBUTION }
+private enum class LicenseDialog { STOCKFISH_GPL, PIECES_ATTRIBUTION, NEURAL_VOICE_ATTRIBUTION, REPHRASE_ATTRIBUTION }
 
 @Composable
 private fun AboutHeader(appVersion: String) {

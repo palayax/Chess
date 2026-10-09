@@ -38,6 +38,10 @@ review. All of this happens on the device:
 - The narration voice runs on your phone. If you switch to the phone's built-in voice in Settings, the
   text is spoken by the text-to-speech engine installed on your phone, which is provided under its own
   terms by its maker.
+- If you turn on **Natural wording** (offered once at setup, and in Settings), the app can download a
+  language model (about 1.2 GB, from GitHub, after you tap Download) and uses it on your phone to reword its
+  commentary; every fact is checked against the app's own text. Nothing you do is sent anywhere: the model
+  runs entirely on your phone, and the reworded text stays in the app's private storage.
 
 Nothing you import, analyse or create is sent to us or to anyone else by the app (apart from Android's
 own backup described above, if you use it).
@@ -51,14 +55,18 @@ anything in the background and never uploads anything.
    (about 100 MB) and the narration voice (about 110 MB). The Setup screen says this and downloads them only
    when you tap **Download**. If you are on mobile data it asks you first. If the download is interrupted,
    it continues only when you tap **Resume**.
-2. **Check for updates (only when you tap it).** In Settings, **Check for updates** downloads a small list
+2. **The optional wording model (only if you ask for it).** If you tick **Also download the wording model**
+   on the Setup screen, or tap **Download** under Natural wording in Settings, the app downloads one more file
+   (about 1.2 GB), with the same mobile-data question and the same Resume rule. It is never downloaded
+   otherwise.
+3. **Check for updates (only when you tap it).** In Settings, **Check for updates** downloads a small list
    of the latest engine data and voice files and its digital signature. If a newer file is available, it is
    downloaded only if you tap **Download and install**.
 
 These files are published on GitHub (github.com/palayax/Chess), a code-hosting service run by
 GitHub, Inc. The app checks every file against fingerprints built into the app (or, for updates, against
-the signed list) before it uses it. The files are data for the engine and the voice; no program code is
-ever downloaded.
+the signed list) before it uses it. The files are data for the engine, the voice and the wording model; no
+program code is ever downloaded.
 
 The app also has links in its About screen (for example to stockfishchess.org and palaya.net). Tapping one
 opens your web browser; the app itself sends nothing.

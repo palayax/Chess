@@ -50,6 +50,11 @@ rewrite and a much weaker analysis. **Recommendation: publish GPLv3 and open the
 - Voice: sherpa-onnx (Apache 2.0), Kokoro-82M (Apache 2.0) and espeak-ng pronunciation data (the espeak-ng
   project's README says "GPL version 3 or later"). The Kokoro archive ships no separate licence file for the
   espeak-ng data, so its per-file terms are **unverified**; the app's About screen credits it factually.
+- Wording model (C2, optional): Qwen2.5-1.5B-Instruct (Q4_K_M GGUF) by the Qwen team, Alibaba Cloud, Apache 2.0
+  ("Copyright 2024 Alibaba Cloud"; the model's LICENSE goes on the model release next to the file), run with
+  llama.cpp (MIT), compiled from source into `librephrase.so`. Both in About ("Natural wording (optional)",
+  `REPHRASE_MODEL_LICENSE.txt`). The file is re-hosted unmodified (no re-quantization). Gemma and Llama were
+  rejected for their pass-through use terms (docs/LLM_REPHRASE_DESIGN.md §1.2).
 - The Stockfish NNUE net was trained on data from the Leela Chess Zero project, made available under the
   Open Database License (per the Stockfish README, which is where About takes the wording). Whether any
   ODbL notice wording is required for the net has **not** been assessed; the licence questions are
@@ -149,7 +154,9 @@ Play asks, per type, what the task is, why it must not be interrupted, and for a
 > continue if the user leaves the screen or switches apps, so it runs as a foreground service with a progress
 > notification that has Pause and Cancel buttons. It never starts by itself and is never restarted by the
 > system (START_NOT_STICKY); it stops when the files are downloaded and verified, or when the user pauses or
-> cancels. The same type is used by the video export on Android 10-14 (below).
+> cancels. The same service downloads, only when the user asks for it (a check box on the Setup screen, or
+> Download in Settings), the optional wording model (about 1.2 GB) with the same notification and controls.
+> The same type is used by the video export on Android 10-14 (below).
 >
 > **Media processing: video export (`VideoExportService`).** When the user taps "Save video", the app
 > renders their game review into an MP4 on the device (drawing the frames, synthesizing the narration with
@@ -171,6 +178,11 @@ anywhere but Google Play. Palaya Chess downloads two **data files**:
   that ships in the app (`libstockfish.so`).
 - `kokoro-int8-en-v0_19.tar.gz`: an ONNX voice model, its voice embeddings, token table and espeak-ng
   pronunciation data, read by sherpa-onnx/onnxruntime, which also ship in the app.
+- `qwen2.5-1.5b-instruct-q4_k_m.gguf` (C2, optional, only when the user asks for it): the tensors and metadata of a
+  language model in the GGUF format, read by llama.cpp, which is compiled from source into `librephrase.so` and
+  ships in the bundle. A GGUF holds no code; it is checked by size and SHA-256 against the build's pins and by its
+  GGUF structure in Kotlin (`GgufHeader`) before llama.cpp parses it. A newer llama.cpp is an app update, never a
+  download.
 
 All program code (dex, `libstockfish.so`, the sherpa-onnx and onnxruntime libraries) is in the bundle and is
 updated only through Play. A new engine is an app update: the app refuses any net whose NNUE version or
@@ -351,7 +363,8 @@ reading of the form, not a legal conclusion; confirm against the form's wording 
     crash-reporting service and no ads.
   - Shared: none.
 - **Network use, for the reviewer's understanding:** the app downloads two data files from GitHub on the
-  first run (only after the user taps Download), and the update manifest, its signature and, on request, a
+  first run (only after the user taps Download), a third, optional one (the wording model, C2) only if the user
+  ticks it at setup or taps Download for it in Settings, and the update manifest, its signature and, on request, a
   model file when the user taps Check for updates in Settings. GitHub receives the device's IP address and a
   User-Agent (`PalayaChess/<version> (Android <SDK>)`) as part of serving the download, as with any web
   request; the app transmits nothing else, and the developer receives nothing (GitHub shows publishers only
@@ -375,8 +388,12 @@ reading of the form, not a legal conclusion; confirm against the form's wording 
 - **Can users request deletion?** Not applicable (no data held by the developer); uninstalling removes
   everything the app stored.
 - **Data stored on the device (not part of the form):** imported PGNs and cached analysis, the engine net and
-  the voice, saved narration audio, settings, the diagnostic log, all in app-private storage; exported videos
-  in `Movies/ChessAnalyzer`.
+  the voice, the optional wording model and its reworded-text cache (`rephrase/`, excluded from backup), saved
+  narration audio, settings, the diagnostic log, all in app-private storage; exported videos in
+  `Movies/ChessAnalyzer`.
+- **The wording model changes nothing here (C2):** it runs on the phone with llama.cpp; no prompt, text or result
+  leaves the device, and there is no SDK (Gemini Nano / ML Kit GenAI was dropped by the owner on 2026-10-09
+  precisely because ML Kit would upload usage analytics). The answer stays "collects: No".
 - **Permissions:** `INTERNET`, `ACCESS_NETWORK_STATE` (the downloads; the metered check before one),
   `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`,
   `POST_NOTIFICATIONS`. Pinned by the host `ManifestPermissionsTest` and the instrumented

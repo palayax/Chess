@@ -44,6 +44,7 @@ import net.palaya.chessanalyzer.ui.model.SideChoice
 import net.palaya.chessanalyzer.ui.model.sideChoice
 import net.palaya.chessanalyzer.ui.screens.AboutScreen
 import net.palaya.chessanalyzer.ui.screens.AnalysisProgressScreen
+import net.palaya.chessanalyzer.ui.screens.RephraseSettingsSection
 import net.palaya.chessanalyzer.ui.screens.GameReportScreen
 import net.palaya.chessanalyzer.ui.screens.ImportScreen
 import net.palaya.chessanalyzer.ui.screens.PracticeScreen
@@ -293,6 +294,7 @@ fun ChessAnalyzerNavHost(
                 onRetry = { viewModel.runAnalysis(gameId, openSummary) },
                 onBack = leave,
                 onShareDetails = { shareDiagnosticLog() },
+                onSkipPolishing = { viewModel.skipPolishing() }, // C2
                 // D2c: the game already waits on disk (AnalysisViewModel moved it there); Setup replaces this screen.
                 onSetUp = {
                     viewModel.clearError()
@@ -460,6 +462,7 @@ fun ChessAnalyzerNavHost(
             // analysis in memory", which pops the back stack.
             var scriptState by remember(gameId) { mutableStateOf<VideoScriptState>(VideoScriptState.Loading) }
             LaunchedEffect(gameId) {
+                // TODO(C2 after V4): rephrasedVideoScriptFor(gameId) here, see the hook in AnalysisViewModel.
                 scriptState = VideoScriptState.Ready(viewModel.videoScriptFor(gameId))
             }
             val script = (scriptState as? VideoScriptState.Ready)?.script
@@ -575,6 +578,8 @@ fun ChessAnalyzerNavHost(
                 onPlayVoiceSample = { viewModel.playVoiceSample(it) },
                 onStopVoiceSample = { viewModel.stopVoiceSample() },
                 onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
+                // C2: Natural wording (on-device AI).
+                commentarySection = { RephraseSettingsSection() },
             )
             if (updateSheetOpen) {
                 UpdateSheet(
