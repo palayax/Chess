@@ -109,60 +109,34 @@ val GameReport.keyMomentPlies: List<Int>
         return (moments.primary + moments.opponent).map { it.ply }.distinct().sorted()
     }
 
-/** The collapsed rows that fold several quiet classes into one line (design §5, rule 4). */
-enum class ClassificationGroup(val members: List<MoveClassification>) {
-    /** Best, Excellent and Good: all "fine", so one row. */
-    GOOD_MOVES(listOf(MoveClassification.BEST, MoveClassification.EXCELLENT, MoveClassification.GOOD)),
-
-    /** Book and Forced: moves the player did not really choose. */
-    BOOK_FORCED(listOf(MoveClassification.BOOK, MoveClassification.FORCED)),
-}
-
 /**
- * One row of the "All moves" table. A row is either one class ([group] null, [badge] is that class)
- * or a [group] of classes whose counts are summed.
+ * One row of the Summary's move-quality table: a class and how many of each side's moves fell in it.
+ * The table shows every class for both sides and never folds or hides one (A4); a class with no
+ * moves is a row of zeros, which is information ("no blunders").
  */
 data class ClassificationRow(
     val badge: MoveClassification,
-    val group: ClassificationGroup?,
     val white: Int,
     val black: Int,
 )
 
 /**
- * The move-quality table, grouped.
- *
- * Collapsed (`showAll = false`): Brilliant, Great, Good moves, the four mistake classes, then
- * Book / Forced, with rows where both sides have 0 left out. `showAll = true` is the old flat
- * table, one row per class and zeros included, in [MoveClassification] order. Nothing is lost
- * either way, and the totals of both views are equal.
+ * The move-quality table (A4), the chess.com Game Review pattern: one row per class, both players'
+ * counts either side of the class badge, in the app's own order (best to worst, [MoveClassification]).
+ * The ten classes the owner listed (Brilliant, Great, Best, Excellent, Good, Book, Inaccuracy, Mistake,
+ * Miss, Blunder) are always present, zeros included. [MoveClassification.FORCED] is the app's eleventh
+ * class: its row is added at the end only when a side has such a move, so that the rows always add up
+ * to every move played and nothing is silently left out.
  */
-fun groupClassificationRows(
+fun classificationRows(
     white: List<ClassificationCount>,
     black: List<ClassificationCount>,
-    showAll: Boolean,
 ): List<ClassificationRow> {
     val w = white.associate { it.classification to it.count }
     val b = black.associate { it.classification to it.count }
-    fun row(c: MoveClassification) = ClassificationRow(c, null, w[c] ?: 0, b[c] ?: 0)
-    if (showAll) return MoveClassification.entries.map(::row)
-
-    fun group(g: ClassificationGroup) = ClassificationRow(
-        badge = g.members.first(),
-        group = g,
-        white = g.members.sumOf { w[it] ?: 0 },
-        black = g.members.sumOf { b[it] ?: 0 },
-    )
-    return listOf(
-        row(MoveClassification.BRILLIANT),
-        row(MoveClassification.GREAT),
-        group(ClassificationGroup.GOOD_MOVES),
-        row(MoveClassification.INACCURACY),
-        row(MoveClassification.MISTAKE),
-        row(MoveClassification.MISS),
-        row(MoveClassification.BLUNDER),
-        group(ClassificationGroup.BOOK_FORCED),
-    ).filter { it.white > 0 || it.black > 0 }
+    return MoveClassification.entries
+        .map { ClassificationRow(it, w[it] ?: 0, b[it] ?: 0) }
+        .filter { it.badge != MoveClassification.FORCED || it.white > 0 || it.black > 0 }
 }
 
 /**

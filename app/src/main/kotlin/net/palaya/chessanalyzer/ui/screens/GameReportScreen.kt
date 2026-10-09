@@ -3,6 +3,16 @@
 package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.remember
+import net.palaya.chessanalyzer.ui.components.PlayerMaterialRow
+import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.canReanalyse
+import net.palaya.chessanalyzer.ui.model.customDepthValue
+import net.palaya.chessanalyzer.ui.model.materialViewOrNull
+import net.palaya.chessanalyzer.ui.model.strengthChoices
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -69,7 +79,6 @@ import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.theme.tacticTypeName
 import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.ui.components.EvalGraph
-import net.palaya.chessanalyzer.ui.model.ClassificationGroup
 import net.palaya.chessanalyzer.ui.model.ClassificationRow
 import net.palaya.chessanalyzer.ui.model.GameReport
 import net.palaya.chessanalyzer.ui.model.KeyMoment
@@ -82,7 +91,7 @@ import net.palaya.chessanalyzer.ui.model.SideChoice
 import net.palaya.chessanalyzer.ui.model.SummaryMoments
 import net.palaya.chessanalyzer.ui.model.TacticGroup
 import net.palaya.chessanalyzer.ui.model.TacticOccurrence
-import net.palaya.chessanalyzer.ui.model.groupClassificationRows
+import net.palaya.chessanalyzer.ui.model.classificationRows
 import net.palaya.chessanalyzer.ui.model.selectSummaryMoments
 import net.palaya.chessanalyzer.ui.model.sideChoice
 import net.palaya.chessanalyzer.video.AccuracyBand
@@ -137,12 +146,20 @@ fun GameReportScreen(
     practicePlies: Set<Int> = emptySet(),
     /** Open Practise at this ply. */
     onTryIt: ((Int) -> Unit)? = null,
+    /**
+     * FEN of the position after the last move (A4): the Summary shows the final material balance from it.
+     * Null hides that part (previews, a game with no moves).
+     */
+    finalFen: String? = null,
+    /** The depth this game was analysed at (A4); null while it is not in memory. Shown with "Re-analyse". */
+    analysisDepth: Int? = null,
+    /** The user picked another strength and confirmed "Re-analyse" (A4). Null hides the card (previews). */
+    onReanalyse: ((AnalysisStrength) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     val moments = selectSummaryMoments(report)
     // A game with nothing to fix has nothing above the fold worth reading, so Details starts open.
     var detailsExpanded by rememberSaveable { mutableStateOf(moments.isEmpty) }
-    var showAllClasses by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -172,6 +189,17 @@ fun GameReportScreen(
             if (onSideChosen != null) {
                 item(key = "side-chooser") { SideChooserCard(choice = report.sideChoice, onChosen = onSideChosen) }
             }
+
+            // A4: how many moves of each class each side played, and the material at the end: right under
+            // "who was who", where chess.com's Game Review puts its table, not behind Details.
+            item(key = "move-quality-title") {
+                Text(
+                    text = stringResource(R.string.summary_move_quality),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.asHeading(),
+                )
+            }
+            item(key = "move-quality") { MoveQualityCard(report = report, finalFen = finalFen) }
 
             keyMomentsSection(
                 report = report,
@@ -216,6 +244,10 @@ fun GameReportScreen(
                 }
             }
 
+            if (onReanalyse != null && analysisDepth != null) {
+                item(key = "analysis-strength") { AnalysisStrengthCard(analysisDepth, onReanalyse) }
+            }
+
             item(key = "details-header") {
                 DetailsHeader(expanded = detailsExpanded, onToggle = { detailsExpanded = !detailsExpanded })
             }
@@ -239,21 +271,6 @@ fun GameReportScreen(
                             sequences = report.sequences,
                         )
                     }
-                }
-
-                item(key = "table-title") {
-                    Text(
-                        text = stringResource(R.string.report_classification_breakdown),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.asHeading(),
-                    )
-                }
-                item(key = "table") {
-                    ClassificationTable(
-                        report = report,
-                        showAll = showAllClasses,
-                        onToggleShowAll = { showAllClasses = !showAllClasses },
-                    )
                 }
 
                 tacticsSections(report = report, onTacticClick = onTacticClick, onLearnPattern = onLearnPattern)
@@ -831,17 +848,20 @@ private fun accuracyColor(accuracy: Double) = when (accuracyBand(accuracy)) {
 }
 
 /**
- * The move-quality table, grouped: Brilliant, Great, "Good moves (Best, Excellent, Good)", the
- * mistake classes and "Book / Forced", with all-zero rows left out. "Show all 11" is the old flat
- * table (every class, zeros included) with the one-line legends for the classes that need one.
+ * The move-quality table (A4), the chess.com Game Review pattern: both players' counts of each class either
+ * side of the class badge, every class for both sides in the app's own order, zeros included (see
+ * [classificationRows]). Below it, the material at the end of the game.
  */
 @Composable
-private fun ClassificationTable(report: GameReport, showAll: Boolean, onToggleShowAll: () -> Unit) {
-    val rows = groupClassificationRows(report.white.counts, report.black.counts, showAll)
+private fun MoveQualityCard(report: GameReport, finalFen: String?) {
+    val rows = classificationRows(report.white.counts, report.black.counts)
     val user = report.userColor
     @Composable
     fun header(player: PlayerReport, color: PieceColor) =
         if (user == color) stringResource(R.string.summary_name_you, player.name) else player.name
+    val whiteName = header(report.white, PieceColor.WHITE)
+    val blackName = header(report.black, PieceColor.BLACK)
+    val material = remember(finalFen) { materialViewOrNull(finalFen) }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         shape = MaterialTheme.shapes.medium,
@@ -849,13 +869,13 @@ private fun ClassificationTable(report: GameReport, showAll: Boolean, onToggleSh
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = header(report.white, PieceColor.WHITE),
+                    text = whiteName,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = header(report.black, PieceColor.BLACK),
+                    text = blackName,
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
@@ -863,27 +883,39 @@ private fun ClassificationTable(report: GameReport, showAll: Boolean, onToggleSh
                 )
             }
             rows.forEach { ClassificationTableRow(it) }
-            if (showAll) {
-                Spacer(modifier = Modifier.height(8.dp))
-                listOf(
-                    R.string.classification_book_help,
-                    R.string.classification_forced_help,
-                    R.string.classification_miss_help,
-                ).forEach { helpRes ->
-                    Text(
-                        text = stringResource(helpRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            Spacer(modifier = Modifier.height(8.dp))
+            // The classes whose name alone does not say what they are.
+            val legends = buildList {
+                add(R.string.classification_book_help)
+                if (rows.any { it.badge == MoveClassification.FORCED }) add(R.string.classification_forced_help)
+                add(R.string.classification_miss_help)
             }
-            TextButton(onClick = onToggleShowAll, modifier = Modifier.heightIn(min = 48.dp)) {
+            legends.forEach { helpRes ->
                 Text(
-                    text = if (showAll) {
-                        stringResource(R.string.report_table_show_fewer)
-                    } else {
-                        stringResource(R.string.report_table_show_all, MoveClassification.entries.size)
+                    text = stringResource(helpRes),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (material != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.summary_final_material),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.asHeading(),
+                )
+                PlayerMaterialRow(name = whiteName, side = material.white)
+                PlayerMaterialRow(name = blackName, side = material.black)
+                Text(
+                    text = when {
+                        material.isLevel -> stringResource(R.string.summary_material_level)
+                        material.whitePoints > material.blackPoints ->
+                            stringResource(R.string.summary_material_ahead, whiteName, material.whitePoints - material.blackPoints)
+                        else ->
+                            stringResource(R.string.summary_material_ahead, blackName, material.blackPoints - material.whitePoints)
                     },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -892,11 +924,7 @@ private fun ClassificationTable(report: GameReport, showAll: Boolean, onToggleSh
 
 @Composable
 private fun ClassificationTableRow(row: ClassificationRow) {
-    val name = when (row.group) {
-        ClassificationGroup.GOOD_MOVES -> stringResource(R.string.report_group_good_moves)
-        ClassificationGroup.BOOK_FORCED -> stringResource(R.string.report_group_book_forced)
-        null -> stringResource(row.badge.displayNameRes)
-    }
+    val name = stringResource(row.badge.displayNameRes)
     val spoken = stringResource(R.string.cd_class_row, name, row.white, row.black)
     Row(
         modifier = Modifier
@@ -916,11 +944,7 @@ private fun ClassificationTableRow(row: ClassificationRow) {
         ClassificationBadge(classification = row.badge, size = 18.dp)
         Spacer(modifier = Modifier.width(10.dp))
         Text(
-            text = when (row.group) {
-                ClassificationGroup.GOOD_MOVES -> stringResource(R.string.report_group_good_moves)
-                ClassificationGroup.BOOK_FORCED -> stringResource(R.string.report_group_book_forced)
-                null -> stringResource(row.badge.displayNameRes)
-            },
+            text = name,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -934,6 +958,120 @@ private fun ClassificationTableRow(row: ClassificationRow) {
             textAlign = TextAlign.End,
         )
     }
+}
+
+/**
+ * "Analysed at Standard" and a "Re-analyse" button (A4): the strength belongs to the game. The button opens a
+ * short chooser (Quick / Standard / Deep, the current one marked); confirming analyses the game again at that
+ * strength. The Settings value stays the default for games analysed for the first time.
+ */
+@Composable
+private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> Unit) {
+    var choosing by rememberSaveable { mutableStateOf(false) }
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = stringResource(R.string.settings_depth),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.asHeading(),
+            )
+            Text(
+                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(depth)),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { choosing = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.reanalyse_button))
+            }
+        }
+    }
+    if (choosing) {
+        ReanalyseDialog(
+            currentDepth = depth,
+            onConfirm = { strength ->
+                choosing = false
+                onReanalyse(strength)
+            },
+            onDismiss = { choosing = false },
+        )
+    }
+}
+
+@Composable
+private fun strengthLabel(depth: Int): String = when (AnalysisStrength.fromDepth(depth)) {
+    AnalysisStrength.QUICK -> stringResource(R.string.settings_depth_quick)
+    AnalysisStrength.STANDARD -> stringResource(R.string.settings_depth_standard)
+    AnalysisStrength.DEEP -> stringResource(R.string.settings_depth_deep)
+    null -> stringResource(R.string.settings_custom_value, customDepthValue(depth))
+}
+
+@Composable
+private fun ReanalyseDialog(currentDepth: Int, onConfirm: (AnalysisStrength) -> Unit, onDismiss: () -> Unit) {
+    var picked by rememberSaveable { mutableStateOf<AnalysisStrength?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.reanalyse_title)) },
+        text = {
+            Column {
+                Text(
+                    text = stringResource(R.string.reanalyse_body, strengthLabel(currentDepth)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                strengthChoices(currentDepth).forEach { choice ->
+                    val label = strengthLabel(choice.strength.depth)
+                    val hint = stringResource(
+                        when (choice.strength) {
+                            AnalysisStrength.QUICK -> R.string.reanalyse_hint_quick
+                            AnalysisStrength.STANDARD -> R.string.reanalyse_hint_standard
+                            AnalysisStrength.DEEP -> R.string.reanalyse_hint_deep
+                        },
+                    )
+                    val current = stringResource(R.string.reanalyse_current)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .selectable(
+                                selected = picked == choice.strength,
+                                role = Role.RadioButton,
+                                onClick = { picked = choice.strength },
+                            )
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = picked == choice.strength, onClick = null)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (choice.isCurrent) "$label ($current)" else label,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                text = hint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { picked?.let(onConfirm) },
+                enabled = canReanalyse(currentDepth, picked),
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.reanalyse_confirm)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.reanalyse_cancel)) }
+        },
+    )
 }
 
 /**
