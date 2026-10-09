@@ -116,6 +116,33 @@ class RephraseMeasurementDumpTest {
             if (k.isNotEmpty()) appendLine("- $g: ${k.size} cards, ${f1(k.sumOf { it.wallMs } / 1000)} s")
         }
         appendLine()
+        val narrAccepted = rows.filter { it.surface == RephraseSurface.NARRATION && it.verdict == ClaimChecker.Verdict.Accepted }
+            .associate { it.text to ClaimChecker.normalize(it.candidate) }
+        if (rows.count { it.surface == RephraseSurface.NARRATION } >= 300) {
+            appendLine("## The narrated story after the post-pass (Normal pace, 169 wpm, no side; design §6.2's cap: <= 1.10 x and the §9.7 budget)")
+            appendLine()
+            appendLine("| Game | Beats reworded | Story before | Story after | Change | Budget |")
+            appendLine("|---|---|---|---|---|---|")
+            val games = listOf(
+                "scholars" to net.palaya.chessanalyzer.core.narration.RealGameFixture.scholars,
+                "chesscom" to net.palaya.chessanalyzer.core.narration.RealGameFixture.chesscom,
+                "immortal" to net.palaya.chessanalyzer.core.narration.RealGameFixture.immortal,
+                "game01" to net.palaya.chessanalyzer.core.narration.RealGameFixture.game01,
+                "byrne_fischer" to net.palaya.chessanalyzer.core.narration.RealGameFixture.byrneFischer,
+            )
+            for ((name, g) in games) {
+                val script = net.palaya.chessanalyzer.core.narration.VideoScriptGenerator(null)
+                    .generate(g.report(null), g.pgn, net.palaya.chessanalyzer.core.narration.NarrationOptions(speechWpm = 169, pace = net.palaya.chessanalyzer.core.narration.VideoPace.NORMAL))
+                val budget = net.palaya.chessanalyzer.core.narration.VideoScriptGenerator.budgetMs((g.report(null).annotations.size + 1) / 2)
+                val after = RephrasedScript.apply(script, narrAccepted, 169, budget)
+                val changed = script.segments.zip(after.segments).count { (a, b) -> a.narration != b.narration }
+                appendLine(
+                    "| $name | $changed of ${RephrasedScript.beats(script).size} | ${f1(script.storyMs / 1000.0)} s | ${f1(after.storyMs / 1000.0)} s | " +
+                        "${f1((after.storyMs - script.storyMs) / 1000.0)} s | ${f1(budget / 1000.0)} s |"
+                )
+            }
+            appendLine()
+        }
         appendLine("## Quality sample: original vs accepted rewrite (owner: fill the A/B column, prefer = R or O)")
         appendLine()
         appendLine("| # | Id | Original | Rewrite | Prefer |")

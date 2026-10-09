@@ -136,6 +136,38 @@ and a line that gives a minor for a rook is "the exchange" (`MaterialGain.EXCHAN
 sentences carry the same terms as the cards with the same proofs; the narration is still outside this
 script's claim-by-claim audit (`NarrationClaimsTest`, `NarrationStringsTest` hold its rules).
 
+## C2 (2026-10-09): reworded texts, held to the original's facts
+
+The optional on-device wording model (docs/LLM_REPHRASE_DESIGN.md) may only reword a text this audit already proved.
+A rewording cannot be parsed by the template verifiers above, so it is held to **closure over the original's facts**
+instead: `core.text.ClaimChecker` (Kotlin) and `scripts/rephrase_check.py` (an independent Python implementation,
+written from a prose spec without reading the Kotlin) compare the moves, squares, pieces on squares, sides (in order),
+numbers, term and outcome-verb counts, band order, names, negations, alternative-move markers and the order of
+moves/outcomes/check of the two texts, plus count rules for hedges, praise and judgement words. A rewording that
+fails any rule is not shown; the original is.
+
+**Negative controls** (`ClaimCheckerTest`, `audit_commentary.py mutate-rephrase`): 25 mutation kinds (a square, a
+piece, a side, "Better was" dropped/moved/renamed, a number, swapped bands, a term added or weakened, an outcome verb
+added, a hedge, praise, doubled text, a list, a preamble, padding, the classification name, you -> White, a negation
+dropped, an alternative marker dropped, an effect moved onto the played move, the first person, notation in
+narration) on every distinct recorded text (190 cards, 388 narration beats): every mutation rejected in both
+implementations; the two agree on all 8,507 lines (`audit_commentary.py rephrase core/build/rephrase/mutations.jsonl`).
+
+**The model's outputs** (host, llama.cpp b11190, prompt v1; full tables with every rejection and a 60-pair quality
+sample for the owner in `docs/audit/rephrase_*_p1.md`):
+
+| Model | Cards: accepted / unchanged / rejected | Narration: accepted / unchanged / rejected |
+|---|---|---|
+| Qwen2.5-1.5B-Instruct Q4_K_M (ship), all 578 texts | 74 / 104 / 12 of 190 (rejection 6.3 %) | 195 / 103 / 90 of 388 (rejection 23.2 %) |
+
+The Kotlin and the Python checker agree on every one of the 578 verdicts (and on the 3 x 287 of the comparison runs).
+Three rules were added after reading the accepted outputs of the first run, because each let a real meaning change
+through: "Rook takes the pawn on h seven was the move" reworded as "The rook takes the pawn on h seven" (a move that
+was never played: alternative markers are now counted), "This hands White d4, which hits the loose bishop on c5"
+reworded as "This hits the loose bishop on c5, giving White d4" (who hits the bishop: the order of moves and outcomes is
+now compared), and "...it clears c4 so that Bc4 can come through" reworded with "allowing" (any form of "allow" is now
+banned, as C1 banned "allowed").
+
 ## Found, not fixed
 
 - `LessonPositive` and `LessonOpponentMissedToo` (below) are unchanged by C1.
