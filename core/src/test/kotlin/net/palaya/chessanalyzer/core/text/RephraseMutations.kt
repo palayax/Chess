@@ -104,6 +104,18 @@ object RephraseMutations {
         Mutation("negation dropped", setOf(Reason.FACTS_NEGATION, Reason.BANNED, Reason.FACTS_TERMS, Reason.FACTS_OUTCOMES)) { t, _ ->
             NOT.find(t)?.let { m -> t.removeRange(m.range) }
         },
+        Mutation("alternative marker dropped", setOf(Reason.FACTS_HYPOTHETICAL, Reason.SHAPE_LENGTH)) { t, _ ->
+            when {
+                " was the move" in t -> t.replaceFirst(" was the move", "")
+                "Instead, " in t -> t.replaceFirst("Instead, ", "")
+                else -> null
+            }
+        },
+        Mutation("effect moved onto the played move", setOf(Reason.FACTS_ORDER, Reason.FACTS_OUTCOMES)) { t, _ ->
+            Regex("^This hands (White|Black|you|your opponent) (\\S+), which ([^.]+)\\.").find(t)?.let { m ->
+                "This ${m.groupValues[3]}, giving ${m.groupValues[1]} ${m.groupValues[2]}." + t.substring(m.range.last + 1)
+            }
+        },
         Mutation("first person added", setOf(Reason.REGISTER_FIRST_PERSON, Reason.SHAPE_LENGTH)) { t, _ ->
             val i = firstSentenceEnd(t)
             t.substring(0, i) + ", as we see" + t.substring(i)

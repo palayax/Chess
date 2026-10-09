@@ -27,8 +27,16 @@
 # Safe to re-run: anything already present and verified is left alone; anything that fails
 # verification is deleted and the script exits non-zero.
 #
-# Usage: scripts/fetch_models.sh
+# Usage: scripts/fetch_models.sh [--rephrase]
+#
+# --rephrase (C2) also fetches the optional wording model (1.1 GB) into vendor/models/rephrase-assets/, from the
+# official Qwen repository at the commit pinned by rephrase.model.url, and checks it against rephrase.model.size /
+# rephrase.model.sha256 / the GGUF magic. Needed only for scripts/model_test_server.py, the :rephrase device tests and
+# scripts/publish_rephrase_model.sh; the build and the default test suites never need it.
 set -euo pipefail
+
+WITH_REPHRASE=0
+[ "${1:-}" = "--rephrase" ] && WITH_REPHRASE=1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCK="$ROOT/vendor/models/MODELS.lock"
@@ -210,6 +218,25 @@ if ! gz_ok; then
     die "this gzip ($(gzip --version | head -1)) made a different .tar.gz (sha256=$GOT_SHA size=$GOT_SIZE) than the pin; deleted. Take the published one from the release in MODELS.lock (see the header of this script)."
   fi
   echo "OK   voice kokoro-int8-en-v0_19.tar.gz ($GOT_SIZE bytes)"
+fi
+
+# ---------------------------------------------------------------- the optional wording model (C2)
+if [ "$WITH_REPHRASE" = 1 ]; then
+  R_DIR="$ROOT/vendor/models/rephrase-assets"
+  R_FILE="$R_DIR/$(prop rephrase.model.file)"
+  R_URL="$(prop rephrase.model.url)"; R_SIZE="$(prop rephrase.model.size)"; R_SHA="$(prop rephrase.model.sha256)"
+  mkdir -p "$R_DIR"
+  if [ -f "$R_FILE" ] && [ "$(size_of "$R_FILE")" = "$R_SIZE" ] && [ "$(sha256_of "$R_FILE")" = "$R_SHA" ]; then
+    echo "OK   wording model $(basename "$R_FILE") (already present)"
+  else
+    echo "Downloading the wording model ($R_SIZE bytes) from the official Qwen repository ..."
+    curl -fL --retry 5 -C - -o "$R_FILE.part" "$R_URL"
+    [ "$(size_of "$R_FILE.part")" = "$R_SIZE" ] || { rm -f "$R_FILE.part"; die "wording model size differs from the lock; deleted"; }
+    [ "$(sha256_of "$R_FILE.part")" = "$R_SHA" ] || { rm -f "$R_FILE.part"; die "wording model SHA-256 differs from the lock; deleted"; }
+    [ "$(head -c 4 "$R_FILE.part")" = "GGUF" ] || { rm -f "$R_FILE.part"; die "not a GGUF file; deleted"; }
+    mv "$R_FILE.part" "$R_FILE"
+    echo "OK   wording model $(basename "$R_FILE") ($R_SIZE bytes)"
+  fi
 fi
 
 echo

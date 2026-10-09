@@ -293,6 +293,9 @@ def _names(t: str) -> list[str]:
 
 
 _NEG_RE = re.compile(r"\b(?:not|no|nothing|none|never|without|nobody|neither|nor|cannot|nowhere)\b|n't\b", re.I)
+# Markers that a move is the alternative, not what happened (added after the P2a run: "... was the move" dropped
+# turned a better move into a played one).
+_HYPO_RE = re.compile(r"\b(?:instead|was the move|the move (?:was|is)|better was|line|would|if|otherwise|rather than)\b", re.I)
 
 _BETTER_RE = re.compile(r"Better was (\S+?)(?=[,.:;](?:\s|$))")
 _CHARGE_TRIGGER = re.compile(r"\b(?:lets?|hands|allows)\b|\bcan play\b", re.I)
@@ -315,6 +318,20 @@ def _charges(t: str) -> list[str]:
     return out
 
 
+_CHECK_MATE_RE = re.compile(r"\b(?:checkmate|check|mate)\b", re.I)
+
+
+def _order(t: str) -> list:
+    """Moves/squares, outcome classes and check/mate words in order of appearance (P2a: who does what)."""
+    events = [(m.start(), m.group(0)) for m in MOVE_RE.finditer(t)]
+    stripped = MOVE_RE.sub(lambda m: " " * len(m.group(0)), t)  # offsets kept
+    events += [(m.start(), m.group(0)) for m in SQUARE_RE.finditer(stripped)]
+    for name, rx in OUTCOMES.items():
+        events += [(m.start(), name) for m in rx.finditer(t)]
+    events += [(m.start(), m.group(0).lower()) for m in _CHECK_MATE_RE.finditer(t)]
+    return [label for _, label in sorted(events, key=lambda e: e[0])]
+
+
 def facts(text: str, surface: str) -> dict:
     """All fact classes of ``text`` (normalised, and folded for NARRATION)."""
     t = prepared(text, surface)
@@ -334,13 +351,15 @@ def facts(text: str, surface: str) -> dict:
         "OUTCOMES": _outcomes(t),
         "NAMES": _names(t),
         "NEGATION": len(_NEG_RE.findall(t)),
+        "HYPOTHETICAL": len(_HYPO_RE.findall(t)),
+        "ORDER": _order(t),
         "BETTER_WAS": _better_was(t),
         "CHARGES": _charges(t),
     }
 
 
 _FACT_ORDER = ["MOVES", "SQUARES", "PIECE_SQUARES", "PIECES", "PLAYERS", "NUMBERS", "TERMS", "BANDS", "OUTCOMES",
-               "NAMES", "NEGATION"]
+               "NAMES", "NEGATION", "HYPOTHETICAL", "ORDER"]
 
 # ---------------------------------------------------------------------------------------------------------
 # Rule tables
@@ -377,6 +396,8 @@ BANNED_ITEMS: list[tuple[str, re.Pattern]] = [(p, re.compile(r"\b" + re.escape(p
                                               for p in dict.fromkeys(_BANNED_PHRASES + _BANNED_WORDS)]
 BANNED_ITEMS += [
     ("clearly (not better/worse)", re.compile(r"\bclearly\b(?! (?:better|worse)\b)", re.I)),
+    ("allow*", re.compile(r"\ballow(?:s|ed|ing)?\b", re.I)),
+    ("set up", re.compile(r"\bset(?:s|ting)? up\b", re.I)),
     ("wins the <piece> on", re.compile(r"\bwins the (?:pawn|knight|bishop|rook|queen|king) on\b", re.I)),
     ("<piece> up/down", re.compile(r"\b(?:pawn|knight|bishop|rook|queen|piece|exchange|material)s? "
                                    r"(?:up|down|ahead|behind)\b", re.I)),
@@ -637,6 +658,17 @@ def mutations(text: str, surface: str) -> list[tuple[str, str, list[str]]]:
     m = re.search(r"\b(?:not|no|nothing) ", text, re.I)
     if m:
         add("negation dropped", text[:m.start()] + text[m.end():], ["FACTS_NEGATION", "FACTS_TERMS", "FACTS_OUTCOMES"])
+    # an alternative move made to look played (P2a finding)
+    if " was the move" in text:
+        add("alternative marker dropped", text.replace(" was the move", "", 1), ["FACTS_HYPOTHETICAL", "SHAPE_LENGTH"])
+    elif "Instead, " in text:
+        add("alternative marker dropped", text.replace("Instead, ", "", 1), ["FACTS_HYPOTHETICAL", "SHAPE_LENGTH"])
+    # who does what: the reply's effect given to the move played ("This hands White d4, which hits X." ->
+    # "This hits X, giving White d4."), the P2a finding the order rule catches
+    m = re.match(r"^This hands (White|Black|you|your opponent) (\S+), which ([^.]+)\.", text)
+    if m:
+        add("effect moved onto the played move", f"This {m.group(3)}, giving {m.group(1)} {m.group(2)}." + text[m.end():],
+            ["FACTS_ORDER", "FACTS_OUTCOMES"])
     # first person
     add("first person added", _insert_first_sentence(text, ", as we see"), ["REGISTER_FIRST_PERSON", "SHAPE_LENGTH"])
     # notation in narration

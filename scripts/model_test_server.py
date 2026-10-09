@@ -98,6 +98,15 @@ class State:
             if path is None:
                 sys.exit(f"{name} not found under {args.root} (run scripts/fetch_models.sh)")
             self.files[f"/{self.tag}/{name}"] = path
+        # C2: the optional wording model (vendor/models/rephrase-assets/), on its own tag; served when present.
+        self.gguf = self.lock.get("rephrase.model.file")
+        self.gguf_tag = self.lock.get("rephrase.release.tag", self.tag)
+        if self.gguf:
+            path = find_file(args.root, self.gguf)
+            if path is None:
+                print(f"note: {self.gguf} not found under {args.root}; the wording model is not served")
+            else:
+                self.files[f"/{self.gguf_tag}/{self.gguf}"] = path
         self.manifest_dir = os.path.abspath(args.manifest_dir) if args.manifest_dir else None
         if self.manifest_dir:
             if not os.path.isfile(os.path.join(self.manifest_dir, "models.json")):

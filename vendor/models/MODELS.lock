@@ -39,3 +39,19 @@ release.tag=models-2026.10
 # C2 (docs/LLM_REPHRASE_DESIGN.md): the optional wording model. The prompt version moves every rephrase cache
 # key when it changes; it must equal RephrasePrompt.VERSION in :core (RephrasePromptTest).
 rephrase.prompt.version=1
+# The wording model the app offers (optional, owner decision 2026-10-09: Qwen2.5-1.5B-Instruct Q4_K_M, Apache-2.0),
+# from Qwen's official GGUF repository at a fixed commit, re-hosted unmodified on the release tag below. Size and
+# SHA-256 were measured on the fetched file (they equal the Hub's LFS pins); arch is the GGUF's general.architecture.
+rephrase.model.id=qwen2.5-1.5b-instruct-q4_k_m
+rephrase.model.file=qwen2.5-1.5b-instruct-q4_k_m.gguf
+rephrase.model.url=https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q4_k_m.gguf
+rephrase.model.size=1117320736
+rephrase.model.sha256=6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e
+rephrase.model.arch=qwen2
+rephrase.model.license=Apache-2.0
+# Its own immutable release tag (C2): the net and the voice stay on release.tag, untouched, so publishing the wording
+# model is one new release holding one file (and its LICENSE); first-run URL = MODEL_BASE_URL + this tag + "/" + file.
+rephrase.release.tag=models-2026.11
+# The llama.cpp tag compiled into librephrase.so (vendor/LLAMA_CPP_VERSION.txt; :rephrase's build checks they agree)
+# and the tag the P2a host measurement ran on.
+rephrase.runtime.tag=b11190

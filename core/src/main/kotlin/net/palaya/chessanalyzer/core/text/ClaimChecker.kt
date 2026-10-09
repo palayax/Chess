@@ -25,7 +25,7 @@ object ClaimChecker {
         REGISTER_CLASS_NAME, REGISTER_EXCLAMATION, REGISTER_FIRST_PERSON,
         BANNED,
         FACTS_MOVES, FACTS_SQUARES, FACTS_PIECE_SQUARES, FACTS_PIECES, FACTS_PLAYERS, FACTS_NUMBERS,
-        FACTS_TERMS, FACTS_BANDS, FACTS_OUTCOMES, FACTS_NAMES, FACTS_NEGATION,
+        FACTS_TERMS, FACTS_BANDS, FACTS_OUTCOMES, FACTS_NAMES, FACTS_NEGATION, FACTS_HYPOTHETICAL, FACTS_ORDER,
         BETTER_WAS, CHARGE,
     }
 
@@ -65,6 +65,18 @@ object ClaimChecker {
         val charges: List<String>,
         /** How many negations the text has ("not", "no", "nothing", "n't", ...). */
         val negations: Int,
+        /**
+         * How many markers say a move is the alternative, not what happened ("Instead,", "was the move", "the
+         * engine's line", "would", "if"): drop one and "Rook takes the pawn on h seven was the move" becomes "The rook
+         * takes the pawn on h seven", a move that was never played (found in the P2a run).
+         */
+        val hypotheticals: Int = 0,
+        /**
+         * The order of what happens: every move or square token, outcome-verb class and check/mate word, as they
+         * appear. "This hands White d4, which hits the loose bishop on c5" and "This hits the loose bishop on c5,
+         * giving White d4" carry the same tokens but not the same claim (who hits the bishop): found in the P2a run.
+         */
+        val order: List<String> = emptyList(),
     )
 
     // -------------------------------------------------------------------------------------------
@@ -247,8 +259,14 @@ object ClaimChecker {
             playerKey(who) + ">" + token.value
         }
         val negations = NEGATION.findAll(t).count()
+        val hypotheticals = HYPOTHETICAL.findAll(t).count()
+        val events = ArrayList<Pair<Int, String>>()
+        TOKEN.findAll(t).forEach { events += it.range.first to it.value }
+        for ((k, r) in OUTCOMES) r.findAll(t).forEach { events += it.range.first to k }
+        CHECK_OR_MATE.findAll(t).forEach { events += it.range.first to it.value.lowercase() }
+        val order = events.sortedBy { it.first }.map { it.second }
 
-        return Facts(moves, squares, pieceSquares, pieces, players, numbers, terms, bands, outcomes, names, better, charges, negations)
+        return Facts(moves, squares, pieceSquares, pieces, players, numbers, terms, bands, outcomes, names, better, charges, negations, hypotheticals, order)
     }
 
     private fun playerKey(word: String): String {
@@ -310,6 +328,10 @@ object ClaimChecker {
             ).map { it to Regex("\\b$it\\b", RegexOption.IGNORE_CASE) } +
             listOf(
                 "clearly (adverb)" to Regex("\\bclearly\\b(?! (?:better|worse))", RegexOption.IGNORE_CASE),
+                // C1 removed "allowed"; any form of "allow" is a charge the original did not make.
+                "allow*" to Regex("\\ballow(?:s|ed|ing)?\\b", RegexOption.IGNORE_CASE),
+                // "sets up a check" is a threat the original did not claim ("with check" is a fact, "sets up" a plan).
+                "set up" to Regex("\\bset(?:s|ting)? up\\b", RegexOption.IGNORE_CASE),
                 "wins the <piece> on" to CommentaryVocabulary.WINS_A_PIECE_ON_A_SQUARE,
                 "material up/down" to Regex(
                     "\\b(?:pawn|knight|bishop|rook|queen|piece|exchange|material)s? (?:up|down|ahead|behind)\\b",
@@ -319,6 +341,14 @@ object ClaimChecker {
         )
 
     private val FIRST_PERSON = Regex("\\b(?:[Ww]e|[Uu]s|[Oo]urs?|[Ll]et's|[Ww]e're|[Ww]e've|[Ww]e'll|I|I'm|I'd|[Mm]e|[Mm]y)\\b")
+
+    private val CHECK_OR_MATE = Regex("\\b(?:checkmate|check|mate)\\b", RegexOption.IGNORE_CASE)
+
+    /** Alternative-move markers (see [Facts.hypotheticals]); the count must be equal. */
+    private val HYPOTHETICAL = Regex(
+        "\\b(?:instead|was the move|the move (?:was|is)|better was|line|would|if|otherwise|rather than)\\b",
+        RegexOption.IGNORE_CASE
+    )
 
     /** Negations: a dropped or an added "not" flips a claim, so the count must be equal. */
     private val NEGATION = Regex(
@@ -423,6 +453,8 @@ object ClaimChecker {
         differ(Reason.FACTS_OUTCOMES, fo.outcomes, fc.outcomes)?.let { return it }
         differ(Reason.FACTS_NAMES, fo.names, fc.names)?.let { return it }
         differ(Reason.FACTS_NEGATION, fo.negations, fc.negations)?.let { return it }
+        differ(Reason.FACTS_HYPOTHETICAL, fo.hypotheticals, fc.hypotheticals)?.let { return it }
+        differ(Reason.FACTS_ORDER, fo.order, fc.order)?.let { return it }
         // A capitalised word the original never uses (in any case) is a name the model added.
         val oLower = WORD.findAll(oFolded).map { it.value.lowercase().removeSuffix("'s") }.toSet()
         for (s in sentences(MOVE.replace(cFolded, " "))) {
