@@ -16,6 +16,7 @@ import net.palaya.chessanalyzer.core.chess.Square
 import net.palaya.chessanalyzer.core.chess.moveToSan
 import net.palaya.chessanalyzer.core.chess.parseSan
 import net.palaya.chessanalyzer.core.chess.parseUci
+import net.palaya.chessanalyzer.core.text.CommentaryVocabulary
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -102,12 +103,8 @@ class CommentaryClaimsTest {
 
     @Test
     fun `none of the unprovable wordings survives anywhere`() {
-        val banned = listOf(
-            "forces mate", "allowed", "drops the", "sets up a deflection", "sets up an", "sets up a clearance",
-            "keeping material level", "stunning", "opens a discovered attack", "The point becomes clear", "probably", "might",
-            "plan", "idea", "intends", "strategic"
-        )
-        val winsAPieceOnASquare = Regex("wins the (pawn|knight|bishop|rook|queen|king) on")
+        val banned = CommentaryVocabulary.C1_BANNED
+        val winsAPieceOnASquare = CommentaryVocabulary.WINS_A_PIECE_ON_A_SQUARE
         every { name, side, a ->
             for (b in banned) assertFalse("$name/$side ply ${a.ply}: '$b' in [${a.text}]", b in a.text)
             assertFalse("$name/$side ply ${a.ply}: [${a.text}]", winsAPieceOnASquare.containsMatchIn(a.text))
@@ -217,64 +214,10 @@ class CommentaryClaimsTest {
     // C1: every sentence is a catalogued template, and every term is re-verified here
     // -----------------------------------------------------------------------
 
-    private val who = "(?:you|your opponent|White|Black)"
-    private val piece = "(?:pawn|knight|bishop|rook|queen|king)"
-    private val on = "the $piece on [a-h][1-8]"
-    private val material = "(?:a queen|a rook|a piece|a pawn|the exchange)"
-    private val bands = "(?:decisively winning|winning|clearly better|slightly better|about level|slightly worse|clearly worse|losing|decisively lost)"
+    private val bands = CommentaryVocabulary.BANDS
 
-    /** The verb phrases a found / allowed / better sentence may carry (docs/COMMENTARY_STYLE.md, the vocabulary table). */
-    private val phrases = listOf(
-        "is checkmate", "is mate", "delivers checkmate",
-        "(?:starts|begins) a forced mate(?: in \\d+)?", "sets a forced mate in \\d+ in motion",
-        "is a back-rank mate", "is mate on the back rank",
-        "is a smothered mate(?:: the king is boxed in by its own pieces)?",
-        "forks $on(?:, $on)* and $on(?: with a pawn)?", "is a (?:pawn )?fork, hitting $on(?:, $on)* and $on(?: at once)?", "lands a fork on $on(?:, $on)* and $on",
-        "attacks $on(?:, $on)* and $on at once", "creates a double attack on $on(?:, $on)* and $on",
-        "pins $on to $on", "puts $on in an absolute pin against the king on [a-h][1-8]", "ties $on to $on with a relative pin",
-        "skewers $on, with $on behind it", "is a skewer: it attacks $on, and $on stands behind it on the same line",
-        "uncovers $on, which now attacks $on", "is a discovered attack: $on is unmasked against $on",
-        "gives check by uncovering $on", "is a discovered check from $on",
-        "gives double check", "is a double check: only a king move can answer it",
-        "attacks the undefended $piece on [a-h][1-8]", "hits the loose $piece on [a-h][1-8]", "attacks $on, which is en prise",
-        "leaves $on undefended, with $on attacking it", "leaves $on en prise to $on",
-        "(?:attacks|hits) $on with an? $piece", "leaves $on attacked by an? $piece",
-        "attacks $on more often than it is defended", "piles up on $on: more attackers than defenders", "leaves $on attacked more often than it is defended",
-        "leaves $on with no safe square", "traps $on: every square it can reach loses material",
-        "(?:wins|picks up) $material",
-        "promotes (?:the pawn )?to an? $piece", "underpromotes to an? $piece", "is an underpromotion, to an? $piece",
-        "is a desperado: the $piece was lost anyway, so it takes $on on the way out",
-        "threatens \\S+, mate on the back rank", "sets up a back-rank mate: \\S+ is the threat",
-        // the engine's line (the detector's own descriptions, opened with the move)
-        "deflects $on away from guarding [a-h][1-8]", "drags $on off [^,]+, and \\S+ follows", "clears [a-h][1-8] so that \\S+ can come through",
-        "takes away $on, which was what held [a-h][1-8]; \\S+ follows", "lures the $piece to [a-h][1-8], and \\S+ mates", "drags the $piece to [a-h][1-8], where \\S+ forks it",
-        "cuts $on off from [a-h][1-8], and \\S+ follows", "is the Greek gift: the knight comes to [a-h][1-8] and the queen to [a-h][1-8] behind it",
-        "sets up a windmill: the rook keeps coming back to [a-h][1-8] with check, taking material each time round",
-        "is a zwischenzug: it comes first, and \\S+ follows", "exploits the overloaded $piece on [a-h][1-8], which cannot guard [a-h][1-8] and [a-h][1-8] at once"
-    ).joinToString("|") { "(?:$it)" }
-
-    private val san = "\\S+"
-    private val templates = listOf(
-        "$san (?:follows known opening theory|is still opening theory|stays in book)",
-        "(?:$san was the only legal move|$san was forced: the only legal move|No choice here: $san was the only legal move)",
-        "$san (?:matches the engine's top choice|is the engine's first choice|is the top engine move here)",
-        "$san (?:is very close to the best move|is nearly the engine's top choice|comes within a whisker of the best move)",
-        "$san (?:is a sound move|is a reasonable move|is a solid choice)",
-        "$san (?:was the only move that kept things on track|is the only move here: the next-best option gives up real ground|is an only move, and nothing else keeps the position on track)",
-        "$san (?:is a sacrifice: it offers|sacrifices) $on", "$san offers $on: a sacrifice the engine rates among the best moves here",
-        "$san leaves $on open to capture, and the engine still rates it among the best moves", "$san is among the engine's best moves here",
-        "$san (?:gives back ground|is not the most precise|concedes a little ground)",
-        "$san (?:gives up real ground|goes wrong|lets the position slip)",
-        "$san (?:gives up a big chunk of the position|is a serious slip|throws a big chunk of the position away)",
-        "(?:This|It) (?:$phrases)", "(?:In the engine's line, |The engine's line shows it: )$san (?:$phrases)",
-        "(?:This lets $who play $san|Now $who can play $san|This hands $who $san)(?:, which|; in the engine's line it) (?:$phrases)",
-        "This allows a forced mate(?: in \\d+)?", "This walks into a forced mate in \\d+", "After this, $who has a forced mate in \\d+",
-        "That takes $who from $bands to $bands", "The position swings from $bands to $bands for $who", "From $bands to $bands in one move: that is what this cost $who",
-        "Better was $san", "Better was $san(?:, which|: it|; in the engine's line it|: in the engine's line it) (?:$phrases)",
-        "Better was $san(?:, forcing mate in \\d+|, with a forced mate in \\d+|: mate in \\d+ was on the board)",
-        "Better was $san(?:, keeping|, which holds on to|: it keeps) (?:a decisive advantage|a winning position)",
-        "A forced mate in \\d+ was on the board", "A decisive advantage was on the board"
-    ).map { Regex("^(?:$it)\\.$") }
+    /** The template catalogue (docs/COMMENTARY_STYLE.md), moved to main in C2 so the rephrase checker reads the same words. */
+    private val templates = CommentaryVocabulary.TEMPLATES
 
     @Test
     fun `every sentence of every text is one of the catalogued templates`() {

@@ -5,6 +5,9 @@
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
     python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
     python scripts/audit_commentary.py mutate core/build/commentary_audit/after.jsonl
+    python scripts/audit_commentary.py rephrase core/build/rephrase/mutations.jsonl          (C2)
+    python scripts/audit_commentary.py rephrase core/build/rephrase/measure_<model>.jsonl    (C2)
+    python scripts/audit_commentary.py mutate-rephrase core/build/rephrase/corpus.jsonl      (C2)
 
 For every sentence of every annotation text, and every intro / step / payoff of every walkthrough, the
 claim it makes is re-derived from the recorded position and the recorded engine data with python-chess
@@ -1457,8 +1460,23 @@ def main_mutate(path):
     return 1 if missed else 0
 
 
+def _rephrase_check():
+    """scripts/rephrase_check.py, loaded by path (``python -I`` does not put the script's folder on sys.path)."""
+    import importlib.util
+    import os
+    spec = importlib.util.spec_from_file_location("rephrase_check", os.path.join(os.path.dirname(os.path.abspath(__file__)), "rephrase_check.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     mode, path = sys.argv[1], sys.argv[2]
+    if mode in ("rephrase", "mutate-rephrase"):
+        # C2 (docs/LLM_REPHRASE_DESIGN.md §5.4): the independent Python twin of core's ClaimChecker.
+        #   rephrase <jsonl>         re-judges original/candidate pairs and must agree with the Kotlin verdicts
+        #   mutate-rephrase <jsonl>  breaks one fact of every recorded text at a time; every break must be rejected
+        return _rephrase_check().main([mode, path])
     if mode == "lines":
         return main_lines(path)
     if mode == "mutate":

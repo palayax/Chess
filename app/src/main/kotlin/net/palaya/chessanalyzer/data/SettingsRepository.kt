@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -41,6 +42,18 @@ class SettingsRepository(private val context: Context) {
         val VIDEO_PACE = stringPreferencesKey("video_pace")
         /** When "Check for updates" last finished (D2e, design §1.8); absent = never. */
         val LAST_UPDATE_CHECK_MS = longPreferencesKey("models_last_update_check_ms")
+        /**
+         * C2 "Natural wording (on-device AI)": absent = off. Turned on when the user downloads the wording
+         * model (at setup or in Settings) and switched in Settings (docs/LLM_REPHRASE_DESIGN.md §7, §12).
+         */
+        val REPHRASE_ENABLED = booleanPreferencesKey("rephrase_enabled")
+    }
+
+    /** C2: whether card and narration texts are reworded by the on-device model (default off). */
+    val rephraseEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.REPHRASE_ENABLED] ?: false }
+
+    suspend fun setRephraseEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.REPHRASE_ENABLED] = enabled }
     }
 
     /** When the user last checked for model updates, or null for never. */

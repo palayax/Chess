@@ -35,3 +35,7 @@ kokoro.targz.size=102543452
 # The GitHub release (immutable tag) that holds both files. First-run URL =
 # BuildConfig.MODEL_BASE_URL + release.tag + "/" + file name. Must match models-YYYY.MM[.n].
 release.tag=models-2026.10
+
+# C2 (docs/LLM_REPHRASE_DESIGN.md): the optional wording model. The prompt version moves every rephrase cache
+# key when it changes; it must equal RephrasePrompt.VERSION in :core (RephrasePromptTest).
+rephrase.prompt.version=1

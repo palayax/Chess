@@ -43,3 +43,6 @@ pc/tts/models/
 
 # Local evidence WAVs from device checks (C1-device); large, kept out of git
 docs/voice_samples/c1_terms/
+
+# C2: llama.cpp source for :rephrase (scripts/fetch_llama_cpp.sh, pinned by vendor/LLAMA_CPP_VERSION.txt)
+vendor/llama.cpp/
