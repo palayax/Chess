@@ -30,7 +30,7 @@ Related documents: `docs/PUBLISHING.md` (the reasoning behind these answers), `d
 - [ ] **The models are live.** They are live since 2026-10-07 (`models-2026.10` release and the signed `models` manifest
       on https://github.com/palayax/Chess). Never delete or replace those assets.
 
-Upload files (`dist/play-kit/`, built at commit `e3843d7`, SHA-256 in `RUN_LOG.md` "P1"):
+Upload files (`dist/play-kit/`, rebuilt 2026-10-08 at commit `af7b274` (famous games, C1 commentary, Hebrew hidden); AAB SHA-256 `cfac2ae8d8e7f627d0c885b599003026dbe782e656cd8a74002a35aa56aa21e2`):
 
 | File | What it is |
 |---|---|
@@ -308,7 +308,7 @@ Permissions in the manifest (aapt2, P1 build): `INTERNET`, `ACCESS_NETWORK_STATE
 | Field | Enter |
 |---|---|
 | Use case(s) | **Network transfer: Upload or download** (the first-run download). Also tick **Local processing: Import or export** if multiple choices are allowed: on Android 10–14 the video export uses dataSync, because mediaProcessing does not exist there. |
-| Video link | `<YouTube URL of fgs_data_sync_demo.mp4>` |
+| Video link | `https://youtube.com/shorts/lkQ6lD0umSI` (unlisted, channel PalayaChess, uploaded 2026-10-09) |
 
 Description:
 
@@ -327,7 +327,7 @@ If the system deferred or stopped the download, the app could not be used: no ga
 | Field | Enter |
 |---|---|
 | Use case | **Media transcoding** (closest listed case: the app renders, encodes and muxes an MP4 on the device). If you can enter text instead, write: "Rendering and encoding a video file on the device". |
-| Video link | `<YouTube URL of fgs_media_processing_demo.mp4>` |
+| Video link | `https://youtube.com/shorts/JVwfR2UHkJU` (unlisted, channel PalayaChess, uploaded 2026-10-09) |
 
 Description:
 
