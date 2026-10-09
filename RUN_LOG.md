@@ -4207,3 +4207,15 @@ Restored: language back to en-US only (`config` en-rUS-ldltr, `persist.sys.local
 3. The system notification-permission dialog (Android 13+) appeared on Download; answered "Don't allow" (the download does not need it).
 4. chess34 still holds the stray `net.palaya.chessanalyzer.engine.test` package noted in C1-device; untouched.
 5. Not mine: `git status` also shows `docs/STORE_LISTING.md` and `docs/play/PLAY_CONSOLE_ANSWERS.md` modified before this run; left as they are.
+
+## Privacy link (P2) (2026-10-09)
+
+Google Play requires the privacy policy to be linked inside the app. About now has a "Privacy policy" row that opens https://palayax.github.io/Chess/privacy/ in the browser.
+
+- **Mechanism:** the same as the other About links: `Modifier.clickableUrl(uriHandler, url)` -> `LocalUriHandler.openUri` (ACTION_VIEW by the platform). The app makes no request itself; `NetworkCallSitesTest` unchanged and green.
+- **Strings:** `about_privacy_policy_label` and `about_privacy_policy_url` (`translatable="false"`) in `strings.xml`, beside `about_license_source_url`.
+- **Placement:** top card of About ("Made by"), directly under the contact row, so it is visible without scrolling. Reference (chess.com pattern): privacy/legal links sit together with the "about the company/contact" information, not buried in a licence block. The source link stays in the licence card (it is a licence obligation, not a legal-policy link).
+- **Row style / a11y:** icon (PrivacyTip, 18 dp, primary) + bodyMedium primary text, like the contact row; the whole row is the target (`heightIn(min = 48.dp)`, `Role.Button`).
+- **Tests:** `AboutPrivacyLinkTest` (instrumented, new): About shows "Privacy policy", it is a button with a click action and >= 48 dp, a tap gives a recording `UriHandler` exactly that URL. `PrivacyPolicyLinkResourceTest` (host, new, 2 cases): URL value, `translatable="false"`, label, and that AboutScreen reads the URL through the shared link modifier. No About test existed before.
+- **Results:** host gate core 541 / app unit 507 (505 + 2) / desktop 25, 0 failed, 0 skipped; `:app:lintDebug` 0 errors. `AboutPrivacyLinkTest` on chess36 (`-gpu host`): tests=1 failures=0 errors=0 skipped=0. Emulator killed, adb server stopped.
+- Not done: no screenshot (the instrumented test asserts the node, role, height and URL); not committed.

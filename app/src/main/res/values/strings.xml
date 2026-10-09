@@ -344,6 +344,10 @@
          Replace this single string with the real URL when available. -->
     <string name="about_license_source_url">https://github.com/palayax/Chess</string>
     <string name="about_license_source_label">Source code</string>
+    <!-- Google Play requires the privacy policy to be linked inside the app. Opened in the browser on tap
+         (like the source link); the app itself makes no request. -->
+    <string name="about_privacy_policy_label">Privacy policy</string>
+    <string name="about_privacy_policy_url" translatable="false">https://palayax.github.io/Chess/privacy/</string>
 
     <string name="about_license_openings_title">Opening book</string>
     <string name="about_license_openings_body">Opening classification data is from lichess-org/chess-openings, dedicated to the public domain under CC0.</string>
