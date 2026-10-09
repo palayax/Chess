@@ -42,6 +42,16 @@ fun aboutMegabytes(bytes: Long): Long {
     return if (mb < 10L) mb else ceilDiv(mb, 10L) * 10L
 }
 
+/**
+ * C2: a size of a gigabyte or more, "about" style: rounded UP to a tenth of a (decimal) GB so it is never
+ * understated ("1.2 GB" for the 1,117,320,736-byte wording model); below 1 GB it is [aboutMegabytes] in MB.
+ */
+fun gigabytesLabel(bytes: Long): String {
+    if (bytes < 1_000L * BYTES_PER_MB) return megabytesLabel(aboutMegabytes(bytes))
+    val tenths = ceilDiv(bytes, 100L * BYTES_PER_MB)
+    return "$LRM${tenths / 10}.${tenths % 10} GB$LRM"
+}
+
 /** "260 MB", LRM-wrapped so the number and the unit keep their order inside a right-to-left line. */
 fun megabytesLabel(megabytes: Long): String = "$LRM$megabytes MB$LRM"
 
@@ -63,25 +73,53 @@ fun percentOf(fraction: Float): Int = (fraction.coerceIn(0f, 1f) * 100f).toInt()
  * The pinned download sizes of the two files (`ModelSetup.netSpec` / `voiceSpec`), and the unpacked voice's
  * size on disk ([voiceInstalledBytes]: the tar's, since the download is a `.tar.gz` from D2f on).
  */
-data class SetupSizes(val netBytes: Long, val voiceBytes: Long, val voiceInstalledBytes: Long = voiceBytes) {
-    fun of(file: ModelFile): Long = if (file == ModelFile.NET) netBytes else voiceBytes
+data class SetupSizes(
+    val netBytes: Long,
+    val voiceBytes: Long,
+    val voiceInstalledBytes: Long = voiceBytes,
+    /** C2: the optional wording model's download (0 in a build or a test without it). */
+    val rephraseBytes: Long = 0L,
+) {
+    fun of(file: ModelFile): Long = when (file) {
+        ModelFile.NET -> netBytes
+        ModelFile.VOICE -> voiceBytes
+        ModelFile.REPHRASE -> rephraseBytes
+    }
 }
+
+/** C2: the wording model counts in setup's sizes and rows only while the user has asked for it. */
+private fun SetupState.counts(f: ModelFile): Boolean = f != ModelFile.REPHRASE || rephraseWanted || rephraseInstalled
+
+private fun SetupState.installed(f: ModelFile): Boolean = when (f) {
+    ModelFile.NET -> netInstalled
+    ModelFile.VOICE -> voiceInstalled
+    ModelFile.REPHRASE -> rephraseInstalled
+}
+
+private fun SetupState.partBytes(f: ModelFile): Long = when (f) {
+    ModelFile.NET -> netPartBytes
+    ModelFile.VOICE -> voicePartBytes
+    ModelFile.REPHRASE -> rephrasePartBytes
+}
+
+/** The files setup is about for [disk]: the net, the voice, and the wording model if the user asked for it. */
+fun setupFiles(disk: SetupState): List<ModelFile> = ModelFile.entries.filter { disk.counts(it) }
 
 /** Bytes the files that are not installed take once they are (the "(260 MB once done)" figure). */
 fun installedFootprintBytes(disk: SetupState, sizes: SetupSizes): Long =
-    (if (disk.netInstalled) 0L else sizes.netBytes) + (if (disk.voiceInstalled) 0L else sizes.voiceInstalledBytes)
+    (if (disk.netInstalled) 0L else sizes.netBytes) + (if (disk.voiceInstalled) 0L else sizes.voiceInstalledBytes) +
+        (if (!disk.counts(ModelFile.REPHRASE) || disk.rephraseInstalled) 0L else sizes.rephraseBytes)
 
 /**
  * Bytes the files that are not installed take to DOWNLOAD (the progress total; since D2f the voice's share is
  * its `.tar.gz`, smaller than what it unpacks to, so this is not [installedFootprintBytes]).
  */
 fun downloadTotalBytes(disk: SetupState, sizes: SetupSizes): Long =
-    (if (disk.netInstalled) 0L else sizes.netBytes) + (if (disk.voiceInstalled) 0L else sizes.voiceBytes)
+    setupFiles(disk).sumOf { f -> if (disk.installed(f)) 0L else sizes.of(f) }
 
 /** Bytes still to download: the missing files minus what their part files already hold. */
 fun bytesLeftToDownload(disk: SetupState, sizes: SetupSizes): Long =
-    (if (disk.netInstalled) 0L else (sizes.netBytes - disk.netPartBytes).coerceAtLeast(0L)) +
-        (if (disk.voiceInstalled) 0L else (sizes.voiceBytes - disk.voicePartBytes).coerceAtLeast(0L))
+    setupFiles(disk).sumOf { f -> if (disk.installed(f)) 0L else (sizes.of(f) - disk.partBytes(f)).coerceAtLeast(0L) }
 
 // ---- The tap on Download ----
 
@@ -192,11 +230,11 @@ private val RUNNING_STATUSES = setOf(SetupStatus.CONNECTING, SetupStatus.DOWNLOA
  */
 fun setupView(disk: SetupState, sizes: SetupSizes, running: Boolean, progress: SetupProgress?): SetupView {
     val left = bytesLeftToDownload(disk, sizes)
-    val hasParts = (!disk.netInstalled && disk.netPartBytes > 0) || (!disk.voiceInstalled && disk.voicePartBytes > 0)
+    val hasParts = setupFiles(disk).any { f -> !disk.installed(f) && disk.partBytes(f) > 0 }
     val live = progress?.takeIf { running || it.status !in RUNNING_STATUSES }
-    val rows = ModelFile.entries.map { f ->
-        val installed = if (f == ModelFile.NET) disk.netInstalled else disk.voiceInstalled
-        val part = if (f == ModelFile.NET) disk.netPartBytes else disk.voicePartBytes
+    val rows = setupFiles(disk).map { f ->
+        val installed = disk.installed(f)
+        val part = disk.partBytes(f)
         SetupFileRow(f, installed, if (installed) sizes.of(f) else part.coerceIn(0L, sizes.of(f)), sizes.of(f), active = false)
     }
     val footprint = downloadTotalBytes(disk, sizes)
@@ -270,15 +308,15 @@ fun setupView(disk: SetupState, sizes: SetupSizes, running: Boolean, progress: S
 
 private fun rowsFrom(disk: SetupState, sizes: SetupSizes, p: SetupProgress, running: Boolean): List<SetupFileRow> {
     val activeFile = if (running) p.perFile.firstOrNull { !it.done }?.file else null
-    return ModelFile.entries.map { f ->
+    return ModelFile.entries.filter { f -> disk.counts(f) || p.perFile.any { it.file == f } }.map { f ->
         val fp = p.perFile.firstOrNull { it.file == f }
-        val installedOnDisk = if (f == ModelFile.NET) disk.netInstalled else disk.voiceInstalled
+        val installedOnDisk = disk.installed(f)
         val installed = fp?.done ?: installedOnDisk
         val total = fp?.bytesTotal?.takeIf { it > 0 } ?: sizes.of(f)
         val done = when {
             installed -> total
             fp != null -> fp.bytesDone.coerceIn(0L, total)
-            else -> (if (f == ModelFile.NET) disk.netPartBytes else disk.voicePartBytes).coerceIn(0L, total)
+            else -> disk.partBytes(f).coerceIn(0L, total)
         }
         SetupFileRow(f, installed, done, total, active = f == activeFile)
     }

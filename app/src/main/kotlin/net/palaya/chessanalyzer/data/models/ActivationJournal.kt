@@ -47,7 +47,7 @@ sealed interface JournalRecord {
 }
 
 /** What [ModelActivator.recoverOnStartup] must do for the record it found. */
-enum class Recovery { NOTHING, ROLL_BACK_NET, FINISH_NET, ROLL_BACK_VOICE, FINISH_VOICE, KEEP_NOTICE, UNREADABLE }
+enum class Recovery { NOTHING, ROLL_BACK_NET, FINISH_NET, ROLL_BACK_VOICE, FINISH_VOICE, ROLL_BACK_REPHRASE, FINISH_REPHRASE, KEEP_NOTICE, UNREADABLE }
 
 /**
  * The journal's rules, pure (host-tested in `ActivationJournalTest`): which phase may follow which, and
@@ -60,6 +60,8 @@ object ActivationMachine {
     fun phases(model: ModelKind): List<JournalPhase> = when (model) {
         ModelKind.NET -> listOf(JournalPhase.SWAPPED, JournalPhase.TRIAL, JournalPhase.COMMITTED)
         ModelKind.VOICE -> listOf(JournalPhase.TRIAL, JournalPhase.SWAPPED, JournalPhase.COMMITTED)
+        // C2: like the net: the GGUF is moved into place and made active, then tried (load + one checked rephrase).
+        ModelKind.REPHRASE -> listOf(JournalPhase.SWAPPED, JournalPhase.TRIAL, JournalPhase.COMMITTED)
     }
 
     /** True when [to] may be written over [from] (null = no journal: only the first phase may start). */
@@ -81,6 +83,7 @@ object ActivationMachine {
         is JournalRecord.InFlight -> when (record.model) {
             ModelKind.NET -> if (record.phase == JournalPhase.COMMITTED) Recovery.FINISH_NET else Recovery.ROLL_BACK_NET
             ModelKind.VOICE -> if (record.phase == JournalPhase.COMMITTED) Recovery.FINISH_VOICE else Recovery.ROLL_BACK_VOICE
+            ModelKind.REPHRASE -> if (record.phase == JournalPhase.COMMITTED) Recovery.FINISH_REPHRASE else Recovery.ROLL_BACK_REPHRASE
         }
     }
 }

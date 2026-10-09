@@ -1,0 +1,14 @@
+llama.cpp source vendored for the :rephrase module (C2, docs/LLM_REPHRASE_DESIGN.md §2.2).
+
+  Repository: https://github.com/ggml-org/llama.cpp
+  Tag:        b11190
+  Commit:     fcc891545b0f06de346d8f67d1e6c61f9bf0e777
+  Licence:    MIT
+  Fetched:    2026-10-09
+
+Fetch reproducibly with: scripts/fetch_llama_cpp.sh
+(re-fetches this exact tag/commit into vendor/llama.cpp/, which is gitignored).
+
+The same tag is the host build the P2a measurement used (pc/bin/llama, llama-server b11190 CPU) and
+rephrase.runtime.tag in vendor/models/MODELS.lock: models.json's runtime range for the wording model says which
+tags may load the GGUF.

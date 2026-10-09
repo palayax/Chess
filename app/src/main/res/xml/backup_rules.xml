@@ -13,6 +13,8 @@
     <exclude domain="file" path="tts_models/" />
     <!-- The downloaded Stockfish NNUE net (~98 MB) and its .part (NetStore.DIR_NAME, D2b). -->
     <exclude domain="file" path="nets/" />
+    <!-- C2: the optional wording model (1.1 GB), its part, journal and the rephrase cache: re-downloadable. -->
+    <exclude domain="file" path="rephrase/" />
     <!-- Model activation journal (D2e, docs/MODEL_DOWNLOAD_DESIGN.md §4.1): device-specific. -->
     <exclude domain="file" path="models/" />
     <!-- Persistent narration audio cache (NarrationStore.DIR_NAME = "narration"): regenerable. -->

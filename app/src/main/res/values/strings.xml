@@ -368,6 +368,9 @@
     <string name="about_license_neural_title">On-device neural narration</string>
     <string name="about_license_neural_body">The narration voice runs entirely on your device via sherpa-onnx (Apache 2.0). Its Kokoro-82M voice model (Apache 2.0) and espeak-ng pronunciation data (from the espeak-ng project, GPL version 3 or later) are downloaded once, when you set up the app. After that the voice works offline, and no text or audio is ever sent anywhere.</string>
     <string name="about_license_neural_view">View full attribution</string>
+    <string name="about_license_rephrase_title">Natural wording (optional)</string>
+    <string name="about_license_rephrase_body">Wording: optionally reworded on your phone by an AI model, Qwen2.5-1.5B-Instruct (by the Qwen team, Alibaba Cloud; Apache 2.0), run with llama.cpp (MIT). It is downloaded only if you ask for it, and every fact is checked against the app\'s own text.</string>
+    <string name="about_license_rephrase_view">View full attribution</string>
 
     <string name="about_disclaimer">Palaya Chess is not affiliated with, endorsed by, or sponsored by Chess.com or Lichess. It only reads PGN game files exported from those services.</string>
 
@@ -620,6 +623,34 @@
     <string name="update_manifest_invalid">The update information couldn\'t be read, so nothing was downloaded.</string>
     <string name="update_kind_net">Chess engine data</string>
     <string name="update_kind_voice">Narration voice</string>
+    <string name="update_kind_rephrase">Wording model</string>
+    <!-- C2: the Analysing screen's last, skippable step (docs/LLM_REPHRASE_DESIGN.md §6.2). -->
+    <string name="progress_polishing">Polishing the commentary (on-device AI)… %1$d of %2$d</string>
+    <string name="progress_polishing_skip">Skip</string>
+    <!-- C2: the optional wording model at setup (owner decision 2026-10-09, design §12.3). -->
+    <string name="setup_rephrase_offer">Also download the wording model (optional, about %1$s)</string>
+    <string name="setup_rephrase_offer_help">Rewords the commentary on your phone with an AI model; every fact is checked against the app\'s own text. The app works fully without it, and you can add it later in Settings.</string>
+    <string name="setup_file_rephrase">Wording model (optional)</string>
+    <!-- C2: Settings > Commentary (design §7). -->
+    <string name="settings_commentary_header">Commentary</string>
+    <string name="rephrase_notification_title">Downloading the wording model</string>
+    <string name="rephrase_notification_ready">The wording model is ready</string>
+    <string name="settings_rephrase_title">Natural wording (on-device AI)</string>
+    <string name="settings_rephrase_not_installed">Rewords the commentary with an AI model on your phone. Every fact is checked against the app\'s own text, and the original is kept if anything differs. Off until you download the wording model.</string>
+    <string name="settings_rephrase_download">Download (about %1$s)</string>
+    <string name="settings_rephrase_downloading">Downloading the wording model… %1$s of %2$s</string>
+    <string name="settings_rephrase_paused">Paused at %1$d%%</string>
+    <string name="settings_rephrase_installed">Reworded on this phone by Qwen2.5-1.5B-Instruct (%1$s). Every fact is checked against the original.</string>
+    <string name="settings_rephrase_cache">Reworded text: %1$s</string>
+    <string name="settings_rephrase_cache_clear">Clear</string>
+    <string name="settings_rephrase_remove">Remove the model</string>
+    <string name="settings_rephrase_remove_title">Remove the wording model?</string>
+    <string name="settings_rephrase_remove_body">This frees about %1$s. The commentary goes back to the app\'s own wording; you can download the model again later.</string>
+    <string name="settings_rephrase_remove_confirm">Remove</string>
+    <string name="settings_rephrase_unavailable">Not available on this phone.</string>
+    <string name="settings_rephrase_no_network">No internet connection. Connect and try again.</string>
+    <string name="settings_rephrase_low_storage">Not enough free space. The wording model needs about %1$s.</string>
+    <string name="settings_rephrase_metered_body">This download is about %1$s. Download now, or wait until you\'re on Wi-Fi.</string>
     <string name="update_offer">%1$s %2$s · about %3$s</string>
     <string name="update_download_install">Download and install</string>
     <string name="update_cancel">Cancel</string>

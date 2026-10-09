@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * "After setup the app makes no network call on its own" starts with "only one class can make one"
- * (docs/MODEL_DOWNLOAD_DESIGN.md §6.1). Scans the production sources of `:app` and `:engine` for every
+ * (docs/MODEL_DOWNLOAD_DESIGN.md §6.1). Scans the production sources of `:app`, `:engine` and `:rephrase` (C2) for every
  * way Kotlin/Java code on Android opens a connection and asserts the only hits are in
  * `data/models/ModelDownloader.kt`. A new call site anywhere else fails here and has to be argued for.
  */
@@ -41,7 +41,7 @@ class NetworkCallSitesTest {
 
     private fun scan(): Pair<Int, List<Hit>> {
         val root = repoDir()
-        val dirs = listOf("app/src/main/kotlin", "app/src/main/java", "engine/src/main/kotlin", "engine/src/main/java")
+        val dirs = listOf("app/src/main/kotlin", "app/src/main/java", "engine/src/main/kotlin", "engine/src/main/java", "rephrase/src/main/kotlin", "rephrase/src/main/java")
             .map { File(root, it) }.filter { it.isDirectory }
         var files = 0
         val hits = ArrayList<Hit>()

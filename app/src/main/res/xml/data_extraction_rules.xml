@@ -11,6 +11,8 @@
     <cloud-backup>
         <exclude domain="file" path="tts_models/" />
         <exclude domain="file" path="nets/" />
+        <!-- C2: the optional wording model (1.1 GB), its part, journal and the rephrase cache: re-downloadable. -->
+        <exclude domain="file" path="rephrase/" />
         <exclude domain="file" path="models/" />
         <exclude domain="file" path="narration/" />
         <exclude domain="file" path="eval_cache/" />
@@ -30,6 +32,8 @@
     <device-transfer>
         <exclude domain="file" path="tts_models/" />
         <exclude domain="file" path="nets/" />
+        <!-- C2: the optional wording model (1.1 GB), its part, journal and the rephrase cache: re-downloadable. -->
+        <exclude domain="file" path="rephrase/" />
         <exclude domain="file" path="models/" />
         <exclude domain="file" path="narration/" />
         <exclude domain="file" path="eval_cache/" />

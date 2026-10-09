@@ -4,10 +4,13 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-/** The two model ids the app knows (docs/MODEL_DOWNLOAD_DESIGN.md §3.2). Any other id is ignored. */
+/** The model ids the app knows (docs/MODEL_DOWNLOAD_DESIGN.md §3.2; REPHRASE: C2). Any other id is ignored. */
 enum class ModelKind(val id: String) {
     NET("engine-net"),
-    VOICE("voice-kokoro-en");
+    VOICE("voice-kokoro-en"),
+
+    /** C2: the optional wording model (docs/LLM_REPHRASE_DESIGN.md §1.4), a GGUF for the llama.cpp in :rephrase. */
+    REPHRASE("rephrase-qwen");
 
     companion object {
         fun fromId(id: String): ModelKind? = entries.firstOrNull { it.id == id }
@@ -33,6 +36,15 @@ sealed interface ModelCompat {
 
         companion object {
             const val KIND = "sherpa-onnx-kokoro"
+        }
+    }
+
+    /** C2: `{"kind":"gguf","arch":"qwen2"}`: a GGUF whose general.architecture is [arch]. */
+    data class Gguf(val arch: String) : ModelCompat {
+        override val kind: String get() = KIND
+
+        companion object {
+            const val KIND = "gguf"
         }
     }
 
@@ -156,12 +168,14 @@ data class ModelManifest(
                     engineTag = compatObj.optStringOrNull("engineTag"),
                 )
                 ModelCompat.SherpaKokoro.KIND -> ModelCompat.SherpaKokoro(layout = compatObj.requireString("layout"))
+                ModelCompat.Gguf.KIND -> ModelCompat.Gguf(arch = compatObj.requireString("arch"))
                 else -> ModelCompat.Other(k)
             }
             val runtime = (o.opt("runtime") as? JSONObject)?.let {
                 ModelRuntime(name = it.requireString("name"), min = it.requireString("min"), max = it.requireString("max"))
             }
             if (kind == ModelKind.VOICE && runtime == null) fail("$where.runtime is required for a voice")
+            if (kind == ModelKind.REPHRASE && runtime == null) fail("$where.runtime is required for the wording model")
             val sha = o.requireString("sha256").lowercase()
             if (!Regex("[0-9a-f]{64}").matches(sha)) fail("$where.sha256 is not 64 hex digits")
             val size = o.requireLong("size")

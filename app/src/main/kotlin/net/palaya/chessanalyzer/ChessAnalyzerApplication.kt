@@ -1,7 +1,11 @@
 package net.palaya.chessanalyzer
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.ActivityManager
 import android.app.Application
+import android.content.ComponentCallbacks2
+import android.os.Bundle
 import android.os.Build
 import android.os.storage.StorageManager
 import android.util.Log
@@ -11,6 +15,11 @@ import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import net.palaya.chessanalyzer.core.text.RephrasePrompt
+import net.palaya.chessanalyzer.core.text.Rephraser
 import net.palaya.chessanalyzer.data.EngineController
 import net.palaya.chessanalyzer.data.GameRepository
 import net.palaya.chessanalyzer.data.LegacyKeyStoragePurge
@@ -31,6 +40,12 @@ import net.palaya.chessanalyzer.data.models.UpdateChecker
 import net.palaya.chessanalyzer.diagnostics.AppDiagnostics
 import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
 import net.palaya.chessanalyzer.engine.NetStore
+import net.palaya.chessanalyzer.rephrase.GeneratedRephraseRuntime
+import net.palaya.chessanalyzer.rephrase.RephraseBackend
+import net.palaya.chessanalyzer.rephrase.RephraseCache
+import net.palaya.chessanalyzer.rephrase.RephraseModelStore
+import net.palaya.chessanalyzer.rephrase.RephraseService
+import net.palaya.chessanalyzer.rephrase.RephraseSupport
 import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.NeuralVoiceTrial
 import net.palaya.chessanalyzer.video.VideoExportService
@@ -105,6 +120,68 @@ class ChessAnalyzerApplication : Application() {
             baseUrl = BuildConfig.MODEL_BASE_URL,
             freeBytes = { modelStorageFreeBytes() },
             diagnostics = diagnostics.log,
+            rephraseStore = rephraseModelStore,
+            // Owner decision (C2 §12.3): a wording model downloaded at setup switches the feature on.
+            onRephraseInstalled = { appScope.launch { settingsRepository.setRephraseEnabled(true) } },
+        )
+    }
+
+    // ---- C2: the optional on-device wording model (docs/LLM_REPHRASE_DESIGN.md) ----
+
+    /** `filesDir/rephrase/models/`: the GGUF, its part, the wanted marker and the load journal. */
+    val rephraseModelStore: RephraseModelStore by lazy { RephraseModelStore(filesDir) }
+
+    /** `filesDir/rephrase/cache/<model>/`: accepted / unchanged / rejected verdicts per text. */
+    val rephraseCache: RephraseCache by lazy { RephraseCache(File(filesDir, RephraseCache.DIR_NAME)) }
+
+    /** True while an Activity of ours is started: the rephrase jobs run only then (design §6.2). */
+    val appForeground = MutableStateFlow(false)
+    private var startedActivities = 0
+
+    /** Whether this phone can run the model (ABI, AVX2 on x86_64, RAM). Cheap; never asked at launch. */
+    fun rephraseAvailability(): RephraseSupport.Availability {
+        val memory = ActivityManager.MemoryInfo().also { (getSystemService(ActivityManager::class.java))?.getMemoryInfo(it) }
+        return RephraseSupport.availability(Build.SUPPORTED_ABIS.firstOrNull().orEmpty(), memory.totalMem) {
+            runCatching { File("/proc/cpuinfo").readText() }.getOrDefault("")
+        }
+    }
+
+    private fun rephraseThreads(): Int = RephraseSupport.recommendedThreads(
+        (0 until Runtime.getRuntime().availableProcessors()).map { i ->
+            runCatching { File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrDefault(0L)
+        },
+    )
+
+    /** The one llama.cpp model of the process. */
+    val rephraseBackend: RephraseBackend by lazy {
+        RephraseBackend(
+            store = rephraseModelStore,
+            availability = { rephraseAvailability() },
+            threads = { rephraseThreads() },
+            scope = appScope,
+            log = { line -> diagnostics.log.log(RephraseService.TAG, line) },
+        )
+    }
+
+    /**
+     * Test seam only (C2, like [updateCheckerForTesting]): the instrumented UI tests put a `FakeRephraser` behind
+     * the service. Null in the app; nothing in main code sets it.
+     */
+    @VisibleForTesting
+    @Volatile
+    var rephraserForTesting: Rephraser? = null
+
+    private suspend fun rephraseEnabled(): Boolean = settingsRepository.rephraseEnabled.first()
+
+    /** Cards and narration go through this (design §6): cache, checker, jobs. */
+    val rephraseService: RephraseService by lazy {
+        RephraseService(
+            cache = rephraseCache,
+            rephraser = { rephraserForTesting?.takeIf { rephraseEnabled() } ?: if (rephraseEnabled()) rephraseBackend.get() else null },
+            foreground = appForeground,
+            log = { line -> diagnostics.log.log(RephraseService.TAG, line) },
+            activeIdOf = { rephraserForTesting?.takeIf { rephraseEnabled() }?.id ?: if (rephraseEnabled()) rephraseBackend.activeId() else null },
+            onJobDone = { if (rephraserForTesting == null) rephraseBackend.scheduleIdleRelease() },
         )
     }
 
@@ -176,6 +253,9 @@ class ChessAnalyzerApplication : Application() {
             onNetActivated = { net -> net.prefix?.let { gameRepository.purgeEvalCachesExcept(it) } },
             onVoiceActivated = { NarrationStore.forApp(this).clear() },
             diagnostics = diagnostics.log,
+            rephraseStore = rephraseModelStore,
+            rephraseTrial = { model, id -> rephraseBackend.trial(model, id) },
+            onRephraseActivated = { id -> rephraseCache.clearExcept("$id@p${RephrasePrompt.VERSION}") },
         )
     }
 
@@ -190,6 +270,9 @@ class ChessAnalyzerApplication : Application() {
         allowCleartextLoopback = BuildConfig.DEBUG,
         installedNetSha256 = netStore.activeNetOrNull()?.let { netStore.activeIdentity().sha256 },
         installedVoiceSha256 = voiceStore.installedSha256(),
+        rephraseArch = net.palaya.chessanalyzer.data.models.GeneratedModelPins.REPHRASE_MODEL_ARCH,
+        llamaCppBuild = GeneratedRephraseRuntime.LLAMA_CPP_BUILD,
+        installedRephraseSha256 = rephraseModelStore.installedSha256(),
     )
 
     private val defaultUpdateChecker: UpdateChecker by lazy {
@@ -218,6 +301,7 @@ class ChessAnalyzerApplication : Application() {
             netStore = netStore,
             voiceStore = voiceStore,
             facts = { appFacts() },
+            rephraseStore = rephraseModelStore,
             freeBytes = { modelStorageFreeBytes() },
             diagnostics = diagnostics.log,
         )
@@ -250,6 +334,38 @@ class ChessAnalyzerApplication : Application() {
         } catch (e: Exception) {
             diagnostics.log.error(ModelSetup.TAG, "recoverOnStartup failed", e)
         }
+        // C2: a wording-model load or generation the previous process did not finish (a native abort, or the
+        // low-memory killer). The file is re-hashed before its next use; a second death in a row turns it off.
+        try {
+            when (rephraseModelStore.recoverOnStartup()) {
+                RephraseModelStore.Recovery.NOTHING -> Unit
+                RephraseModelStore.Recovery.RECHECK ->
+                    diagnostics.log.log(RephraseService.TAG, "the last process died loading or running the wording model; it is re-checked before its next use")
+                RephraseModelStore.Recovery.TURN_OFF -> {
+                    diagnostics.log.log(RephraseService.TAG, "the wording model ended the process twice in a row; Natural wording is turned off")
+                    appScope.launch { settingsRepository.setRephraseEnabled(false) }
+                }
+            }
+        } catch (e: Exception) {
+            diagnostics.log.error(RephraseService.TAG, "rephrase recovery failed", e)
+        }
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(activity: Activity) {
+                startedActivities++
+                appForeground.value = true
+            }
+
+            override fun onActivityStopped(activity: Activity) {
+                startedActivities = (startedActivities - 1).coerceAtLeast(0)
+                appForeground.value = startedActivities > 0
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+            override fun onActivityResumed(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
         // An update from a bundled build (versionCode 1) moves its net into nets/ here, before anything
         // can read it: renames only, no hashing, nothing downloaded (docs/MODEL_DOWNLOAD_DESIGN.md §8).
         try {
@@ -274,6 +390,9 @@ class ChessAnalyzerApplication : Application() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         diagnostics.onTrimMemory(level)
+        // C2: the 1.1 GB model goes first when the system is short of memory, or when the app leaves the screen.
+        @Suppress("DEPRECATION")
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) appScope.launch { rephraseBackend.release() }
     }
 
     override fun onLowMemory() {

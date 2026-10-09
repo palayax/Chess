@@ -31,6 +31,13 @@ class RephraseService(
     private val foreground: StateFlow<Boolean>? = null,
     private val requestTimeoutMs: Long = DEFAULT_TIMEOUT_MS,
     private val log: (String) -> Unit = {},
+    /**
+     * The id the cache is read under, cheaply (no load, no hashing): what [applyCached] and [applyCachedScript] use
+     * on the UI path. Null = the feature is off or there is no model: the originals.
+     */
+    private val activeIdOf: suspend () -> String? = { rephraser()?.id },
+    /** After a job: the app frees the model a minute later ([RephraseBackend.scheduleIdleRelease]). */
+    private val onJobDone: () -> Unit = {},
 ) {
 
     data class Stats(
@@ -44,19 +51,25 @@ class RephraseService(
 
     /** [report] with every annotation text whose rewording is already cached swapped in. Reads files only. */
     suspend fun applyCached(report: GameReport): GameReport {
-        val r = rephraser() ?: return report
+        val id = activeIdOf() ?: return report
         val texts = report.annotations.map { it.text } + report.keyMoments.map { it.summary }
-        return RephrasedReport.apply(report, cache.accepted(r.id, RephraseSurface.CARD, texts.distinct()))
+        return RephrasedReport.apply(report, cache.accepted(id, RephraseSurface.CARD, texts.distinct()))
     }
 
     /** [script] with every cached narration rewording applied, under the script-level cap. Reads files only. */
     suspend fun applyCachedScript(script: VideoScript, wpm: Int, budgetMs: Long): VideoScript {
-        val r = rephraser() ?: return script
-        return RephrasedScript.apply(script, cache.accepted(r.id, RephraseSurface.NARRATION, RephrasedScript.beats(script)), wpm, budgetMs)
+        val id = activeIdOf() ?: return script
+        return RephrasedScript.apply(script, cache.accepted(id, RephraseSurface.NARRATION, RephrasedScript.beats(script)), wpm, budgetMs)
     }
 
     /** The id the narration cache entry of a rephrased script must carry, or null with the feature off. */
-    suspend fun activeId(): String? = rephraser()?.id
+    suspend fun activeId(): String? = activeIdOf()
+
+    /** How many of [items] still need the model (not cached under the active id): 0 = nothing to polish. */
+    suspend fun pending(items: List<Pair<RephraseSurface, String>>): Int {
+        val id = activeIdOf() ?: return 0
+        return items.distinct().count { (s, t) -> cache.get(id, s, t) == null }
+    }
 
     /**
      * Rewords every text of [items] that is not cached yet, in order, one at a time. [onProgress] gets
@@ -68,6 +81,18 @@ class RephraseService(
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): Stats {
         val r = rephraser() ?: return Stats(unavailable = items.size)
+        try {
+            return polishWith(r, items, onProgress)
+        } finally {
+            onJobDone()
+        }
+    }
+
+    private suspend fun polishWith(
+        r: Rephraser,
+        items: List<Pair<RephraseSurface, String>>,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): Stats {
         val unique = items.distinct()
         var s = Stats()
         val byReason = HashMap<String, Int>()
@@ -116,6 +141,9 @@ class RephraseService(
     }
 
     companion object {
+        /** The diagnostic log tag. */
+        const val TAG = "rephrase"
+
         /** Per request (design §6.4: 30 s on llama.cpp). */
         const val DEFAULT_TIMEOUT_MS = 30_000L
 

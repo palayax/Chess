@@ -25,10 +25,23 @@ data class AppFacts(
     /** Full SHA-256 of the installed voice tar (its marker), null when none is installed. */
     val installedVoiceSha256: String?,
     val limits: SizeLimits = SizeLimits.DEFAULT,
+    /** C2: the GGUF architecture the wording model must have (`GeneratedModelPins.REPHRASE_MODEL_ARCH`). */
+    val rephraseArch: String = "",
+    /** C2: the llama.cpp build compiled into librephrase.so (`GeneratedRephraseRuntime.LLAMA_CPP_BUILD`); 0 = none. */
+    val llamaCppBuild: Int = 0,
+    /** C2: SHA-256 of the installed wording model, null when none is (then no update is offered for it). */
+    val installedRephraseSha256: String? = null,
 )
 
 /** Plausible sizes per kind (design §3.3). Tests with small stand-in files pass their own. */
-data class SizeLimits(val netMin: Long, val netMax: Long, val voiceMin: Long, val voiceMax: Long) {
+data class SizeLimits(
+    val netMin: Long,
+    val netMax: Long,
+    val voiceMin: Long,
+    val voiceMax: Long,
+    val rephraseMin: Long = 200 * MB,
+    val rephraseMax: Long = 3_000 * MB,
+) {
     companion object {
         private const val MB = 1_000_000L
         val DEFAULT = SizeLimits(netMin = 50 * MB, netMax = 400 * MB, voiceMin = 20 * MB, voiceMax = 600 * MB)
@@ -48,6 +61,13 @@ enum class Incompatibility {
     NET_ARCH,
     VOICE_LAYOUT,
     VOICE_RUNTIME,
+
+    /** C2: a GGUF of another architecture, or a llama.cpp range that excludes this build. */
+    REPHRASE_ARCH,
+    REPHRASE_RUNTIME,
+
+    /** C2: the wording model is optional; an update is offered only to a phone that has it. */
+    NOT_INSTALLED,
 }
 
 /** The answer for one entry. */
@@ -99,7 +119,42 @@ object ModelCompatibility {
         return when (entry.kind) {
             ModelKind.NET -> evaluateNet(entry, facts)
             ModelKind.VOICE -> evaluateVoice(entry, facts)
+            ModelKind.REPHRASE -> evaluateRephrase(entry, facts)
         }
+    }
+
+    private val GGUF_NAME = Regex("""[A-Za-z0-9._-]{1,120}\.gguf""")
+    private val LLAMA_TAG = Regex("""b(\d{1,7})""")
+
+    /**
+     * C2 (docs/LLM_REPHRASE_DESIGN.md §1.4): `compat.kind == "gguf"` with this build's architecture, a `llama.cpp`
+     * runtime range (`bNNNN` tags, inclusive) holding the compiled build, a `*.gguf` name, a size in range; and only
+     * for a phone that has the wording model installed (an optional 1.1 GB file is never pushed by an update).
+     */
+    private fun evaluateRephrase(entry: ManifestEntry, facts: AppFacts): CompatVerdict {
+        val compat = entry.compat as? ModelCompat.Gguf
+            ?: return CompatVerdict.Incompatible(Incompatibility.WRONG_COMPAT_KIND, "compat.kind ${entry.compat.kind}")
+        if (compat.arch != facts.rephraseArch) {
+            return CompatVerdict.Incompatible(Incompatibility.REPHRASE_ARCH, "GGUF architecture ${compat.arch}, app ${facts.rephraseArch}")
+        }
+        val rt = entry.runtime
+        val lo = rt?.min?.let { LLAMA_TAG.matchEntire(it)?.groupValues?.get(1)?.toInt() }
+        val hi = rt?.max?.let { LLAMA_TAG.matchEntire(it)?.groupValues?.get(1)?.toInt() }
+        if (rt == null || rt.name != "llama.cpp" || lo == null || hi == null || facts.llamaCppBuild !in lo..hi) {
+            return CompatVerdict.Incompatible(
+                Incompatibility.REPHRASE_RUNTIME,
+                "runtime ${rt?.name} ${rt?.min}..${rt?.max}, app has llama.cpp b${facts.llamaCppBuild}",
+            )
+        }
+        if (!GGUF_NAME.matches(entry.fileName) || !entry.url.endsWith("/" + entry.fileName)) {
+            return CompatVerdict.Incompatible(Incompatibility.BAD_FILE_NAME, "wording model file ${entry.fileName}")
+        }
+        if (entry.sizeBytes !in facts.limits.rephraseMin..facts.limits.rephraseMax) {
+            return CompatVerdict.Incompatible(Incompatibility.SIZE_OUT_OF_RANGE, "wording model size ${entry.sizeBytes}")
+        }
+        val installed = facts.installedRephraseSha256
+            ?: return CompatVerdict.Incompatible(Incompatibility.NOT_INSTALLED, "the wording model is not installed")
+        return if (installed == entry.sha256) CompatVerdict.AlreadyInstalled else CompatVerdict.Offer
     }
 
     private fun urlProblem(url: String, facts: AppFacts): CompatVerdict.Incompatible? {

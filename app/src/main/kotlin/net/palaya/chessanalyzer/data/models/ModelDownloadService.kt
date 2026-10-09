@@ -403,7 +403,7 @@ class ModelDownloadService : Service() {
         val permille = ((p?.overallFraction ?: 0f).coerceIn(0f, 1f) * 1000).toInt()
         return NotificationCompat.Builder(this, CHANNEL_PROGRESS)
             .setSmallIcon(R.drawable.ic_notification_model_download)
-            .setContentTitle(getString(R.string.setup_notification_title))
+            .setContentTitle(getString(if (p.onlyRephrase()) R.string.rephrase_notification_title else R.string.setup_notification_title))
             .setContentText(text)
             .setProgress(1000, permille, p == null || p.status == SetupStatus.CONNECTING && permille == 0)
             .setOngoing(true)
@@ -431,6 +431,7 @@ class ModelDownloadService : Service() {
                 if (!cancelFromNotification) return
                 builder.setContentTitle(getString(R.string.setup_notification_cancelled))
             }
+            p.status == SetupStatus.DONE && p.onlyRephrase() -> builder.setContentTitle(getString(R.string.rephrase_notification_ready))
             p.status == SetupStatus.DONE -> builder.setContentTitle(getString(R.string.setup_notification_ready))
                 .setContentText(getString(R.string.setup_notification_ready_text))
             // A Pause tapped on the Setup screen needs no notification: the user is looking at the result.
@@ -442,6 +443,10 @@ class ModelDownloadService : Service() {
         }
         notifySafely(NOTIFICATION_ID_DONE, builder.build())
     }
+
+    /** C2: a run that fetches only the optional wording model (started from Settings) says so. */
+    private fun SetupProgress?.onlyRephrase(): Boolean =
+        this != null && perFile.isNotEmpty() && perFile.all { it.file == ModelFile.REPHRASE }
 
     private fun lineText(p: SetupProgress): Int {
         val line = when {

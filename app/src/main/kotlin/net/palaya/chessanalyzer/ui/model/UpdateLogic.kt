@@ -139,7 +139,7 @@ fun updateSheetView(state: UpdateUiState, block: UpdateBlock?, maxRetries: Int =
                 UpdateFailure.DAMAGED -> UpdateLine.DAMAGED
                 UpdateFailure.INSUFFICIENT_STORAGE -> UpdateLine.LOW_STORAGE
                 UpdateFailure.INCOMPATIBLE -> UpdateLine.INCOMPATIBLE
-                UpdateFailure.BUSY -> if (o.kind == ModelKind.NET) UpdateLine.BUSY_ANALYSIS else UpdateLine.BUSY_EXPORT
+                UpdateFailure.BUSY -> if (o.kind == ModelKind.VOICE) UpdateLine.BUSY_EXPORT else UpdateLine.BUSY_ANALYSIS
                 UpdateFailure.INSECURE, UpdateFailure.INSTALL -> UpdateLine.FAILED
             }
         }

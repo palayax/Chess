@@ -182,7 +182,13 @@ private fun OfferCard(row: UpdateOfferRow, onInstall: (UpdateOffer) -> Unit) {
             Text(
                 text = stringResource(
                     R.string.update_offer,
-                    stringResource(if (row.kind == ModelKind.NET) R.string.update_kind_net else R.string.update_kind_voice),
+                    stringResource(
+                        when (row.kind) {
+                            ModelKind.NET -> R.string.update_kind_net
+                            ModelKind.VOICE -> R.string.update_kind_voice
+                            ModelKind.REPHRASE -> R.string.update_kind_rephrase
+                        },
+                    ),
                     row.version,
                     megabytesLabel(aboutMegabytes(row.sizeBytes)),
                 ),

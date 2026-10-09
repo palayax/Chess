@@ -4,6 +4,7 @@ import java.io.File
 import kotlinx.coroutines.CancellationException
 import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
 import net.palaya.chessanalyzer.engine.NetStore
+import net.palaya.chessanalyzer.rephrase.RephraseModelStore
 import net.palaya.chessanalyzer.video.VoiceStore
 
 /** Where an update install stands (the Settings sheet's progress block). */
@@ -61,6 +62,8 @@ class ModelUpdateInstaller(
     private val netStore: NetStore,
     private val voiceStore: VoiceStore,
     private val facts: () -> AppFacts,
+    /** C2: where a wording-model update downloads ([RephraseModelStore.updatePartFile]); null in a build without it. */
+    private val rephraseStore: RephraseModelStore? = null,
     private val freeBytes: () -> Long,
     private val diagnostics: DiagnosticLog? = null,
 ) {
@@ -72,6 +75,7 @@ class ModelUpdateInstaller(
     fun partFileFor(entry: ManifestEntry): File = when (entry.kind) {
         ModelKind.NET -> netStore.partFileFor(entry.fileName)
         ModelKind.VOICE -> voiceStore.updatePartFile(entry.sha256)
+        ModelKind.REPHRASE -> rephraseStore?.updatePartFile(entry.fileName) ?: File(entry.fileName + ".part")
     }
 
     /** Free space the update needs: the rest of the download, plus the unpacked voice, plus the margin. */
@@ -162,6 +166,13 @@ class ModelUpdateInstaller(
                     onUnpack = { f -> onProgress(UpdateProgress(kind, UpdatePhase.UNPACKING, done, entry.sizeBytes, unpackFraction = f)) },
                     onTrial = { onProgress(UpdateProgress(kind, UpdatePhase.TRYING, done, entry.sizeBytes)) },
                 )
+            }
+            ModelKind.REPHRASE -> {
+                phase = UpdatePhase.VERIFYING
+                emit()
+                phase = UpdatePhase.TRYING
+                emit()
+                activator.activateRephrase(part, entry)
             }
         }
         return when (outcome) {

@@ -10,6 +10,8 @@ import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
 import net.palaya.chessanalyzer.engine.ActiveNet
 import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.engine.StockfishEngine
+import net.palaya.chessanalyzer.rephrase.GgufHeader
+import net.palaya.chessanalyzer.rephrase.RephraseModelStore
 import net.palaya.chessanalyzer.video.InsufficientVoiceStorageException
 import net.palaya.chessanalyzer.video.VoiceArchiveDamagedException
 import net.palaya.chessanalyzer.video.VoiceStore
@@ -40,6 +42,15 @@ fun interface VoiceTrial {
 }
 
 data class VoiceTrialResult(val ok: Boolean, val detail: String)
+
+/**
+ * C2: the trial of a new wording model (docs/LLM_REPHRASE_DESIGN.md §1.4): load it and rephrase one fixed text; the
+ * result must pass the claim checker (accepted or unchanged). The app's implementation releases the backend in use
+ * first (one model per process).
+ */
+fun interface RephraseTrial {
+    suspend fun run(model: File, modelId: String): VoiceTrialResult
+}
 
 /** How an activation ended. Only [Activated] changed anything for good. */
 sealed interface ActivationOutcome {
@@ -110,6 +121,10 @@ class ModelActivator(
     private val diagnostics: DiagnosticLog? = null,
     private val clock: () -> Long = System::currentTimeMillis,
     private val checkpoint: (String) -> Unit = {},
+    /** C2: the wording model's store, its trial, and what to do after a switch (purge the old model's cache). */
+    private val rephraseStore: RephraseModelStore? = null,
+    private val rephraseTrial: RephraseTrial? = null,
+    private val onRephraseActivated: (newModelId: String) -> Unit = {},
 ) {
     companion object {
         const val TAG = "models"
@@ -154,6 +169,17 @@ class ModelActivator(
                 val r = record as JournalRecord.InFlight
                 finishVoiceCommit()
                 RecoveryReport(recovery, ModelKind.VOICE, "voice ${r.new.sha256.take(12)} had passed its trial; clean-up finished")
+            }
+            Recovery.ROLL_BACK_REPHRASE -> {
+                val r = record as JournalRecord.InFlight
+                rollBackRephraseFiles(r.new, r.old)
+                journal.writeRolledBack(ModelKind.REPHRASE, "the process ended during the ${r.phase.wire} phase", clock())
+                RecoveryReport(recovery, ModelKind.REPHRASE, "wording model ${r.new.name} rolled back to ${r.old?.name ?: "the compiled model"} (died in ${r.phase.wire})")
+            }
+            Recovery.FINISH_REPHRASE -> {
+                val r = record as JournalRecord.InFlight
+                finishRephraseCommit(r.new, r.old)
+                RecoveryReport(recovery, ModelKind.REPHRASE, "wording model ${r.new.name} had passed its trial; clean-up finished")
             }
             Recovery.UNREADABLE -> {
                 // Never expected (writes are atomic). Fail safe: back to the compiled net (the engine then
@@ -375,6 +401,111 @@ class ModelActivator(
             log("voice update ${entry.version}: installed (${entry.unpackedSha256.take(12)}); the narration cache was cleared")
             ActivationOutcome.Activated(ModelKind.VOICE, result.detail)
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Wording model (C2)
+    // ---------------------------------------------------------------------------------------------
+
+    private fun pinsFor(id: ModelIdentity, store: RephraseModelStore): RephraseModelStore.Pins =
+        if (id.name == store.compiled.fileName) store.compiled
+        else RephraseModelStore.Pins(
+            id = id.name.removeSuffix(".gguf").lowercase(), fileName = id.name, sizeBytes = id.sizeBytes, sha256 = id.sha256,
+            arch = store.compiled.arch, releaseTag = store.compiled.releaseTag,
+        )
+
+    /**
+     * Activates a verified wording-model [part] (C2, docs/LLM_REPHRASE_DESIGN.md §1.4): the GGUF structure is checked
+     * in Kotlin first (llama.cpp never parses a file that failed); then journal `swapped` (moved into place and made
+     * active), `trial` (load + one checked rephrase, [RephraseTrial]), `committed` (the old file and the old model's
+     * cache folder go). A trial that fails is rolled back at once; one that kills the process (a native abort) is
+     * rolled back by [recoverOnStartup].
+     */
+    suspend fun activateRephrase(part: File, entry: ManifestEntry): ActivationOutcome = withContext(Dispatchers.IO) {
+        require(entry.kind == ModelKind.REPHRASE)
+        val store = rephraseStore
+        val trialRunner = rephraseTrial
+        val compat = entry.compat as? ModelCompat.Gguf
+        if (store == null || trialRunner == null || compat == null) {
+            part.delete()
+            return@withContext ActivationOutcome.Rejected(ModelKind.REPHRASE, RejectReason.INCOMPATIBLE, "no wording-model support")
+        }
+        val problem = try {
+            GgufHeader.check(part, compat.arch)
+            if (part.length() != entry.sizeBytes) "size ${part.length()}, the manifest says ${entry.sizeBytes}" else null
+        } catch (e: IOException) {
+            e.message ?: "not a GGUF"
+        }
+        val old = store.activePins()
+        val oldInstalled = store.installedFileOrNull() != null
+        if (problem == null && entry.fileName == old.fileName) {
+            part.delete()
+            return@withContext ActivationOutcome.Rejected(ModelKind.REPHRASE, RejectReason.INCOMPATIBLE, "the same file name is already in use")
+        }
+        if (problem != null) {
+            part.delete()
+            log("wording model update ${entry.fileName} refused before llama.cpp saw it: $problem")
+            return@withContext ActivationOutcome.Rejected(ModelKind.REPHRASE, RejectReason.INCOMPATIBLE, problem)
+        }
+        withContext(NonCancellable) {
+            val newId = ModelIdentity(entry.fileName, entry.sizeBytes, entry.sha256)
+            val oldId = if (oldInstalled) ModelIdentity(old.fileName, old.sizeBytes, old.sha256) else null
+            val newPins = pinsFor(newId, store)
+
+            journal.advance(JournalRecord.InFlight(ModelKind.REPHRASE, JournalPhase.SWAPPED, newId, oldId, clock()))
+            checkpoint("rephrase:journal-swapped")
+            try {
+                store.installVerified(part, newPins)
+                store.setActivePins(newPins)
+            } catch (e: IOException) {
+                rollBackRephraseFiles(newId, oldId)
+                journal.clear()
+                return@withContext ActivationOutcome.Rejected(ModelKind.REPHRASE, RejectReason.INSTALL, e.message ?: "install failed")
+            }
+            checkpoint("rephrase:swapped")
+
+            journal.advance(JournalRecord.InFlight(ModelKind.REPHRASE, JournalPhase.TRIAL, newId, oldId, clock()))
+            checkpoint("rephrase:trial")
+            log("wording model update ${entry.fileName}: trying it (load + one checked rephrase)")
+            val result = try {
+                trialRunner.run(store.fileFor(entry.fileName), newPins.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoiceTrialResult(false, "${e.javaClass.simpleName}: ${e.message}")
+            }
+            if (!result.ok) {
+                rollBackRephraseFiles(newId, oldId)
+                journal.writeRolledBack(ModelKind.REPHRASE, "trial failed: ${result.detail}", clock())
+                log("wording model update ${entry.fileName}: the trial failed (${result.detail}); rolled back")
+                return@withContext ActivationOutcome.RolledBack(ModelKind.REPHRASE, result.detail)
+            }
+
+            journal.advance(JournalRecord.InFlight(ModelKind.REPHRASE, JournalPhase.COMMITTED, newId, oldId, clock()))
+            checkpoint("rephrase:committed")
+            finishRephraseCommit(newId, oldId)
+            log("wording model update ${entry.fileName}: installed (${result.detail})")
+            ActivationOutcome.Activated(ModelKind.REPHRASE, result.detail)
+        }
+    }
+
+    private fun rollBackRephraseFiles(new: ModelIdentity, old: ModelIdentity?) {
+        val store = rephraseStore ?: return
+        val restore = old?.let { pinsFor(it, store) }
+        store.setActivePins(restore)
+        if (new.name != old?.name && new.name != store.compiled.fileName) store.fileFor(new.name).delete()
+        store.updatePartFile(new.name).delete()
+    }
+
+    private fun finishRephraseCommit(new: ModelIdentity, old: ModelIdentity?) {
+        val store = rephraseStore
+        if (store != null) {
+            val pins = pinsFor(new, store)
+            if (store.activePins() != pins) store.setActivePins(pins)
+            old?.let { if (it.name != new.name) store.fileFor(it.name).delete() }
+            runCatching { onRephraseActivated(pins.id) }.onFailure { log("rephrase cache purge failed: ${it.javaClass.simpleName}") }
+        }
+        journal.clear()
     }
 
     /** Puts the previous voice back if a swap was under way and drops any scratch. True if one was restored. */

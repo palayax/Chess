@@ -259,6 +259,28 @@ val generateModelPins = tasks.register("generateModelPins") {
         if (der.size != 91 || !derHex.startsWith(p256Header)) {
             fail("${manifestPublicKeyFile.name} is not a P-256 public key in X.509 DER (${der.size} bytes)")
         }
+        // C2: the optional wording model (docs/LLM_REPHRASE_DESIGN.md §1.4). The build never needs the GGUF; a present
+        // one under vendor/models/rephrase-assets/ is checked by size only (hashing 1.1 GB on every build is too slow;
+        // scripts/fetch_models.sh verifies the SHA-256).
+        val rId = prop("rephrase.model.id")
+        if (!Regex("""[a-z0-9][a-z0-9._-]{2,63}""").matches(rId)) fail("rephrase.model.id $rId is not a lower-case id")
+        val rFile = prop("rephrase.model.file")
+        if (!Regex("""[A-Za-z0-9._-]+\.gguf""").matches(rFile)) fail("rephrase.model.file $rFile is not a .gguf file name")
+        val rSize = prop("rephrase.model.size").toLongOrNull()?.takeIf { it in 200_000_000L..3_000_000_000L }
+            ?: fail("rephrase.model.size is not between 200 MB and 3 GB")
+        val rSha = prop("rephrase.model.sha256").lowercase()
+        if (!Regex("[0-9a-f]{64}").matches(rSha)) fail("rephrase.model.sha256 is not 64 hex digits: $rSha")
+        val rArch = prop("rephrase.model.arch")
+        if (!Regex("""[a-z0-9_]+""").matches(rArch)) fail("rephrase.model.arch $rArch is not a GGUF architecture name")
+        val rLicense = prop("rephrase.model.license")
+        val rPrompt = prop("rephrase.prompt.version").toIntOrNull()?.takeIf { it > 0 } ?: fail("rephrase.prompt.version is not a positive number")
+        val rRuntime = prop("rephrase.runtime.tag")
+        if (!Regex("""b\d+""").matches(rRuntime)) fail("rephrase.runtime.tag $rRuntime is not bNNNN")
+        val rTag = prop("rephrase.release.tag")
+        if (!Regex("""models-\d{4}\.\d{2}(\.\d+)?""").matches(rTag)) fail("rephrase.release.tag $rTag does not match models-YYYY.MM[.n]")
+        val gguf = rootProject.file("vendor/models/rephrase-assets/$rFile")
+        if (gguf.isFile && gguf.length() != rSize) fail("${gguf.path} is ${gguf.length()} bytes, the lock pins $rSize")
+
         val derBase64 = Base64.getEncoder().encodeToString(der)
         val keySha = MessageDigest.getInstance("SHA-256").digest(der).joinToString("") { "%02x".format(it) }
 
@@ -288,6 +310,18 @@ val generateModelPins = tasks.register("generateModelPins") {
             |     */
             |    const val MANIFEST_PUBLIC_KEY_DER_BASE64: String = "$derBase64"
             |    const val MANIFEST_PUBLIC_KEY_SHA256: String = "$keySha"
+            |
+            |    /** C2: the optional wording model (docs/LLM_REPHRASE_DESIGN.md §1.4), on its own release tag. */
+            |    const val REPHRASE_MODEL_ID: String = "$rId"
+            |    const val REPHRASE_MODEL_FILE: String = "$rFile"
+            |    const val REPHRASE_MODEL_SIZE_BYTES: Long = ${rSize}L
+            |    const val REPHRASE_MODEL_SHA256: String = "$rSha"
+            |    /** GGUF general.architecture, checked in Kotlin before llama.cpp parses the file. */
+            |    const val REPHRASE_MODEL_ARCH: String = "$rArch"
+            |    const val REPHRASE_MODEL_LICENSE: String = "$rLicense"
+            |    const val REPHRASE_RELEASE_TAG: String = "$rTag"
+            |    const val REPHRASE_PROMPT_VERSION: Int = $rPrompt
+            |    const val REPHRASE_RUNTIME_TAG: String = "$rRuntime"
             |}
             |""".trimMargin()
         )
@@ -364,6 +398,7 @@ gradle.taskGraph.whenReady {
 dependencies {
     implementation(project(":core"))
     implementation(project(":engine"))
+    implementation(project(":rephrase"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)

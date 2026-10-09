@@ -9,12 +9,14 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
 import net.palaya.chessanalyzer.engine.NetStore
+import net.palaya.chessanalyzer.rephrase.RephraseModelDamagedException
+import net.palaya.chessanalyzer.rephrase.RephraseModelStore
 import net.palaya.chessanalyzer.video.InsufficientVoiceStorageException
 import net.palaya.chessanalyzer.video.VoiceArchiveDamagedException
 import net.palaya.chessanalyzer.video.VoiceStore
 
-/** The two files setup fetches, in this order. */
-enum class ModelFile { NET, VOICE }
+/** The files setup fetches, in this order. REPHRASE (C2) only when the user asked for the optional wording model. */
+enum class ModelFile { NET, VOICE, REPHRASE }
 
 /** What the Setup screen, the Home card and the notification say (design §1.2, §1.3). */
 enum class SetupStatus { IDLE, CONNECTING, DOWNLOADING, RETRYING, UNPACKING, PAUSED, FAILED, DONE }
@@ -58,6 +60,10 @@ data class SetupState(
     val voiceInstalled: Boolean,
     val netPartBytes: Long,
     val voicePartBytes: Long,
+    /** C2: the user asked for the optional wording model (it never makes setup incomplete). */
+    val rephraseWanted: Boolean = false,
+    val rephraseInstalled: Boolean = false,
+    val rephrasePartBytes: Long = 0L,
 ) {
     val complete: Boolean get() = netInstalled && voiceInstalled
 }
@@ -88,6 +94,14 @@ class ModelSetup(
     /** Free bytes on the volume that holds `filesDir`; injectable for the low-space tests. */
     private val freeBytes: () -> Long,
     private val diagnostics: DiagnosticLog? = null,
+    /**
+     * C2 (docs/LLM_REPHRASE_DESIGN.md §12.3): the optional wording model. Fetched third, and only while the user
+     * has asked for it ([RephraseModelStore.isWanted]); it never makes setup incomplete ([needsNet], [needsVoice]
+     * and [isComplete] do not see it).
+     */
+    private val rephraseStore: RephraseModelStore? = null,
+    /** Called once the wording model is installed by a run (the app switches the feature on, §12.3). */
+    private val onRephraseInstalled: () -> Unit = {},
 ) {
     companion object {
         /** Headroom on top of the files themselves (the app's own databases, caches, an export). */
@@ -121,6 +135,15 @@ class ModelSetup(
             sha256 = voiceStore.download.sha256,
         )
 
+    /** The wording model's download: its own release tag (C2), the compiled pins. Null in a build without the store. */
+    val rephraseSpec: ModelFileSpec?
+        get() = rephraseStore?.compiled?.let { p ->
+            ModelFileSpec(url = "$baseUrl${p.releaseTag}/${p.fileName}", fileName = p.fileName, sizeBytes = p.sizeBytes, sha256 = p.sha256)
+        }
+
+    /** Cheap: the user asked for the wording model and it is not installed yet. */
+    fun needsRephrase(): Boolean = rephraseStore?.let { it.isWanted() && !it.isInstalled() } == true
+
     /** What the unpacked voice takes on disk (the tar's size; the download is the smaller `.tar.gz`). */
     val voiceUnpackedBytes: Long get() = voiceStore.neededBytes
 
@@ -137,14 +160,23 @@ class ModelSetup(
         voiceInstalled = !needsVoice(),
         netPartBytes = netStore.partFileFor().lengthOrZero(),
         voicePartBytes = voiceStore.partFile.lengthOrZero(),
+        rephraseWanted = rephraseStore?.isWanted() == true,
+        rephraseInstalled = rephraseStore?.isInstalled() == true,
+        rephrasePartBytes = rephraseStore?.partFile?.lengthOrZero() ?: 0L,
     )
+
+    /** C2: bytes of the wording model still to download when the user asked for it, else 0. */
+    private fun rephraseBytesLeft(s: SetupState): Long {
+        val spec = rephraseSpec ?: return 0L
+        return if (s.rephraseWanted && !s.rephraseInstalled) (spec.sizeBytes - s.rephrasePartBytes).coerceAtLeast(0) else 0L
+    }
 
     /** Bytes still to download for the missing files ("About 160 MB left"). */
     fun bytesLeft(): Long {
         val s = state()
         val net = if (s.netInstalled) 0L else (netSpec.sizeBytes - s.netPartBytes).coerceAtLeast(0)
         val voice = if (s.voiceInstalled) 0L else (voiceSpec.sizeBytes - s.voicePartBytes).coerceAtLeast(0)
-        return net + voice
+        return net + voice + rephraseBytesLeft(s)
     }
 
     /**
@@ -156,7 +188,8 @@ class ModelSetup(
         val s = state()
         val net = if (s.netInstalled) 0L else (netSpec.sizeBytes - s.netPartBytes).coerceAtLeast(0)
         val voice = if (s.voiceInstalled) 0L else (voiceSpec.sizeBytes - s.voicePartBytes).coerceAtLeast(0) + voiceStore.neededBytes
-        return if (net + voice == 0L) 0L else net + voice + SAFETY_MARGIN_BYTES
+        val rephrase = rephraseBytesLeft(s)
+        return if (net + voice + rephrase == 0L) 0L else net + voice + rephrase + SAFETY_MARGIN_BYTES
     }
 
     /**
@@ -177,6 +210,11 @@ class ModelSetup(
     fun discardPartials() {
         netStore.deleteParts()
         voiceStore.deletePart()
+        rephraseStore?.let {
+            it.deleteParts()
+            // Cancel is "not now" for the optional model too: Settings offers it again later.
+            if (!it.isInstalled()) it.setWanted(false)
+        }
         diagnostics?.log(TAG, "setup cancelled: part files deleted")
     }
 
@@ -188,16 +226,18 @@ class ModelSetup(
         withContext(Dispatchers.IO) {
             val netNeeded = netStore.verifiedNetOrNull() == null
             val voiceNeeded = !voiceStore.isInstalled()
-            if (!netNeeded && !voiceNeeded) {
+            val rephraseNeeded = needsRephrase()
+            if (!netNeeded && !voiceNeeded && !rephraseNeeded) {
                 onProgress(SetupProgress(1f, 0, 0, emptyList(), SetupStatus.DONE))
                 return@withContext SetupOutcome.Complete
             }
             diagnostics?.log(
                 TAG,
                 "setup start: net ${if (netNeeded) "needed" else "installed"}, voice ${if (voiceNeeded) "needed" else "installed"}, " +
+                    "wording model ${if (rephraseNeeded) "needed" else if (rephraseStore?.isInstalled() == true) "installed" else "not asked for"}, " +
                     "free ${freeBytes()} bytes, needs ${storageNeeded()}, from host ${ModelDownloader.hostOf(baseUrl)}, release $releaseTag",
             )
-            val tracker = ProgressTracker(netNeeded, voiceNeeded, onProgress)
+            val tracker = ProgressTracker(netNeeded, voiceNeeded, rephraseNeeded, onProgress)
 
             if (netNeeded) {
                 val r = fetch(ModelFile.NET, netSpec, netStore.partFileFor(), tracker, extraBytesNeeded = 0L)
@@ -251,6 +291,25 @@ class ModelSetup(
                     "voice: installed (${voiceStore.installedVersionId()}), unpacked in ${(System.nanoTime() - unpackStart) / 1_000_000} ms",
                 )
                 tracker.installed(ModelFile.VOICE)
+            }
+
+            if (rephraseNeeded) {
+                val store = rephraseStore!!
+                val spec = rephraseSpec!!
+                val r = fetch(ModelFile.REPHRASE, spec, store.partFile, tracker, extraBytesNeeded = 0L)
+                if (r != null) return@withContext r
+                try {
+                    withContext(NonCancellable) { store.installVerified(store.partFile) }
+                } catch (e: IOException) {
+                    store.partFile.delete()
+                    val reason = if (e is RephraseModelDamagedException) FailureReason.DAMAGED else FailureReason.INSTALL
+                    diagnostics?.error(TAG, "wording model: install failed ($reason)", e)
+                    tracker.failed(ModelFile.REPHRASE, reason)
+                    return@withContext SetupOutcome.Failed(ModelFile.REPHRASE, reason, e.message)
+                }
+                diagnostics?.log(TAG, "wording model: installed as ${RephraseModelStore.ROOT_NAME}/models/${spec.fileName}")
+                tracker.installed(ModelFile.REPHRASE)
+                runCatching { onRephraseInstalled() }
             }
             diagnostics?.log(TAG, "setup complete")
             tracker.done()
@@ -311,11 +370,13 @@ class ModelSetup(
     private inner class ProgressTracker(
         private val netNeeded: Boolean,
         private val voiceNeeded: Boolean,
+        private val rephraseNeeded: Boolean,
         private val emit: (SetupProgress) -> Unit,
     ) {
         private val files = LinkedHashMap<ModelFile, FileProgress>().apply {
             if (netNeeded) put(ModelFile.NET, FileProgress(ModelFile.NET, 0, netSpec.sizeBytes, DownloadState.Idle))
             if (voiceNeeded) put(ModelFile.VOICE, FileProgress(ModelFile.VOICE, 0, voiceSpec.sizeBytes, DownloadState.Idle))
+            if (rephraseNeeded) put(ModelFile.REPHRASE, FileProgress(ModelFile.REPHRASE, 0, rephraseSpec!!.sizeBytes, DownloadState.Idle))
         }
         private var unpack = 0f
         private var status = SetupStatus.CONNECTING
@@ -382,10 +443,12 @@ class ModelSetup(
         private fun publish() {
             val net = files[ModelFile.NET]
             val voice = files[ModelFile.VOICE]
+            val rephrase = files[ModelFile.REPHRASE]
             val total = files.values.sumOf { it.bytesTotal }
             val done = files.values.sumOf { it.bytesDone.coerceAtMost(it.bytesTotal) }
             val weighted = (net?.bytesDone?.coerceAtMost(net.bytesTotal) ?: 0L) +
-                (voice?.let { it.bytesDone.coerceAtMost(it.bytesTotal) * 0.9 + unpack * 0.1 * it.bytesTotal } ?: 0.0)
+                (voice?.let { it.bytesDone.coerceAtMost(it.bytesTotal) * 0.9 + unpack * 0.1 * it.bytesTotal } ?: 0.0) +
+                (rephrase?.bytesDone?.coerceAtMost(rephrase.bytesTotal) ?: 0L)
             val fraction = if (total > 0) (weighted.toFloat() / total).coerceIn(0f, 1f) else 1f
             emit(
                 SetupProgress(
