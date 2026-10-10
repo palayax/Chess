@@ -4433,3 +4433,35 @@ Host, in the worktree: `:core:test` **550** (541 + 9) / 0 failed / 0 skipped; `:
 ### Deviations
 1. Device runs, the `a4_*` screenshots and the live-API screenshot of the update sheet are missing (emulators busy, above). Everything needed is built; run `A4AnalyticsInstrumentedTest`, `UpdateCheckUpstreamTest` and `UpdateCheckNetworkTest` on chess36 then chess34 (`-e a4HoldMs 9000` pauses at each stage and logs `A4_SHOT <stage>` under tag `A4Test`).
 2. A copy of `pc/bin/stockfish` and `pc/tts/.venv-kokoro` (both gitignored) was added to the worktree for `:desktop:test`.
+
+---
+
+## Device verification after V4+A4 merge (2026-10-10, main at 666f0cf)
+
+Full `:app:connectedDebugAndroidTest`, one device at a time, counts read from `app/build/outputs/androidTest-results/connected/debug/*.xml` (copies in the scratch dirs `merged36\` and `merged34\`).
+
+| Device | Tests | Failed | Skipped |
+|---|---|---|---|
+| chess36 (API 36), first run | 188 | 2 | 0 |
+| chess36, the two failing classes re-run after the test-only fix (5 tests) | 5 | 0 | 0 |
+| chess34 (API 34), full run with the fix | 188 | 0 | 0 |
+
+188 = 184 (V4) + `A4AnalyticsInstrumentedTest` (1) + `UpdateCheckUpstreamTest` (3).
+
+### The two failures (chess36) were one cause, in the tests
+- `A4AnalyticsInstrumentedTest.summaryTableMaterialPerGameStrengthAndBoardStrips` ("Analysed at Quick" not found) and `BestLineModeInstrumentedTest.aSummaryKeyMomentWithoutAWalkthroughOffersTheLine` ("Show the best line" not found) both used `performScrollTo()` on an item of the Summary's `LazyColumn`. A4's "Move quality" card is ten rows tall, so those items now lie beyond the composed window; an item that is not composed is not in the semantics tree and `performScrollTo()` finds no node. Both failed again on a re-run of the two classes (deterministic, not a race). No product fault: the items are there once the list is scrolled to them.
+- Test-only fix (no product code touched): `compose.onNode(hasScrollAction()).performScrollToNode(hasText(...))` before the lookup (a `summaryItem()` helper in the A4 test for the six Summary look-ups; the one Summary look-up in the best-line test). Re-run on chess36: both classes green (5/5, 0 skipped), and the full run on chess34 with the fix: 188/188.
+
+### Screenshots (`docs/screenshots/`, chess36, taken with `adb emu screenrecord screenshot` during `am instrument -e a4HoldMs 9000`)
+- `a4_summary_stats.png`: Move quality table (all ten classes + Forced for Tartakower's 1 forced move, both sides, legends) and "Material at the end" (Tartakower ahead by 12).
+- `a4_reanalyse.png`: the "Analyse this game again" chooser (Quick marked current, Standard, Deep, Re-analyse disabled).
+- `a4_board_material.png`: Board at the last move, names above and below with captured pieces and "+12" on the side ahead.
+- `a4_update_upstream.png`: the update sheet with the three upstream rows. The versions there (Stockfish 99, Kokoro v9.9) come from the test's own fake GitHub server (`UpdateCheckUpstreamTest`), not the live API.
+
+### Deviations
+1. chess36 was started with `-gpu host` as asked for the full run; the screenshots needed a restart with `-gpu swangle_indirect` (CLAUDE.md "Emulator gotchas": on the host GPU the screen is stale and System UI ANRs; the first attempt showed a stale Settings/Languages frame with a "System UI isn't responding" dialog). That dialog was dismissed with "Wait" after the reboot. chess34 ran on `-gpu host` without trouble.
+2. The screenshot run of `UpdateCheckUpstreamTest` used only its first test (the one that holds for the sheet), `-e a4HoldMs 25000`, because that class logs no `A4_SHOT` marker; its screenshots were taken on a 3 s timer.
+3. Two test files modified (above), uncommitted.
+4. chess34 still holds the stray `net.palaya.chessanalyzer.engine.test` package noted before.
+
+**Device state restored.** Both emulators shut down, adb server stopped, apps uninstalled (chess36 by hand, chess34 by Gradle), font scale 1.0 on both.
