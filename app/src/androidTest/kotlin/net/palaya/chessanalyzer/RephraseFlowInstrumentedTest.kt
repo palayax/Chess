@@ -47,12 +47,17 @@ class RephraseFlowInstrumentedTest {
 
     /** A "model" that rewords the charge sentences of error cards, the way the checker accepts. */
     private val fake = FakeRephraser(fakeId) { r ->
-        if (r.surface != RephraseSurface.CARD) r.text
-        else r.text
+        if (r.surface == RephraseSurface.NARRATION) {
+            narrationCalls++
+            // merge the move and its evaluation into one sentence, as the real model does
+            r.text.replaceFirst(". The evaluation moves", ", and the evaluation moves")
+        } else r.text
             .replace(Regex("^Now (White|Black|you|your opponent) can play "), "$1 can now play ")
             .replace(Regex("^This hands (White|Black|you|your opponent) "), "This gives $1 ")
             .replace(Regex("^This lets (White|Black|you|your opponent) play "), "Now $1 gets to play ")
     }
+
+    private var narrationCalls = 0
 
     @After
     fun tearDown() {
@@ -113,8 +118,31 @@ class RephraseFlowInstrumentedTest {
         val accepted = cacheDir.listFiles()!!.map { it.readText() }.count { it.startsWith("A\n") }
         assertTrue("$accepted accepted", accepted > 0)
 
+        // The Video route: the narration pre-step rewords the beats (verdicts cached under the fake's folder,
+        // NARRATION entries among them), and the script the screen gets carries the accepted wording.
+        val narrationCallsBefore = narrationCalls
+        compose.onNodeWithText(app.getString(R.string.summary_watch_video)).performScrollTo().performClick()
+        compose.waitUntil(120_000) { compose.onAllNodesWithText(app.getString(R.string.video_title)).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue("the narration beats were sent to the model", narrationCalls > narrationCallsBefore)
+        val activity = run {
+            var a: MainActivity? = null
+            scenario!!.onActivity { a = it }
+            a!!
+        }
+        val vm = androidx.lifecycle.ViewModelProvider(activity)[net.palaya.chessanalyzer.ui.viewmodel.AnalysisViewModel::class.java]
+        val base = runBlocking { vm.videoScriptFor(stored.id) }!!
+        val worded = runBlocking { vm.rephrasedVideoScriptFor(stored.id) }!!
+        assertEquals(base.segments.size, worded.segments.size)
+        assertTrue(
+            "some beat carries the accepted rewording",
+            worded.segments.any { it.narration.contains(", and the evaluation moves") } &&
+                base.segments.none { it.narration.contains(", and the evaluation moves") },
+        )
+        assertEquals(0, runBlocking { vm.narrationPolishPending(stored.id) })
+
         // Setting off: the service hands back the originals at once (the cache is only read when it is on).
         runBlocking { app.settingsRepository.setRephraseEnabled(false) }
         assertEquals(null, runBlocking { app.rephraseService.activeId() })
+        assertEquals(base, runBlocking { vm.rephrasedVideoScriptFor(stored.id) })
     }
 }

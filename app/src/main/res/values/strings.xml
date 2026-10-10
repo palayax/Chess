@@ -666,6 +666,8 @@
     <!-- C2: the Analysing screen's last, skippable step (docs/LLM_REPHRASE_DESIGN.md §6.2). -->
     <string name="progress_polishing">Polishing the commentary (on-device AI)… %1$d of %2$d</string>
     <string name="progress_polishing_skip">Skip</string>
+    <string name="video_polishing_title">Polishing the narration</string>
+    <string name="video_polishing">Polishing the narration (on-device AI)… %1$d of %2$d</string>
     <!-- C2: the optional wording model at setup (owner decision 2026-10-09, design §12.3). -->
     <string name="setup_rephrase_offer">Also download the wording model (optional, about %1$s)</string>
     <string name="setup_rephrase_offer_help">Rewords the commentary on your phone with an AI model; every fact is checked against the app\'s own text. The app works fully without it, and you can add it later in Settings.</string>

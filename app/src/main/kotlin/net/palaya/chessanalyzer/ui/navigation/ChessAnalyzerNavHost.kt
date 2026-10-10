@@ -1,5 +1,8 @@
 package net.palaya.chessanalyzer.ui.navigation
 
+import net.palaya.chessanalyzer.ui.screens.NarrationPolishingScreen
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Job
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -477,8 +480,27 @@ fun ChessAnalyzerNavHost(
             // V4: the pace and the voice can now be changed from this screen (its "Voice and pace" sheet). The pace
             // changes the script's timing and the voice its speech-rate estimate, so the script is built again; the
             // old one stays on screen until the new one is ready (no spinner, the sheet stays open).
+            // C2: with Natural wording on and beats not yet reworded, the on-device model rewords them first
+            // ("Polishing the narration… N of M", Skip); the screen, the player and the export then get the
+            // reworded script (`rephrasedVideoScriptFor`: the core post-pass over the cache, the original when off).
+            var narrationPolish by remember(gameId) { mutableStateOf<Job?>(null) }
             LaunchedEffect(gameId, settings.videoPace, narrationVoiceSettings) {
-                scriptState = VideoScriptState.Ready(viewModel.videoScriptFor(gameId))
+                val base = viewModel.videoScriptFor(gameId)
+                val pending = if (base != null) viewModel.narrationPolishPending(gameId) else 0
+                if (pending > 0) {
+                    scriptState = VideoScriptState.Polishing(0, pending)
+                    coroutineScope {
+                        val job = launch { viewModel.polishNarration(gameId) { done, total -> scriptState = VideoScriptState.Polishing(done, total) } }
+                        narrationPolish = job
+                        job.join()
+                    }
+                    narrationPolish = null
+                }
+                scriptState = VideoScriptState.Ready(if (base == null) null else viewModel.rephrasedVideoScriptFor(gameId))
+            }
+            (scriptState as? VideoScriptState.Polishing)?.let { p ->
+                NarrationPolishingScreen(done = p.done, total = p.total, onSkip = { narrationPolish?.cancel() })
+                return@composable
             }
             val script = (scriptState as? VideoScriptState.Ready)?.script
             if (scriptState is VideoScriptState.Loading) {
@@ -646,5 +668,7 @@ fun ChessAnalyzerNavHost(
  */
 private sealed interface VideoScriptState {
     data object Loading : VideoScriptState
+    /** C2: the narration is being reworded on the device ([done] of [total] beats), skippable. */
+    data class Polishing(val done: Int, val total: Int) : VideoScriptState
     data class Ready(val script: VideoScript?) : VideoScriptState
 }

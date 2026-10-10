@@ -231,8 +231,11 @@ conflict.
   `release.tag`). Downloading it at setup switches the feature on (owner decision §12.3). The cache lives in
   `filesDir/rephrase/cache/<model>/` (NOT `rephrase/<model>/`: `rephrase/models/` holds the GGUF and a model switch
   purges every other cache folder). `rephrase/` is excluded from backup in all three rule sets.
-- **The narration post-pass is not wired yet** (V4 owned the video files when C2 landed): see the "V4 INTEGRATION
-  HOOK" comment in `AnalysisViewModel` and the TODO in `ChessAnalyzerNavHost`'s Video route.
+- **The narration post-pass runs as a pre-step of the Video route** (`ChessAnalyzerNavHost`): when
+  `narrationPolishPending(gameId) > 0` it shows "Polishing the narration (on-device AI)… N of M" with Skip, then the
+  route hands `rephrasedVideoScriptFor(gameId)` (core `RephrasedScript` over the cache) to the VideoScreen, so the
+  player, "Save video" and the exporter all read the finished words and the export never calls the model. A pace or
+  voice change rebuilds the script; its beats are the same texts, already cached, so the pre-step does not reappear.
 
 ## Emulator gotchas
 

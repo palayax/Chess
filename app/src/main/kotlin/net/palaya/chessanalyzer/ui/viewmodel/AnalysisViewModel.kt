@@ -843,14 +843,10 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
 
     // ---- C2: the narration post-pass (docs/LLM_REPHRASE_DESIGN.md §6.2) ----
     //
-    // V4 INTEGRATION HOOK (to wire after V4 merges; nothing in the video pipeline calls these yet):
-    //  1. ChessAnalyzerNavHost, the Video route: `viewModel.videoScriptFor(gameId)` -> `viewModel.rephrasedVideoScriptFor(gameId)`
-    //     (the VideoScreen, the player, NarrationCoordinator and the exporter then all see the reworded beats; the narration
-    //     WAV cache is keyed by sentence text, so the originals' WAVs stay valid for the setting-off case).
-    //  2. VideoScreen, before "Prepare narration" and before "Save video": when `narrationPolishPending(gameId) > 0`, show
-    //     "Polishing the narration… N of M" with Skip, running `polishNarration(gameId) { done, total -> }` in a coroutine
-    //     the Skip button cancels; then reload the script with `rephrasedVideoScriptFor(gameId)`. The export never calls the
-    //     model: it reads what this pass cached.
+    // Wired into the Video route (ChessAnalyzerNavHost): `narrationPolishPending` decides whether the "Polishing the
+    // narration" pre-step shows, `polishNarration` runs it (Skip = cancel), and `rephrasedVideoScriptFor` is the script the
+    // VideoScreen, the player, NarrationCoordinator and the exporter get. The narration WAV cache is keyed by sentence text,
+    // so the originals' WAVs stay valid for the setting-off case; the export never calls the model.
 
     /**
      * The finished, paced script of [gameId] with every cached narration rewording applied by the pure
