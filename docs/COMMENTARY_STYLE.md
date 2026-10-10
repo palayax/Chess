@@ -46,6 +46,8 @@ numbers) at generation time; the Kotlin generator re-checks it (`CommentaryGener
 | **a winning position / a decisive advantage** (MISS: "Better was Rxh7: it keeps a winning position.") | card | the mover's win-percent before the move: 82..95 / 95 and up (a MISS needs 90 or a mate) |
 | **sacrifice** "Nxb5 sacrifices the knight on b5." / "Rb8 offers the knight on d7: a sacrifice the engine rates among the best moves here." | card (BRILLIANT) | the opponent can take the named piece for a net of at least 200 by exchange; the third wording also needs the class's loss of at most 2 |
 | **the engine's line** "In the engine's line, ..." / "The engine's line shows it: ..." | card | deflection, decoy, clearance, removing the defender, interference, Greek gift, windmill, zwischenzug, overload: proved by replaying the recorded PV, and said as the engine's line because the opponent may reply differently |
+| **a spoken line move** (V4) "Knight takes the pawn on f seven, with check." / "Castles queenside, with check." / "The rook on a one to d one." | narration (the video's best line) | the move is the engine's line's next move, legal on the board it is played on (the Board's line, `BestLines`); the piece named stands on its from-square; "the X on <square>" only when another piece of that kind could also reach the target; "takes the Y on" names the piece standing on the target (en passant said as such); the promotion piece; "with check" / "and that is checkmate" read off the position after the move. One wording, no rotation. |
+| **back to the game** (V4) "Back to the game now." | narration (after the video's best line; first sentence of a detour's pivot-out) | a simulated line (the best line's last move, or a detour's payoff) has just ended, and the board this sentence is said over is the game's own position before the move the moment is about |
 
 **Terms not added, and why.** "Simplifies", "liquidates", "trades into a winning endgame" need an endgame
 definition and an evaluation after the trade that one position's numbers do not hold. "Loses a tempo" has
@@ -231,3 +233,20 @@ with the phonemizer shipped in sherpa-onnx 1.13.8): "zwischenzug" came out "ZWIS
 `NeuralTtsProvider.synthesize`; the narration cache key stays the real sentence, and the provider fingerprint carries the table's id so an
 edit to the table never reuses older audio. Desperado, skewer, decisively and "the exchange up" are read correctly and are not respelled. A new
 entry needs the phonemes of the term and of the respelling, pinned in `SpokenRespellingTest`. The device voice is not respelled.
+
+## 7. The spoken best line (V4)
+
+The owner found the video's simulated lines confusing because their moves were played in silence. Since V4 every
+move of the engine's best line after a key moment is said as it is played, in the words every other narrated move
+uses ("Pawn takes the pawn on d four.", "Knight to c six.", "Castles queenside, with check."), and the board's
+return to the game is said in five words: "Back to the game now." The detour of a missed tactic already said each
+move ("So: queen takes the rook on a one, with check."); its pivot-out now opens with the same "Back to the game
+now." and its variants were reworded so they do not say "back" twice ("In the real game, though, this got played
+instead -", "What actually happened was this -").
+
+Both sentences are claims and are verified like the rest: the spoken move against the board in Kotlin
+(`CommentaryClaimsTest`, worked out from the board without the narration's vocabulary) and with python-chess
+(`scripts/audit_commentary.py lines`), the return against the game's position; `mutate` breaks each and every break
+is flagged (`docs/COMMENTARY_AUDIT.md`, "V4"). A line move has one wording on purpose: a move is a fact, and the
+same move must sound the same wherever it is said.
+

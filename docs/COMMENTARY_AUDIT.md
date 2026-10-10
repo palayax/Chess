@@ -136,6 +136,32 @@ and a line that gives a minor for a rook is "the exchange" (`MaterialGain.EXCHAN
 sentences carry the same terms as the cards with the same proofs; the narration is still outside this
 script's claim-by-claim audit (`NarrationClaimsTest`, `NarrationStringsTest` hold its rules).
 
+## V4 (2026-10-09): the spoken best line and "Back to the game now."
+
+The video's best line (ANALYSIS_SPEC 9.8) is narrated since V4: one segment per move that says the move, then
+"Back to the game now." over the game's position; the detour's pivot-out opens with the same sentence. Two new
+narration templates, so two new verifiers in `scripts/audit_commentary.py`:
+
+- **`lines`, the spoken moves.** `CommentaryAuditDumpTest.dumpBestLines` now writes, for every video line, what the
+  segments after the key moment actually say and show (`says`, `sayFens`, `sayUci`, `sayKinds`, `back`, `backFen`).
+  Each spoken move is re-derived from python-chess's board (`expected_line_move`: the piece on the from-square, its
+  square when another piece of its kind could reach the target, the target, the piece taken, en passant, the
+  promotion, check or mate) and must be that sentence exactly, over the board the line has reached, as the line's
+  own move; the segments must be the moves and then one return; the return must say "Back to the game now." over
+  the game's position before the move.
+- **`lines`, every return.** `video_returns.jsonl` lists every segment that says "Back to the game": it must open
+  with the sentence, say it once, follow a best line's last move or a detour's payoff, and show the game's position
+  before the move it is about.
+
+**Result (2026-10-09, three games x three sides, Normal pace):** `lines` - 432 move records, 678 lines (246
+alternatives), 15 video lines, 57 spoken line moves, 33 returns to the game (15 after a best line, 18 after a
+detour); **2646 checks, 2646 supported, 0 WRONG** (2478 before V4: the new checks are the spoken moves, the
+returns and their boards; three fewer video lines because game01's 13...Bc6 no longer fits the pace cap once its
+line is spoken). `after` - unchanged: 144 texts, 0 WRONG; 0 of 288 side variants differ. `mutate` - the 24 card
+mutations as before (0 missed), plus 7 on the spoken line: a move on the wrong square, a capture said as a quiet
+move, the wrong piece, a check left out or added, notation instead of words, "Back to the game now." over the
+line's last position instead of the game's, the return sentence missing: **7 applied, 7 flagged, 0 missed.**
+
 ## Found, not fixed
 
 - `LessonPositive` and `LessonOpponentMissedToo` (below) are unchanged by C1.

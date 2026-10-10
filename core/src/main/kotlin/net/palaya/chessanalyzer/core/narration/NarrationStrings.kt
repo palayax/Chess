@@ -357,9 +357,6 @@ sealed interface Sentence {
     /** "MorphyFan — 85.0%, est. 1650" */
     data class CardFinalPlayerLine(val name: String, val accuracy: String, val rating: Int) : Sentence
 
-    /** "Blunders 1–2 · Mistakes 0–1" */
-    data class CardFinalCountsLine(val whiteBlunders: Int, val blackBlunders: Int, val whiteMistakes: Int, val blackMistakes: Int) : Sentence
-
     /** "What to work on" */
     data object CardWorkOnHeading : Sentence
 
@@ -590,8 +587,22 @@ sealed interface Sentence {
     /** "And there was mate in four behind it." */
     data class MateBehindIt(val mateIn: Int) : Sentence
 
-    /** "Back in the real game, though, that got played instead —" */
+    /** "In the real game, though, this got played instead —" (said after [BackToTheGame] since V4). */
     data object PivotOut : Sentence
+
+    /**
+     * One move of the engine's best line, spoken as it is played in the video (V4): the move in words and
+     * nothing else, "Knight takes the pawn on f seven, with check." Every fact is the move's own on its board
+     * ([SpokenChess.describe]: the piece, its square when two could go, the square, what it takes, check or
+     * mate), so the sentence is exactly as true as the move is legal.
+     */
+    data class LineMove(val move: SpokenMove) : Sentence
+
+    /**
+     * "Back to the game now." The board has just left a simulated line (the engine's best line, or a missed
+     * tactic's detour) and shows the game's own position again (V4).
+     */
+    data object BackToTheGame : Sentence
 
     /** "And the chance is gone. It does not come back." */
     data object ChanceGone : Sentence

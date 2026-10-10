@@ -66,12 +66,17 @@ class CommentaryAuditDumpTest {
     @Test
     fun dumpBestLines() {
         val out = StringBuilder()
+        val returns = StringBuilder()
         val games = listOf("immortal" to RealGameFixture.immortal, "chesscom" to RealGameFixture.chesscom, "game01" to RealGameFixture.game01)
         for ((name, game) in games) {
             for (side in listOf<Color?>(null, Color.WHITE, Color.BLACK)) {
                 val report = game.report(side)
                 val script = VideoScriptGenerator(side).generate(report, game.pgn, NarrationOptions(speechWpm = 169, pace = VideoPace.NORMAL))
                 val video = script.segments.mapNotNull { s -> s.bestLine?.let { s.ply!! to it } }.toMap()
+                // V4: what the segments after each key moment actually say and show (its spoken moves, then the return).
+                val after = script.segments.filter { it.bestLine != null }.associate { k ->
+                    k.ply!! to script.segments.subList(k.index + 1, k.index + 2 + k.bestLine!!.uci.size)
+                }
                 for (a in report.annotations) {
                     val lines = BestLines.linesFor(a).joinToString(",") { l ->
                         "{\"multiPv\":${l.multiPv},\"depth\":${l.depth},\"startFen\":${q(l.startFen)}," +
@@ -81,15 +86,34 @@ class CommentaryAuditDumpTest {
                     val v = video[a.ply]
                     val videoJson = if (v == null) "null" else
                         "{\"fen\":${q(v.fen)},\"uci\":[${v.uci.joinToString(",") { q(it) }}],\"san\":[${v.san.joinToString(",") { q(it) }}]," +
-                            "\"captions\":[${v.captions.joinToString(",") { q(it) }}]}"
+                            "\"captions\":[${v.captions.joinToString(",") { q(it) }}]," +
+                            "\"says\":[${after.getValue(a.ply).dropLast(1).joinToString(",") { q(it.narration) }}]," +
+                            "\"sayFens\":[${after.getValue(a.ply).dropLast(1).joinToString(",") { q((it.board as BoardDirective.PlayMove).fen) }}]," +
+                            "\"sayUci\":[${after.getValue(a.ply).dropLast(1).joinToString(",") { q((it.board as BoardDirective.PlayMove).uci) }}]," +
+                            "\"sayKinds\":[${after.getValue(a.ply).joinToString(",") { q(it.kind.name) }}]," +
+                            "\"back\":${q(after.getValue(a.ply).last().narration)}," +
+                            "\"backFen\":${q((after.getValue(a.ply).last().board as BoardDirective.Annotate).fen)}}"
                     out.appendLine(
                         "{\"game\":${q(name)},\"side\":${q(side?.name)},\"ply\":${a.ply},\"san\":${q(a.san)},\"uci\":${q(a.uci)}," +
                             "\"cls\":${q(a.classification.name)},\"fenBefore\":${q(a.fenBefore)},\"lines\":[$lines],\"video\":$videoJson}"
                     )
                 }
+                // V4: every place the narration says the board is back in the game, with what the board shows
+                // and what came just before it (a best line's last move, or a detour's payoff).
+                for ((i, seg) in script.segments.withIndex()) {
+                    if (!seg.narration.contains("Back to the game")) continue
+                    val a = report.annotations[seg.ply!! - 1]
+                    val fen = (seg.board as? BoardDirective.Annotate)?.fen
+                    returns.appendLine(
+                        "{\"game\":${q(name)},\"side\":${q(side?.name)},\"ply\":${a.ply},\"fenBefore\":${q(a.fenBefore)}," +
+                            "\"boardFen\":${q(fen)},\"prevKind\":${q(script.segments[i - 1].kind.name)},\"narration\":${q(seg.narration)}}"
+                    )
+                }
             }
         }
         File("build/commentary_audit/best_lines.jsonl").apply { parentFile.mkdirs() }.writeText(out.toString())
+        File("build/commentary_audit/video_returns.jsonl").writeText(returns.toString())
+        assertTrue("some returns to the game", returns.isNotEmpty())
         assertTrue("three games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33 + RealGameFixture.game01.pgn.moves.size))
     }
 }

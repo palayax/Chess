@@ -1081,6 +1081,34 @@ centred and, if still too tall, every size steps down together.
 No new chess claim is made: every field is a report number or the §12 sentence. `GameRecapTest`
 checks each against the report on the four recorded games.
 
+**The intro on the board, and the final numbers' table (V4).** The owner saw the board appear only after a
+few seconds of narration, because the intro was a board-less title card. Since V4 the intro's card carries
+the game's starting position (`BoardDirective.Card.boardFen`: the first annotation's position before the
+move, else the PGN's start, else the standard one) and is drawn ON it: the board, the eval bar (the intro
+segment carries the engine's evaluation of that position, `evalBefore(1)`), the side panel and, over the
+middle of the board, a dark band holding the same fitted card as before (title, subtitle line, accuracy
+line; `BoardFrameRenderer.drawTitleOnBoard`, sized from the board, never over the first or last rank). So
+frame 0 of the MP4 and of the in-app player shows the board. The intro's narration, its words and its
+timing are unchanged. The final-numbers card's "Blunders 1–2 · Mistakes 0–1" line is replaced by a
+**move-quality table**: every class but FORCED (`QUALITY_TABLE_CLASSES`, in the app's order: Brilliant,
+Great, Best, Excellent, Good, Book, Inaccuracy, Mistake, Miss, Blunder), each with White's and Black's count
+(`VideoScript.qualityCounts`, from `PlayerReport.classificationCounts`; a count equals that side's moves of
+that class, zeros included, `CardTextTest`), drawn as two columns of five rows under one header row with the
+class badge in its own colour (`QualityTableGeometry`, `CardLayoutTest`; the card still fits its box at
+720p and in the player's portrait frame, `CardFrameFitInstrumentedTest`). Reference (chess.com, pattern
+only): Game Review opens on the board with the players and the coach's first words around it, and its
+summary lists the move classes with their icons and a count per player; taken: the board from the first
+moment and the class/count table, in our own words, colours of the app and layout.
+
+**Material on the board frames (V4).** Every board frame of the video carries the material of the position
+it shows (`core.analysis.MaterialBalance`, computed from the very pieces drawn, so a hypothetical line's
+frame shows that line's material): beside each player, the pieces that side has captured (the opponent's
+pieces missing from the starting set, a piece above its starting count being a promoted pawn, weakest
+first) and "+N" for the side ahead in points (pawn 1, knight 3, bishop 3, rook 5, queen 9). In the 16:9
+frame the row sits under each name in the side panel; in the player's portrait frame it is in the player
+bars above and below the board. This is chess.com's score line (pattern only); it says nothing the board
+does not show, and `MaterialBalanceTest` pins the counting.
+
 ### 9.8 The video pace (V3)
 
 Added in Round 14 for the owner's "the analysis is a bit too fast for key moves/sequences". The pace is a
@@ -1160,39 +1188,62 @@ untouched: the pace runs after every tier and budget decision, so BRILLIANT/GREA
 are exactly what they were, and only gain a pause.
 
 **Recap and time left.** Unchanged: the recap card is still after the last segment and outside both numbers;
-the export's "N of M" and "about N min left" count segments and measure synthesis time, and the pace adds no
-segment and no speech.
+the export's "N of M" and "about N min left" count segments and measure synthesis time. The V3 pace adds no
+segment and no speech; the narrated best lines (V4, below) do add segments, so "N of M" counts them.
 
-**The best line in the video (V2).** A key moment on a MISTAKE, MISS or BLUNDER whose narration names the
-better move over a still board (`ScriptBuilder.betterMoveBeats`: the error beat told at DWELL or FULL length
-without a detour, and a brief beat on one of the report's key moments, the five costliest errors) plays the
-engine's best line on the board **after its speech** (`ScriptSegment.bestLine`, `SegmentBestLine`), instead
-of leaving the better move as an arrow: the same moves the Board shows (`BestLines.bestFor`), at most
-`BestLines.VIDEO_MAX_PLIES` = 4 (the DWELL variation length of §9.7), one every `lineMoveMinMs`, each sliding in
-400 ms and resting with its caption ("Best line — 18... Nf5 19. Qd2"), the final position held
-`lineFinalHoldMs`, drawn as an excursion (tinted border, the chip "Engine's best line", no verdict; the eval
-bar keeps the beat's eval). An inaccuracy keeps its arrow: it is BRIEF, "never a walk of the missed line"
-(§9.7). A missed tactic with a detour already walks its line with narration (§9.7 FULL / DWELL).
+**The best line in the video (V2, narrated since V4).** A key moment on a MISTAKE, MISS or BLUNDER whose
+narration names the better move over a still board (`ScriptBuilder.betterMoveBeats`: the error beat told at
+DWELL or FULL length without a detour, and a brief beat on one of the report's key moments, the five
+costliest errors) is followed by the engine's best line: the same moves the Board shows (`BestLines.bestFor`),
+at most `BestLines.VIDEO_MAX_PLIES` = 4 (the DWELL variation length of §9.7). An inaccuracy keeps its arrow:
+it is BRIEF, "never a walk of the missed line" (§9.7). A missed tactic with a detour already walks its line
+with narration (§9.7 FULL / DWELL).
 
-- **Decided: the line extends the segment by pace time, inside the cap.** Narration stays the source of
-  timing: the line starts when the speech ends (`SegmentFrameBuilder` takes the timeline's own speech
-  length, so the player and the MP4 start it at the same instant) and lives in the segment's hold
-  (`holdAfterMs` = the line's time + any other hold), so no timeline consumer needs anything new and the
-  exporter's audio is silence there. It is counted in `VideoScript.pacingMs`, never in the story, so the
-  §9.7 budget, the words, the cached narration, the recap card and the "N of M" / "about N min left" export
-  figures are unchanged (no new segment, no new speech).
-- **Which moments and how many plies (`ScriptBuilder.bestLinePlan`)**, decided once, at the slowest pace
-  (Relaxed), so every pace plays the same moves: the room under the 15 percent cap that the V3 pace time
-  leaves at Relaxed is shared out most important first (tier, then loss, then the earlier move); each moment
-  gets up to 4 plies while its Relaxed time fits, and as many as fit (at least one) when four do not; a
-  moment for which not even one ply fits keeps its arrow. So the lines never scale the V3 pauses and holds
-  down, and a game's pace time stays under its cap at every pace.
-- **Measured (host recordings, 169 wpm, `BestLineVideoTest`, `core/build/pace/v2_best_lines.txt`):** the
-  Opera Game 1 moment (9...b5, 4 plies), the Immortal Game 2 (11...cxb5, 16...Bc5, 4 plies each), game01 3
-  (24.Bh3 and 7...e4 4 plies, 13...Bc6 1 ply: the room ran out), the scholar's mate 1 (3...Nf6, 1 ply),
-  Byrne-Fischer none (its arrow-only moments are inaccuracies). The pace time at Relaxed / Normal / Brisk
-  rose by 9.5 / 7.0 / 4.9 s (Opera), 19.0 / 14.0 / 9.8 s (Immortal), 22.5 / 16.5 / 11.4 s (game01); every
-  game stays under its cap (game01 Relaxed 86.5 of 87.3 s).
+Until V4 the line was played silently inside the key moment's hold, and the owner found the silent moves
+confusing. Since V4 each move of the line is **a segment of its own** that **says the move**
+(`SegmentKind.BEST_LINE`, `Sentence.LineMove`): "Knight takes the pawn on f seven, with check." - the move in
+words and nothing else, built from the board it is played on (`SpokenChess.describe`: the piece, its square
+when another of its kind could go there, the square, what it takes, en passant, the promotion, check or mate)
+and spoken in the vocabulary of every other narrated move (`Vocabulary.movePhrase`). Then one more segment
+puts the board back on the game's position (the key moment's own picture) and says **"Back to the game now."**
+(`Sentence.BackToTheGame`). The same sentence now opens the detour's pivot-out ("Back to the game now. What
+actually happened was this —", §9.7), so every simulated line ends the same way. Each line move slides as
+its words start (400 ms), rests under its caption ("Best line — 18... Nf5 19. Qd2"), is drawn as an excursion
+(tinted border, the chip "Engine's best line", no verdict; the eval bar keeps the beat's eval) and is on
+screen at least `lineMoveMinMs` (its speech estimate with the timeline's 900 ms floor and 250 ms gap, plus a
+hold that makes up the rest); the last one holds the final position `lineFinalHoldMs` more. The line's moves
+are not game moves, so the panel's "recent moves" never lists them. The in-app player and the exporter need
+nothing new: they are ordinary segments (synthesized, cached, timed and drawn like any other), so the voice
+says the moves in the MP4 and in the player alike.
+
+- **Decided: the narrated line is pace time, inside the cap.** The lines are laid in by `ScriptBuilder.paced`,
+  after the §9.7 budget loop, exactly where the silent line was: their segments' speech estimates and holds
+  are counted in `VideoScript.pacingMs`, never in the story, so `storyMs` and the budget are untouched (the
+  story is still the same at every pace, and the budget still holds it).
+- **The same words at every pace.** Which key moments get a line, and how many plies each, is decided once,
+  at the slowest pace (`ScriptBuilder.bestLinePlan`, Relaxed), from the room under the 15 percent cap that
+  the V3 pace time leaves; since V4 a line's cost there (`lineCostMs`) includes its spoken moves and its
+  "back to the game" sentence. Every pace therefore plays and says the same moves in the same words (only
+  the holds differ), the cached narration is reused across paces, and a line never pushes the V3 pauses
+  down. The words are rendered without the phrase rotation (`speak`: one wording each), so they cannot
+  depend on how often `paced` ran. The narration cache key stays a pure function of the sentence: a new
+  sentence is a new key.
+- **Measured (host recordings, 169 wpm, `BestLineVideoTest`, `core/build/pace/v4_best_lines.txt`).** A spoken
+  line move is 1.7 s ("Pawn to h five.") to 2.7 s ("Rook takes the pawn on a four.") of speech, about as long
+  as Relaxed's 2.0 s line step, so a 4-ply line went from 9.5 s silent to about 11.5-13 s spoken (plus 2.0 s
+  for "Back to the game now."). Per game at Relaxed / Normal / Brisk, the line time: the Opera Game 1 moment
+  (9...b5, 4 plies) 11.5 / 10.7 / 10.2 s; the Immortal Game 2 (11...cxb5, 16...Bc5, 4 plies each) 23.0 /
+  21.4 / 20.4 s; game01 2 (7...e4 3 plies, 24.Bh3 4 plies) 22.2 / 20.8 / 19.8 s, the cap having no room left
+  for 13...Bc6's one ply (it keeps its arrow); the scholar's mate none (its 9 s cap has no room for 3...Nf6's
+  one spoken ply after the V3 pace time; it keeps its arrow); Byrne-Fischer none (inaccuracies). Every game
+  stays under its cap (game01 Relaxed 86.2 of 87.3 s). The detours' "Back to the game now." adds about 1.3 s
+  of story per detour (the Immortal Game 420.1 -> 423.9 s, inside its 442 s budget).
+- **Verified as a claim.** Each spoken move is re-derived from the board, independently of the narration's
+  vocabulary, in `CommentaryClaimsTest` and by `scripts/audit_commentary.py lines` (python-chess), and every
+  "Back to the game now." is checked to follow a simulated line and to stand on the game's own position;
+  `mutate` breaks each (a wrong square, a capture said as a quiet move, a wrong piece, a check left out or
+  added, notation instead of words, the return over the line's last position, the return sentence missing)
+  and every break is flagged.
 
 **Reference (chess.com Game Review, pattern only).** Stepping through a review shows a key move on its own:
 the board sits on the position, the move is made, its classification appears with it, and the coach's

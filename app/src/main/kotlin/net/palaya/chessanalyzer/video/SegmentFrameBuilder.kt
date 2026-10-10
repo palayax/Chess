@@ -1,11 +1,11 @@
 package net.palaya.chessanalyzer.video
 
+import net.palaya.chessanalyzer.core.analysis.MaterialBalance
 import net.palaya.chessanalyzer.core.chess.Position
 import net.palaya.chessanalyzer.core.chess.parseUci
 import net.palaya.chessanalyzer.core.narration.BoardDirective
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.ScriptTiming
-import net.palaya.chessanalyzer.core.narration.SegmentBestLine
 import net.palaya.chessanalyzer.core.narration.SegmentLeadIn
 import net.palaya.chessanalyzer.core.narration.SegmentKind
 import net.palaya.chessanalyzer.core.narration.VideoScript
@@ -52,6 +52,8 @@ object SegmentFrameBuilder {
             if (seg.index > uptoIndex) break
             // The game moves a key move's lead-in played first (ANALYSIS_SPEC 9.8) come before it.
             seg.leadIn?.let { result.addAll(it.approachSan) }
+            // The engine's best line (V4) was never played: it is not one of the game's recent moves.
+            if (seg.kind == SegmentKind.BEST_LINE) continue
             val directive = seg.board
             if (directive is BoardDirective.PlayMove) result.add(directive.san)
         }
@@ -62,10 +64,9 @@ object SegmentFrameBuilder {
      * @param elapsedMs time since the segment started, lead-in included: while it is inside
      *   [ScriptSegment.leadIn] the lead-in is drawn (ANALYSIS_SPEC 9.8), and the segment's own board
      *   starts after it, so a PlayMove slides exactly when its narration starts.
-     * @param speechMs how long the segment's speech lasts on the timeline ([TimedSegment.speechDurationMs]).
-     *   A segment's [ScriptSegment.bestLine] (V2) starts when the speech ends, so the in-app player and the
-     *   exporter pass the same timeline value and draw the line at the same instant. Null falls back to
-     *   the estimate with the timeline's floor, which is what the timeline uses before any audio exists.
+     *
+     * Every board frame carries the material of the position it shows ([MaterialBalance], V4): the pieces
+     * each side has captured and "+N" for the side ahead, chess.com style, counted from the pieces it draws.
      */
     fun build(
         script: VideoScript,
@@ -74,23 +75,28 @@ object SegmentFrameBuilder {
         orientation: BoardOrientation,
         /** Resolved once per frame stream by the caller — see [BoardFrameRenderer.PanelLabels]. */
         labels: BoardFrameRenderer.PanelLabels = BoardFrameRenderer.PanelLabels.ENGLISH,
-        speechMs: Long? = null,
     ): RenderInstruction {
         val leadIn = segment.leadIn
-        if (leadIn != null && elapsedMs < leadIn.durationMs) {
-            return buildLeadIn(script, segment, leadIn, elapsedMs, orientation, labels)
+        val instruction = if (leadIn != null && elapsedMs < leadIn.durationMs) {
+            buildLeadIn(script, segment, leadIn, elapsedMs, orientation, labels)
+        } else {
+            buildBoard(script, segment, (elapsedMs - segment.leadInMs).coerceAtLeast(0L), orientation, labels)
         }
-        val line = segment.bestLine
-        if (line != null) {
-            val lineStart = bestLineStartMs(segment, speechMs)
-            if (elapsedMs >= lineStart) return buildBestLine(script, segment, line, elapsedMs - lineStart, orientation, labels)
-        }
-        return buildBoard(script, segment, (elapsedMs - segment.leadInMs).coerceAtLeast(0L), orientation, labels)
+        return withMaterial(instruction)
     }
 
-    /** When a segment's best line starts, from the segment's start: after the lead-in and the speech. */
-    fun bestLineStartMs(segment: ScriptSegment, speechMs: Long?): Long =
-        segment.leadInMs + (speechMs ?: segment.estimatedSpeechMs.coerceAtLeast(ScriptTiming.MIN_SEGMENT_MS))
+    /** The material of the position a board frame shows, counted from the pieces it draws. */
+    private fun withMaterial(instruction: RenderInstruction): RenderInstruction {
+        if (instruction !is RenderInstruction.Board) return instruction
+        val pieces = instruction.spec.boardState.pieces.values.map { p ->
+            net.palaya.chessanalyzer.core.chess.Piece(
+                net.palaya.chessanalyzer.core.chess.PieceType.valueOf(p.type.name),
+                if (p.color == net.palaya.chessanalyzer.ui.model.PieceColor.WHITE) net.palaya.chessanalyzer.core.chess.Color.WHITE
+                else net.palaya.chessanalyzer.core.chess.Color.BLACK,
+            )
+        }
+        return RenderInstruction.Board(instruction.spec.copy(material = MaterialBalance.of(pieces)))
+    }
 
     /** The segment's own board, [elapsedMs] after its lead-in (if any) ended. */
     private fun buildBoard(
@@ -180,11 +186,33 @@ object SegmentFrameBuilder {
                 )
             )
 
-            // R6c: the words of a title card come from CardContents (each fact once, whole-percent accuracy,
-            // names isolated), and the intro and the final numbers carry no caption bar (the card says it).
-            is BoardDirective.Card -> RenderInstruction.Card(
-                CardContents.forSegment(script, segment.kind, directive.heading, directive.lines),
-                CardContents.captionFor(segment.kind, segment.caption),
+            // V4: a card with a position (the intro) is that position with the card's words on the board, so
+            // the board is on screen from the first frame; the words are the same fitted card (R6c).
+            is BoardDirective.Card -> if (directive.boardFen != null) {
+                RenderInstruction.Board(
+                    panelDefaults.copy(
+                        boardState = fenToBoardState(directive.boardFen!!),
+                        orientation = orientation,
+                        titleCard = CardContents.forSegment(script, segment.kind, directive.heading, directive.lines, labels.recap.className, labels.recap.side),
+                        caption = CardContents.captionFor(segment.kind, segment.caption),
+                    )
+                )
+            } else {
+                // R6c: the words of a title card come from CardContents (each fact once, whole-percent accuracy,
+                // names isolated), and the intro and the final numbers carry no caption bar (the card says it).
+                RenderInstruction.Card(
+                    CardContents.forSegment(script, segment.kind, directive.heading, directive.lines, labels.recap.className, labels.recap.side),
+                    CardContents.captionFor(segment.kind, segment.caption),
+                )
+            }
+        }
+
+        // V2 + V4: a move of the engine's best line, played and spoken after its key moment. Drawn as an
+        // excursion (the tinted border and the best-line chip) so the viewer can tell it from the game; no
+        // verdict or kind chip, because none of these moves was played or classified.
+        if (segment.kind == SegmentKind.BEST_LINE && result is RenderInstruction.Board) {
+            return RenderInstruction.Board(
+                result.spec.copy(excursionActive = true, excursionLabel = labels.bestLine, segmentKind = null, classification = null)
             )
         }
 
@@ -280,68 +308,6 @@ object SegmentFrameBuilder {
                 checkedKingSquare = checkedSquare(fen),
                 caption = segment.caption,
                 recentMoves = recent(steps.size),
-            )
-        )
-    }
-
-    /**
-     * The engine's best line after a key moment's speech (ANALYSIS_SPEC 9.8, V2): one move every
-     * [SegmentBestLine.stepMs] from the position before the move, each sliding for [MOVE_ANIMATION_MS] and
-     * then resting with its caption (the line so far, numbered), then the final position held. Drawn as an
-     * excursion (the tinted border and the best-line chip) so the viewer can tell it from the game; no
-     * verdict chip, because none of these moves was played or classified. The eval bar keeps the
-     * segment's eval: the line is the engine's best play from that position, so its evaluation is that one.
-     */
-    private fun buildBestLine(
-        script: VideoScript,
-        segment: ScriptSegment,
-        line: SegmentBestLine,
-        elapsedMs: Long,
-        orientation: BoardOrientation,
-        labels: BoardFrameRenderer.PanelLabels,
-    ): RenderInstruction {
-        val base = BoardFrameRenderer.BoardFrameSpec(
-            boardState = net.palaya.chessanalyzer.ui.model.BoardState.empty(),
-            labels = labels,
-            chapterLabel = chapterLabelFor(script, segment.index),
-            segmentKind = null,
-            speakerColor = segment.speakerColor,
-            userColor = script.userColor,
-            ply = segment.ply,
-            header = script.header,
-            evalWinPercentWhite = segment.eval?.winPercentWhite,
-            evalCp = segment.eval?.evalCp,
-            evalMateIn = segment.eval?.mateIn,
-            moveNumber = segment.moveNumber,
-            orientation = orientation,
-            excursionActive = true,
-            excursionLabel = labels.bestLine,
-            recentMoves = recentPlayedSans(script, segment.index),
-        )
-        val steps = line.uci
-        if (steps.isEmpty() || line.stepMs <= 0) {
-            return RenderInstruction.Board(base.copy(boardState = fenToBoardState(line.fen), caption = segment.caption))
-        }
-        val stepIndex = (elapsedMs / line.stepMs).toInt().coerceIn(0, steps.size - 1)
-        val local = elapsedMs - stepIndex * line.stepMs
-        var pos = Position.fromFen(line.fen)
-        for (i in 0 until stepIndex) pos = safeMakeMove(pos, steps[i])
-        val beforeState = fenToBoardState(pos.toFen())
-        val fromTo = uciSquares(steps[stepIndex])
-        val settled = local >= MOVE_ANIMATION_MS
-        val afterPos = safeMakeMove(pos, steps[stepIndex])
-        val animating = if (!settled && fromTo != null) {
-            val progress = easeInOut((local.toFloat() / MOVE_ANIMATION_MS).coerceIn(0f, 1f))
-            beforeState.pieces[fromTo.first]?.let { BoardFrameRenderer.AnimatingPiece(it, fromTo.first, fromTo.second, progress) }
-        } else null
-        return RenderInstruction.Board(
-            base.copy(
-                boardState = if (settled) fenToBoardState(afterPos.toFen()) else beforeState,
-                lastMove = fromTo,
-                animating = animating,
-                checkedKingSquare = if (settled) checkedSquare(afterPos.toFen()) else null,
-                caption = line.captions.getOrNull(stepIndex) ?: segment.caption,
-                san = line.san.getOrNull(stepIndex),
             )
         )
     }

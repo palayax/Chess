@@ -15,6 +15,8 @@ import android.text.Layout
 import android.text.TextUtils
 import androidx.compose.ui.graphics.asAndroidPath
 import net.palaya.chessanalyzer.core.analysis.EvalFormat
+import net.palaya.chessanalyzer.core.analysis.MaterialBalance
+import net.palaya.chessanalyzer.core.chess.PieceType as CorePieceType
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.analysis.TacticInstance
 import net.palaya.chessanalyzer.core.chess.Color as CoreColor
@@ -113,6 +115,13 @@ object BoardFrameRenderer {
         val evalSwingCp: Int? = null,
         /** The words burned into the side panel — see [PanelLabels]. */
         val labels: PanelLabels = PanelLabels.ENGLISH,
+        /**
+         * The material of the position drawn (V4): each side's captured pieces and "+N" for the side ahead,
+         * shown with the players. Computed by the caller from the very position this frame shows; null draws none.
+         */
+        val material: MaterialBalance? = null,
+        /** A title card drawn on the board (V4: the intro on the starting position); null for none. */
+        val titleCard: CardContent? = null,
     )
 
     /**
@@ -214,6 +223,11 @@ object BoardFrameRenderer {
     // must look like the app's `EvalBar` composable, not just be "close".
     private const val EVAL_WHITE_FILL = 0xFFF2F1EC.toInt()
     private const val EVAL_BLACK_FILL = 0xFF1A1917.toInt()
+    /** The intro's band over the starting position (V4): the card surface, mostly opaque so the title reads. */
+    private const val TITLE_BAND = 0xEB262421.toInt()
+    /** Captured pieces of one type overlap by this share of an icon; a new type starts after a small gap. */
+    private const val MATERIAL_OVERLAP = 0.45f
+    private const val MATERIAL_TYPE_GAP = 0.15f
 
     internal val classificationColors: Map<MoveClassification, Int> = mapOf(
         MoveClassification.BRILLIANT to 0xFF26C2A3.toInt(),
@@ -268,6 +282,10 @@ object BoardFrameRenderer {
      * and eval bar must not touch the frame's edges.
      */
     fun renderBoardFrame(canvas: Canvas, widthPx: Int, heightPx: Int, spec: BoardFrameSpec) {
+        // V4: the in-app player in portrait is a taller-than-wide surface; it gets the portrait layout
+        // (the board as wide as the screen, as in the Walkthrough). The exported video is always 16:9.
+        if (heightPx > widthPx) return renderPortraitBoardFrame(canvas, widthPx, heightPx, spec)
+
         canvas.drawColor(CHROME_DARK)
 
         val captionHeight = captionBarHeight(heightPx)
@@ -290,6 +308,22 @@ object BoardFrameRenderer {
             drawPanel(canvas, spec, panelLeft, boardTop, panelWidth, boardSize)
         }
 
+        drawBoard(canvas, spec, boardLeft, boardTop, squareSize)
+        spec.titleCard?.let { drawTitleOnBoard(canvas, it, boardLeft, boardTop, boardSize) }
+
+        // The classification badge for the current move lives in the side panel (drawn above, before
+        // the board itself) rather than floating over the board — see [drawPanel].
+
+        drawCaptionBar(canvas, widthPx, heightPx, captionHeight, spec.caption)
+    }
+
+    /**
+     * The board itself, shared by the 16:9 frame and the portrait one: squares, the last move, highlights,
+     * check, coordinates, pieces (the moving one at its interpolated place), arrows, and the excursion's
+     * tinted border with its chip.
+     */
+    private fun drawBoard(canvas: Canvas, spec: BoardFrameSpec, boardLeft: Float, boardTop: Float, squareSize: Float) {
+        val boardSize = squareSize * 8f
         fun displayCell(sq: Square): Pair<Int, Int> {
             val f = sq.file()
             val r = sq.rankFromTop()
@@ -394,7 +428,7 @@ object BoardFrameRenderer {
             )
             if (!spec.excursionLabel.isNullOrBlank()) {
                 // Inset into the board's own top-left corner rather than floating above it — the
-                // new layout gives the board almost no headroom above its top edge.
+                // layout gives the board almost no headroom above its top edge.
                 drawChip(
                     canvas,
                     text = spec.excursionLabel,
@@ -406,11 +440,176 @@ object BoardFrameRenderer {
                 )
             }
         }
+    }
 
-        // The classification badge for the current move now lives in the side panel (drawn
-        // above, before the board itself) rather than floating over the board — see [drawPanel].
+    /**
+     * The intro's title card drawn ON the starting position (V4): a dark band across the middle of the board
+     * holding the same fitted card (title, subtitle, accuracy line; [buildCardBlock], R6c) at the board's
+     * scale, so the board is visible from the first frame and the title is read on it. Chess.com's Game
+     * Review opens on the board too, the players and the coach's first words around it (pattern only).
+     */
+    private fun drawTitleOnBoard(canvas: Canvas, content: CardContent, boardLeft: Float, boardTop: Float, boardSize: Float) {
+        val bandWidth = boardSize * 0.92f
+        val pad = boardSize * 0.04f
+        val textWidth = bandWidth - 2 * pad
+        val available = boardSize * 0.62f
+        var scale = 1f
+        var block = buildCardBlock(content, boardSize, textWidth, available, scale)
+        while (block.height > available && scale > 0.55f) {
+            scale -= 0.1f
+            block = buildCardBlock(content, boardSize, textWidth, available, scale)
+        }
+        val bandHeight = block.height + 2 * pad
+        val bandLeft = boardLeft + (boardSize - bandWidth) / 2f
+        val bandTop = boardTop + (boardSize - bandHeight) / 2f
+        canvas.drawRoundRect(
+            RectF(bandLeft, bandTop, bandLeft + bandWidth, bandTop + bandHeight),
+            boardSize * 0.02f, boardSize * 0.02f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = TITLE_BAND },
+        )
+        canvas.drawRect(bandLeft, bandTop, bandLeft + boardSize * 0.012f, bandTop + bandHeight, Paint().apply { color = GREEN_PRIMARY })
+        block.draw(canvas, bandLeft + pad, bandTop + pad)
+    }
+
+    /**
+     * The in-app player's portrait frame (V4, item "full screen in portrait"): laid out like the Walkthrough
+     * and chess.com's mobile board, top to bottom: Black's player bar (name, captured pieces, "+N"), the eval
+     * bar and the board as wide as the frame allows, White's player bar, one info row (the verdict or kind
+     * chip, the move with its number, the evaluation), and the caption bar. The same data as the 16:9 frame;
+     * only the arrangement differs. Recent moves and the chapter are left to the player's own controls.
+     */
+    private fun renderPortraitBoardFrame(canvas: Canvas, widthPx: Int, heightPx: Int, spec: BoardFrameSpec) {
+        canvas.drawColor(CHROME_DARK)
+        val w = widthPx.toFloat()
+        val h = heightPx.toFloat()
+        val captionHeight = captionBarHeight(heightPx)
+        val margin = w * 0.025f
+        val stripHeight = w * 0.085f
+        val infoHeight = w * 0.08f
+        val evalBarWidth = w * 0.045f
+        val gap = w * 0.015f
+        // The board takes the width, unless the frame is too short for the strips and the caption around it.
+        val boardByWidth = w - 2 * margin - evalBarWidth - gap
+        val boardByHeight = h - captionHeight - 2 * margin - 2 * stripHeight - infoHeight - 3 * gap
+        val boardSize = minOf(boardByWidth, boardByHeight).coerceAtLeast(8f)
+        val squareSize = boardSize / 8f
+        val left = margin + ((boardByWidth - boardSize) / 2f).coerceAtLeast(0f)
+        val boardLeft = left + evalBarWidth + gap
+        val right = boardLeft + boardSize
+
+        var y = margin
+        val top = if (spec.orientation == BoardOrientation.WHITE_DOWN) CoreColor.BLACK else CoreColor.WHITE
+        drawPlayerStrip(canvas, spec, top, left, y, right - left, stripHeight)
+        y += stripHeight + gap * 0.5f
+        val boardTop = y
+        drawEvalBar(canvas, left, boardTop, evalBarWidth, boardSize, spec.evalWinPercentWhite, spec.evalCp, spec.evalMateIn)
+        drawBoard(canvas, spec, boardLeft, boardTop, squareSize)
+        spec.titleCard?.let { drawTitleOnBoard(canvas, it, boardLeft, boardTop, boardSize) }
+        y += boardSize + gap * 0.5f
+        drawPlayerStrip(canvas, spec, top.opposite(), left, y, right - left, stripHeight)
+        y += stripHeight + gap
+        drawInfoRow(canvas, spec, left, y, right - left, infoHeight)
 
         drawCaptionBar(canvas, widthPx, heightPx, captionHeight, spec.caption)
+    }
+
+    /** One player's bar in the portrait frame: colour dot, name (rating), "you", the pieces they took, "+N". */
+    private fun drawPlayerStrip(canvas: Canvas, spec: BoardFrameSpec, color: CoreColor, left: Float, top: Float, width: Float, height: Float) {
+        canvas.drawRoundRect(RectF(left, top, left + width, top + height), height * 0.15f, height * 0.15f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = SURFACE_DARK })
+        val textSize = height * 0.40f
+        val pad = height * 0.25f
+        val header = spec.header
+        val name = when {
+            header == null -> spec.labels.toMove(color).takeIf { spec.speakerColor == color } ?: if (color == CoreColor.WHITE) "White" else "Black"
+            color == CoreColor.WHITE -> header.whiteName + (header.whiteRating?.let { " ($it)" } ?: "")
+            else -> header.blackName + (header.blackRating?.let { " ($it)" } ?: "")
+        }
+        val label = name + if (spec.userColor == color) " · you" else ""
+        val active = spec.speakerColor == color
+        val dotR = textSize * 0.32f
+        val cx = left + pad + dotR
+        canvas.drawCircle(cx, top + height / 2f, dotR, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = if (color == CoreColor.WHITE) WHITE_FILL else BLACK_FILL })
+        if (color == CoreColor.BLACK) {
+            canvas.drawCircle(cx, top + height / 2f, dotR, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; this.color = ON_DARK_SECONDARY; strokeWidth = 1.5f })
+        }
+        val nameLeft = cx + dotR + pad * 0.6f
+        // The material takes what it needs at the right; the name gets the rest and ends in an ellipsis.
+        val materialWidth = spec.material?.let { materialWidth(it, color, height * 0.5f) } ?: 0f
+        val nameRoom = (left + width - pad - materialWidth - pad - nameLeft).coerceAtLeast(textSize * 2)
+        val fit = fitLine(label, nameRoom, textSize, textSize * 0.7f, ::boldWidth)
+        canvas.drawText(fit.text, nameLeft, top + height / 2f + fit.size * 0.35f, recapPaint(if (active) GREEN_PRIMARY else ON_DARK_PRIMARY, fit.size, bold = active))
+        spec.material?.let { drawMaterial(canvas, it, color, left + width - pad - materialWidth, top + height / 2f, height * 0.5f) }
+    }
+
+    /** The info row under the portrait board: the chip, the move with its number, and the evaluation with the swing. */
+    private fun drawInfoRow(canvas: Canvas, spec: BoardFrameSpec, left: Float, top: Float, width: Float, height: Float) {
+        var x = left
+        val mid = top + height / 2f
+        panelChip(spec)?.let { chip ->
+            val size = height * 0.36f
+            val chipTop = mid - (size + size * 0.7f) / 2f
+            drawChip(canvas, chip.text, x, chipTop, chip.color, AColor.BLACK, size)
+            x += boldWidth(chip.text, size) + size + height * 0.25f
+        }
+        // The evaluation, right-aligned.
+        var evalLeft = left + width
+        if (spec.evalCp != null || spec.evalMateIn != null) {
+            val scoreText = EvalFormat.score(spec.evalCp, spec.evalMateIn)
+            val scorePaint = recapPaint(ON_DARK_PRIMARY, height * 0.45f, bold = true)
+            val swingText = spec.evalSwingCp?.let { "swing ${EvalFormat.swing(it)}" }
+            val swingPaint = recapPaint(swingFavoursMover(spec.evalSwingCp ?: 0, spec.speakerColor), height * 0.30f, bold = true)
+            val swingWidth = swingText?.let { swingPaint.measureText(it) + height * 0.2f } ?: 0f
+            evalLeft = left + width - scorePaint.measureText(scoreText) - swingWidth
+            canvas.drawText(scoreText, evalLeft, mid + scorePaint.textSize * 0.35f, scorePaint)
+            swingText?.let { canvas.drawText(it, left + width - swingPaint.measureText(it), mid + swingPaint.textSize * 0.35f, swingPaint) }
+        }
+        val moveRoom = evalLeft - x - height * 0.25f
+        if (!spec.san.isNullOrBlank() && moveRoom > height) {
+            val moveNumber = spec.moveNumber ?: spec.ply?.let { (it + 1) / 2 }
+            val text = spec.san + (moveNumber?.let { "  ·  " + spec.labels.moveNumber(it) } ?: "")
+            val fit = fitLine(text, moveRoom, height * 0.42f, height * 0.28f, ::boldWidth)
+            canvas.drawText(fit.text, x, mid + fit.size * 0.35f, recapPaint(ON_DARK_PRIMARY, fit.size, bold = true))
+        }
+    }
+
+    /**
+     * The pieces [by] has captured and, when [by] is ahead, "+N" (V4, chess.com's score line): small pieces
+     * of the captured side's colour, grouped by type (a type's pieces overlap), weakest first, from [left]
+     * centred on [midY]. Nothing is drawn for a side that has taken nothing and is not ahead.
+     */
+    private fun drawMaterial(canvas: Canvas, material: MaterialBalance, by: CoreColor, left: Float, midY: Float, iconSize: Float) {
+        val victimColor = if (by == CoreColor.WHITE) PieceColor.BLACK else PieceColor.WHITE
+        var x = left
+        var previous: CorePieceType? = null
+        for (type in material.captured(by)) {
+            if (previous != null) x += if (type == previous) iconSize * MATERIAL_OVERLAP else iconSize * (1f + MATERIAL_TYPE_GAP)
+            // A small icon gets a thin outline: the board's 2.6 px outline would swallow a 20 px bishop or rook. A black
+            // piece keeps a little more of its light outline, which is what shows it on the dark panel.
+            val outline = iconSize * if (victimColor == PieceColor.BLACK) 0.06f else 0.03f
+            drawPiece(canvas, Piece(PieceType.valueOf(type.name), victimColor), x, midY - iconSize / 2f, iconSize, outlinePx = outline)
+            previous = type
+        }
+        if (previous != null) x += iconSize
+        val lead = material.lead(by)
+        if (lead > 0) {
+            val paint = recapPaint(ON_DARK_SECONDARY, iconSize * 0.8f, bold = true)
+            canvas.drawText("+$lead", x + iconSize * 0.25f, midY + paint.textSize * 0.35f, paint)
+        }
+    }
+
+    /** How wide [drawMaterial] draws for [by] at [iconSize]. */
+    private fun materialWidth(material: MaterialBalance, by: CoreColor, iconSize: Float): Float {
+        val captured = material.captured(by)
+        var width = 0f
+        var previous: CorePieceType? = null
+        for (type in captured) {
+            if (previous != null) width += if (type == previous) iconSize * MATERIAL_OVERLAP else iconSize * (1f + MATERIAL_TYPE_GAP)
+            previous = type
+        }
+        if (previous != null) width += iconSize
+        val lead = material.lead(by)
+        if (lead > 0) width += iconSize * 0.25f + recapPaint(0, iconSize * 0.8f, bold = true).measureText("+$lead")
+        return width
     }
 
     /**
@@ -545,7 +744,11 @@ object BoardFrameRenderer {
         val bodyLayouts = layouts.map { it!! }
         val bodyHeight = bodyLayouts.sumOf { it.height.toDouble() }.toFloat() + gaps
 
-        val total = titleHeight + bodyHeight + factBlock
+        // ---- the move-quality table (V4, the final numbers): two columns of five classes under a header row
+        val table = content.table
+        val tableHeight = table?.let { QualityTableGeometry.height(h, it.rows.size, scale) } ?: 0f
+
+        val total = titleHeight + bodyHeight + factBlock + tableHeight
         return CardBlock(total) { canvas, left, top ->
             var y = top
             fun drawAt(layout: StaticLayout) {
@@ -564,8 +767,60 @@ object BoardFrameRenderer {
                 y += ruleGap
                 factLines.forEach { drawAt(it); y += factGap }
             }
+            if (table != null) drawQualityTable(canvas, table, left, y, textWidth, h, scale)
         }
     }
+
+    /**
+     * The final numbers' move-quality table (V4), laid out by [QualityTableGeometry]: a rule, a header row
+     * with the two side words over each column's counts, then two columns of five rows, each row White's
+     * count, the class badge (its glyph on its own colour, as the app's badges and the recap's chips) with the
+     * class name, and Black's count. A zero is printed grey, so the classes a side did play stand out.
+     */
+    private fun drawQualityTable(canvas: Canvas, table: QualityTable, left: Float, top: Float, width: Float, h: Float, scale: Float) {
+        val rowH = QualityTableGeometry.rowHeight(h, scale)
+        val gapAbove = QualityTableGeometry.gapAbove(h, scale)
+        canvas.drawRect(left, top + gapAbove * 0.35f, left + width, top + gapAbove * 0.35f + 2f, Paint().apply { color = 0x33FFFFFF })
+        val columnGap = width * QualityTableGeometry.COLUMN_GAP
+        val colW = (width - columnGap) / 2f
+        val size = QualityTableGeometry.textSize(h, colW, scale)
+        val countW = size * 1.9f
+        val headerPaint = recapPaint(ON_DARK_SECONDARY, size * 0.8f, bold = true)
+        var y = top + gapAbove
+        val perColumn = QualityTableGeometry.ROWS_PER_COLUMN
+        for (col in 0..1) {
+            val x0 = left + col * (colW + columnGap)
+            // Header: the side words centred over the two count columns.
+            val wh = fitLine(table.whiteHeader, countW * 1.6f, headerPaint.textSize, headerPaint.textSize * 0.6f, ::boldWidth)
+            val bh = fitLine(table.blackHeader, countW * 1.6f, headerPaint.textSize, headerPaint.textSize * 0.6f, ::boldWidth)
+            val hb = y + rowH / 2f + headerPaint.textSize * 0.35f
+            canvas.drawText(wh.text, x0 + countW / 2f - boldWidth(wh.text, wh.size) / 2f, hb, recapPaint(ON_DARK_SECONDARY, wh.size, bold = true))
+            canvas.drawText(bh.text, x0 + colW - countW / 2f - boldWidth(bh.text, bh.size) / 2f, hb, recapPaint(ON_DARK_SECONDARY, bh.size, bold = true))
+            for ((i, row) in table.rows.drop(col * perColumn).take(perColumn).withIndex()) {
+                val rowTop = y + rowH * (i + 1)
+                val mid = rowTop + rowH / 2f
+                fun count(n: Int, cx: Float) {
+                    val paint = recapPaint(if (n == 0) ON_DARK_SECONDARY else ON_DARK_PRIMARY, size, bold = n != 0)
+                    canvas.drawText(n.toString(), cx - paint.measureText(n.toString()) / 2f, mid + size * 0.35f, paint)
+                }
+                count(row.white, x0 + countW / 2f)
+                count(row.black, x0 + colW - countW / 2f)
+                // The badge: the class colour with its glyph, then the name.
+                val r = size * 0.62f
+                val bx = x0 + countW + size * 0.4f + r
+                canvas.drawCircle(bx, mid, r, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = classificationColors[row.classification] ?: GREEN_PRIMARY })
+                val glyphFit = fitLine(row.glyph, r * 1.6f, size * 0.75f, size * 0.4f, ::boldWidth)
+                canvas.drawText(glyphFit.text, bx - boldWidth(glyphFit.text, glyphFit.size) / 2f, mid + glyphFit.size * 0.35f, recapPaint(CHIP_INK, glyphFit.size, bold = true))
+                val nameLeft = bx + r + size * 0.4f
+                val nameRoom = (x0 + colW - countW - size * 0.3f) - nameLeft
+                val nameFit = fitLine(row.label, nameRoom, size, size * 0.6f, ::boldWidth)
+                canvas.drawText(nameFit.text, nameLeft, mid + nameFit.size * 0.35f, recapPaint(classTextColor(row.classification), nameFit.size, bold = true))
+            }
+        }
+    }
+
+    /** A class name in its own colour where that reads on the dark card; the darker classes in the light ink. */
+    private fun classTextColor(c: MoveClassification): Int = classificationColors[c] ?: ON_DARK_PRIMARY
 
     // ------------------------------------------------------------------------------------------
     // Recap end card (R6b)
@@ -776,7 +1031,7 @@ object BoardFrameRenderer {
         }
     }
 
-    private fun drawPiece(canvas: Canvas, piece: Piece, squareLeft: Float, squareTop: Float, squareSize: Float) {
+    private fun drawPiece(canvas: Canvas, piece: Piece, squareLeft: Float, squareTop: Float, squareSize: Float, outlinePx: Float = 2.6f) {
         val path = androidPathFor(piece.type)
         val bounds = androidBoundsFor(piece.type)
         val (fill, stroke) = if (piece.color == PieceColor.WHITE) WHITE_FILL to WHITE_STROKE else BLACK_FILL to BLACK_STROKE
@@ -795,7 +1050,7 @@ object BoardFrameRenderer {
         val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = stroke
             style = Paint.Style.STROKE
-            strokeWidth = 2.6f / scale
+            strokeWidth = outlinePx / scale
         }
         canvas.drawPath(path, fillPaint)
         canvas.drawPath(path, strokePaint)
@@ -1013,7 +1268,7 @@ object BoardFrameRenderer {
             y += chipHeight + height * 0.042f
         }
 
-        y = drawPlayers(canvas, spec.header, spec.speakerColor, spec.userColor, contentLeft, y, height, spec.labels)
+        y = drawPlayers(canvas, spec.header, spec.speakerColor, spec.userColor, contentLeft, y, height, spec.labels, spec.material)
 
         y += height * 0.015f
         canvas.drawRect(contentLeft, y, left + width - pad, y + 2f, Paint().apply { color = 0x33FFFFFF })
@@ -1157,16 +1412,28 @@ object BoardFrameRenderer {
         startY: Float,
         panelHeight: Float,
         labels: PanelLabels,
+        material: MaterialBalance? = null,
     ): Float {
         var y = startY
         val rowHeight = panelHeight * 0.06f
         val nameSize = panelHeight * 0.034f
+        // V4: under each name, the pieces that side has captured and "+N" when it is ahead (chess.com's score line).
+        fun materialRow(color: CoreColor) {
+            val m = material ?: return
+            if (m.captured(color).isEmpty() && m.lead(color) == 0) return
+            val icon = nameSize * 1.05f
+            drawMaterial(canvas, m, color, contentLeft + nameSize * 0.96f, y - rowHeight * 0.55f, icon)
+            y += rowHeight * 0.62f
+        }
 
         if (header != null) {
             drawPlayerRow(canvas, header.whiteName, header.whiteRating, CoreColor.WHITE, speakerColor, userColor, contentLeft, y, nameSize)
             y += rowHeight
+            materialRow(CoreColor.WHITE)
             drawPlayerRow(canvas, header.blackName, header.blackRating, CoreColor.BLACK, speakerColor, userColor, contentLeft, y, nameSize)
-            y += rowHeight + panelHeight * 0.01f
+            y += rowHeight
+            materialRow(CoreColor.BLACK)
+            y += panelHeight * 0.01f
         } else if (speakerColor != null) {
             val youSuffix = if (userColor != null && userColor == speakerColor) "  ${labels.youMarker}" else ""
             val text = "${labels.toMove(speakerColor)}$youSuffix"

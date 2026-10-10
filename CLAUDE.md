@@ -220,6 +220,9 @@ conflict.
   must call `ensureSetUp()` first (a fresh process opens on Setup while the net is missing);
   `SetupGateInstrumentedTest` pins the gate itself. `ChessAnalyzerApplication.modelSetupForTesting` points the
   service and the gate at a scratch directory (tests only).
+- **A freshly booted emulator can fail a whole connected run with "Starting 0 tests ... Process crashed"** (V4): the app's
+  startup took over 20 s and the system declared an ANR ("failed to complete startup"). Not a code fault: wait until the
+  device has settled (`adb shell cat /proc/loadavg` under about 4) and run again.
 - **Gradle uninstalls the app once `connectedDebugAndroidTest` finishes.** That deletes
   `/sdcard/Android/data/<pkg>/`, so any evidence file a test wrote there (a synthesized WAV, an
   exported MP4) is gone before you can `adb pull` it — and a later `run-as` reports

@@ -63,9 +63,6 @@ object EnglishNarration : NarrationStrings {
             is Sentence.CaptionTakeaway -> one("Takeaway ${sentence.index} of ${sentence.total}")
             Sentence.CardFinalNumbersHeading -> one("Final numbers")
             is Sentence.CardFinalPlayerLine -> one("${sentence.name} — ${sentence.accuracy}%, est. ${sentence.rating}")
-            is Sentence.CardFinalCountsLine -> one(
-                "Blunders ${sentence.whiteBlunders}–${sentence.blackBlunders} · Mistakes ${sentence.whiteMistakes}–${sentence.blackMistakes}"
-            )
             Sentence.CardWorkOnHeading -> one("What to work on")
             is Sentence.WalkthroughIntro -> one(walkthroughIntro(sentence))
             is Sentence.GameSummary -> one(gameSummary(sentence))
@@ -285,15 +282,19 @@ object EnglishNarration : NarrationStrings {
                 )
             }
             is Sentence.MateBehindIt -> one("And there was mate in ${number(sentence.mateIn)} behind it.")
+            // Said after "Back to the game now." (V4), so none of them says "back" again.
             Sentence.PivotOut ->
                 if (coach) listOf(
-                    "Back in the real game, though, that got played instead —",
+                    "In the real game, though, this got played instead —",
                     "But that is the line that never was. In the real game, this went on the board —",
-                    "So, back to reality. What actually happened was this —"
+                    "What actually happened was this —"
                 ) else listOf(
-                    "Returning to the game as played, the move actually chosen was this —",
-                    "Back to the main line. What was played instead was this —"
+                    "The move actually chosen was this —",
+                    "What was played instead was this —"
                 )
+            // V4: one move of a simulated line, said as it is played. The move in words and nothing else.
+            is Sentence.LineMove -> one(cap(Vocabulary.movePhrase(sentence.move, includeOutcome = true)) + ".")
+            Sentence.BackToTheGame -> one("Back to the game now.")
             Sentence.ChanceGone ->
                 if (coach) listOf(
                     "And the chance is gone. It does not come back.",

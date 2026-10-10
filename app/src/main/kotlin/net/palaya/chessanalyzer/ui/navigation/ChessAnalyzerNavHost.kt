@@ -55,6 +55,7 @@ import net.palaya.chessanalyzer.ui.model.updateSheetView
 import net.palaya.chessanalyzer.ui.viewmodel.UpdatesViewModel
 import net.palaya.chessanalyzer.ui.screens.TacticSimulationScreen
 import net.palaya.chessanalyzer.ui.screens.VideoScreen
+import net.palaya.chessanalyzer.ui.screens.VideoSection
 import kotlinx.coroutines.launch
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.ui.viewmodel.AnalysisViewModel
@@ -459,7 +460,10 @@ fun ChessAnalyzerNavHost(
             // suspends. Three states, not two: "still loading" must not be mistaken for "no
             // analysis in memory", which pops the back stack.
             var scriptState by remember(gameId) { mutableStateOf<VideoScriptState>(VideoScriptState.Loading) }
-            LaunchedEffect(gameId) {
+            // V4: the pace and the voice can now be changed from this screen (its "Voice and pace" sheet). The pace
+            // changes the script's timing and the voice its speech-rate estimate, so the script is built again; the
+            // old one stays on screen until the new one is ready (no spinner, the sheet stays open).
+            LaunchedEffect(gameId, settings.videoPace, narrationVoiceSettings) {
                 scriptState = VideoScriptState.Ready(viewModel.videoScriptFor(gameId))
             }
             val script = (scriptState as? VideoScriptState.Ready)?.script
@@ -479,6 +483,25 @@ fun ChessAnalyzerNavHost(
                         { goToSetup() }
                     } else {
                         null
+                    },
+                    // V4: the Settings screen's own Video section (voice picker + pace), in the player's sheet. A new
+                    // voice gives the provider a new cache fingerprint (sid), so cached narration is never mixed.
+                    voiceAndPaceSettings = {
+                        val voiceSampleState by viewModel.voiceSamples.state.collectAsState()
+                        // Closing the sheet (with or without the picker open) stops a sample and frees the voice engine.
+                        DisposableEffect(Unit) { onDispose { viewModel.releaseVoiceSamples() } }
+                        VideoSection(
+                            settings = settings,
+                            onSettingsChange = { viewModel.updateSettings(it) },
+                            narrationVoiceSettings = narrationVoiceSettings,
+                            voiceInstalled = voiceInstalled,
+                            onNarratorSpeakerChange = { viewModel.setNarratorSpeaker(it) },
+                            voiceSampleState = voiceSampleState,
+                            onPlayVoiceSample = { viewModel.playVoiceSample(it) },
+                            onStopVoiceSample = { viewModel.stopVoiceSample() },
+                            onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
+                            heading = stringResource(R.string.video_voice_and_pace),
+                        )
                     },
                 )
             } else {

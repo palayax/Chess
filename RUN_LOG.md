@@ -4219,3 +4219,179 @@ Google Play requires the privacy policy to be linked inside the app. About now h
 - **Tests:** `AboutPrivacyLinkTest` (instrumented, new): About shows "Privacy policy", it is a button with a click action and >= 48 dp, a tap gives a recording `UriHandler` exactly that URL. `PrivacyPolicyLinkResourceTest` (host, new, 2 cases): URL value, `translatable="false"`, label, and that AboutScreen reads the URL through the shared link modifier. No About test existed before.
 - **Results:** host gate core 541 / app unit 507 (505 + 2) / desktop 25, 0 failed, 0 skipped; `:app:lintDebug` 0 errors. `AboutPrivacyLinkTest` on chess36 (`-gpu host`): tests=1 failures=0 errors=0 skipped=0. Emulator killed, adb server stopped.
 - Not done: no screenshot (the instrumented test asserts the node, role, height and URL); not committed.
+
+## V4 (2026-10-09): video review fixes after the owner's phone test
+
+Owner requests after testing the release APK on a phone: the video review should open full screen in portrait like
+"Show me", show the board from the first frame, say the simulated lines' moves, show material and per-side move
+quality, and offer the narrator voice on the Video screen. Nothing committed. Summary/Board/Settings/update checker
+left to the parallel agent, except the one change item 5 needed in `SettingsScreen.kt` (below). desktop/ and pc/
+untouched (`:desktop:test` 25/0/0 after the contract change). No Hebrew/RTL work.
+
+### 1. Full screen in portrait, as "Show me"
+
+What "Show me" does (verified in the tree and on chess36, `docs/screenshots/v4_show_me_reference.png`): it opens the
+Walkthrough (`TacticSimulationScreen`), a normal screen: system bars shown (edge to edge, dark), a top bar with the back
+arrow and the title, the board **as wide as the screen** directly under it, the controls (stepper, card) under the
+board, the one primary button pinned at the bottom; no overlay; the back arrow and system back pop to where the user
+came from. The Video screen before V4 drew the exported video's 16:9 frame at the screen's width (a ~230 dp board on a
+411 dp phone); its own "full screen" rotated to landscape and hid the bars.
+Now the Video screen in portrait matches it: same bar (back, "Video review", plus the new gear and the old
+full-screen icon), the picture as wide as the screen in a **3:4 portrait frame** (`PORTRAIT_FRAME_ASPECT`) whose
+board is the screen's width (`BoardFrameRenderer.renderPortraitBoardFrame`, chosen whenever the surface is taller than
+wide: Black's player bar, eval bar + board, White's player bar, one info row with the chip, the move and the
+evaluation, the caption bar), controls under it (scrub, transport, chapters), "Save video" pinned at the bottom, system
+bars as they are, back pops. Landscape and the landscape full screen keep the 16:9 frame (the MP4 is unchanged in
+shape). `docs/screenshots/v4_player_portrait_intro.png`, `v4_player_portrait_material.png`,
+`v4_player_portrait_best_line.png`.
+
+### 2. The board from frame 0
+
+The intro's card is drawn on the game's starting position (`BoardDirective.Card.boardFen`; the intro segment now
+carries the engine's eval of that position): the board, eval bar and panel from frame 0, the title, subtitle and
+accuracy line in a dark band over the middle of the board (`drawTitleOnBoard`, the same fitted card, never over the
+first or last rank). Intro narration unchanged. **Frame 0 of the exported MP4 is the board**
+(`docs/screenshots/v4_mp4_frame0.png`, extracted with ffmpeg from the pulled MP4). Reference (chess.com, pattern
+only): Game Review opens on the board with the players and the coach's first words around it; taken: the board from
+the first moment, the title on it. ANALYSIS_SPEC §9.7 "The intro on the board".
+
+### 3. The simulated lines are narrated
+
+- **Best line (V2):** each move is now its own `SegmentKind.BEST_LINE` segment that says the move
+  (`Sentence.LineMove`: `Vocabulary.movePhrase` of `SpokenChess.describe`, the existing spoken-notation path, one
+  wording), then a segment over the game's position says **"Back to the game now."** (`Sentence.BackToTheGame`).
+  Inserted by `ScriptBuilder.paced` after the §9.7 budget loop; their speech and holds are pace time
+  (`VideoScript.pacingMs`), so `storyMs` and the budget are untouched; the plan is decided once at Relaxed with the
+  spoken cost (`lineCostMs`), so every pace says the same words (cache reused); chapters are re-indexed. The player and
+  the exporter needed nothing new (ordinary segments); `SegmentFrameBuilder` draws a BEST_LINE segment as the excursion
+  (border, "Engine's best line", no verdict) and leaves line moves out of "recent moves"; the old silent in-hold path
+  and `speechMs` are gone.
+- **Detours (missed tactics):** their moves were already spoken ("So: queen takes the rook on a one, with check.");
+  the pivot-out now opens with the same "Back to the game now." (the PivotOut variants were reworded so "back" is not
+  said twice). Story +1 to 4 s per game (Immortal 420.1 -> 423.9 s, game01 546.7 -> 548.5 s, Opera 308.8 -> 310.8 s,
+  Byrne-Fischer 535.4 -> 539.2 s; scholar's 52.5 s unchanged), all inside their budgets.
+- **Timing measured** (`core/build/pace/v4_best_lines.txt`, 169 wpm): a spoken line move is 1.7-2.7 s of speech; line
+  time at Relaxed / Normal / Brisk: Opera 11.5 / 10.7 / 10.2 s (4 plies), Immortal 23.0 / 21.4 / 20.4 s (2 x 4),
+  game01 22.2 / 20.8 / 19.8 s (3 + 4). Two moments lost their line to the cap because a spoken line costs more than a
+  silent one: game01's 13...Bc6 (1 ply) and the scholar's mate's 3...Nf6 (1 ply); both keep their arrow. Every game
+  under its cap (game01 Relaxed 86.2 of 87.3 s). ANALYSIS_SPEC §9.8 rewritten.
+- **Claims:** verifier in `scripts/audit_commentary.py` (`expected_line_move` from python-chess's board; every return
+  checked to follow a simulated line and to stand on the game's position, `video_returns.jsonl`), 7 new `mutate`
+  breaks; COMMENTARY_STYLE rows + §7; `CommentaryClaimsTest` derives each spoken move from the board without the
+  narration's vocabulary. Audit: `lines` 2646 checks, 0 WRONG (57 spoken moves, 33 returns); `after` 144 texts 0 WRONG,
+  0/288 side variants differ; `mutate` 21/21 card + 7/7 line mutations flagged, 0 missed.
+- **Cache:** the key is still a pure function of the sentence; new sentences are new keys (seen on the device: the
+  export synthesized 57 segments, the second export of the same script 57/57 from the cache).
+
+### 4. Material and move quality
+
+- `core/.../analysis/MaterialBalance.kt` (new, small, pure; `MaterialBalanceTest` 7 cases): counts per side, points
+  1/3/3/5/9, `lead(color)`, `captured(by)` (the opponent's pieces missing from the starting set, promotions counted as
+  promoted pawns, weakest first), from a `Position`, any pieces, or a FEN. It did not exist before (searched the tree
+  and the worktrees). `SegmentFrameBuilder` attaches it to every board frame, computed from the pieces drawn; the 16:9
+  panel draws the captured pieces and "+N" under each name, the portrait frame in the player bars. A small-icon outline
+  was needed (the board's 2.6 px piece outline swallowed a 20 px bishop; seen in the first export's frames, fixed and
+  re-exported). `docs/screenshots/v4_material_landscape.png`, `v4_material_portrait.png`, `v4_mp4_material_back.png`.
+- Final-numbers card: the "Blunders 1–2 · Mistakes 0–1" line is replaced by a table of every class but Forced in the
+  app's order and colours (`VideoScript.qualityCounts` from `PlayerReport.classificationCounts`,
+  `QUALITY_TABLE_CLASSES`), two columns of five under a header row (`QualityTableGeometry`; one column of ten did not
+  fit the 720p card with the player lines). Fit checked on the host (`CardLayoutTest`, 2 new) and in pixels at 720p and
+  in the 3:4 player frame (`CardFrameFitInstrumentedTest`, 4 new). `docs/screenshots/v4_mp4_final_numbers.png`: the
+  Immortal Game, White 1 Brilliant, 7 Great, 6 Best, 0 Excellent, 1 Good, 4 Book, 1 Inaccuracy, 2 Mistakes, 0 Miss,
+  1 Blunder; Black 0/1/6/2/1/4/3/2/0/2 (the Summary's numbers for that analysis).
+
+### 5. Voice and pace on the Video screen
+
+A gear in the Video screen's bar ("Voice and pace") pauses the player and opens a bottom sheet holding the Settings
+screen's own Video section (`VideoSection`, now `internal`, with a `heading` parameter: the only change to
+`SettingsScreen.kt`): the narrator voice row (the same `VoicePickerDialog`, with samples) and the Pace control.
+The nav host rebuilds the script when the pace or the voice changes (keyed on them; the old script stays on screen
+meanwhile, so the sheet stays open) and the provider is rebuilt from the voice settings as before, so the speaker's
+`sid` in the provider fingerprint moves every cache key; closing the sheet frees the sample engine. Reference
+(chess.com, pattern only): its video player keeps playback settings behind a gear on the player.
+`docs/screenshots/v4_voice_and_pace_sheet.png`, `v4_voice_picker_from_video.png`.
+
+### Real export on chess36 (the Immortal Game, Famous games, Standard, Bella, Relaxed)
+
+Debug build, models from the test APK's seeds (`FamousGamesInstrumentedTest#withTheNetInstalledReviewThisGameStartsTheAnalysis`
+via `am instrument`), analysed on the device (depth 14). Exported twice (the second after the icon fix; its audio is
+bit-identical to the first: same cached clips): **"7 min 40 s · 40 MB"**, 459.60 s audio / 459.50 s video, 1280x720.
+- Frame 0 = the starting position with the title on the board (`v4_mp4_frame0.png`).
+- Offline ASR of the MP4's audio (faster-whisper small.en): 53.7-63.7 s "Bishop to a 4. Knight to a 6. Knight to c3.
+  Knight to c5. Back to the game now." (10.g4's best line; frames `v4_mp4_best_line_move1.png`,
+  `v4_mp4_back_to_the_game.png`, `v4_mp4_contact_sheet.png`), and 321.8-332.3 s "Bishop to a six. Knight to c7 with
+  check. King to d8. Knight takes the bishop on a six. Back to the game now." (20...Na6; `v4_mp4_best_line_20na6.png`);
+  the detours end "Back to the game now." at 110.8, 220.5 and 293.9 s.
+- The narration WAVs pulled from `files/narration/` (Kokoro, Bella): those nine clips (1.2-2.2 s each) transcribe as the
+  moves above and "Back to the game now." (1.37 s); kept in `docs/voice_samples/v4/` (9 WAVs, 676 KB).
+- Screenshots of the player and the voice control (chess36, `adb emu screenrecord screenshot`, all viewed):
+  `v4_show_me_reference.png` (the Walkthrough, for comparison), `v4_player_portrait_intro.png`,
+  `v4_player_portrait_material.png`, `v4_player_portrait_best_line.png`, `v4_voice_and_pace_sheet.png`,
+  `v4_voice_picker_from_video.png`; MP4 frames `v4_mp4_*.png` (frame 0, a best-line move, the return, the 20...Na6
+  line, material after it, the final numbers, a contact sheet); `v4_material_landscape.png` / `v4_material_portrait.png`
+  (rendered on the device by `CardFrameFitInstrumentedTest`). The MP4s are kept on the host only (scratchpad).
+
+### Tests
+
+- **Host, new:** `MaterialBalanceTest` (7), `CommentaryClaimsTest` (+1: every spoken line move derived from the board,
+  every return on the game's position, three games x three sides x three paces), `CardTextTest` (+2: the intro on the
+  starting position with its eval; the quality table = the report's counts, Forced the only class left out, the old
+  counts line gone), `BestLineVideoTest` rewritten (6: the line's segments after their key moment, each move's time at
+  every pace, pace time / same words / story, the v4 measurement, sides, chapters re-indexed), `CardLayoutTest` (+2: the
+  table's rows and labels, the fit arithmetic), `LinePlaybackLogicTest` (the V2 timeline case rewritten for spoken
+  segments and their frames), `VideoScriptGeneratorTest` (the intro now carries its eval).
+  `CommentaryAuditDumpTest.dumpBestLines` also writes what the line's segments say and `video_returns.jsonl`.
+- **Instrumented, new or rewritten:** `VideoScreenPortraitTest` (2: portrait picture as wide as the screen at 3:4 under
+  the bar, back, controls under it; the gear opens the Settings Video section, Brisk is chosen, the picker opens with
+  every voice, Done closes), `CardFrameFitInstrumentedTest` (+4: the intro on the board changes pixels only in its band
+  for 8 name pairs, the table on the card and every card inside its box at 1080x1440, the portrait board wider than
+  85 % of the frame, the material drawn beside the players in both frames), `BestLineVideoInstrumentedTest` (rewritten:
+  each line move and the return are heard in the MP4, RMS > 1000 during each, frames = the renderer's, the player
+  lays out the same timeline), `PanelChipLabelTest` (the best-line case on a BEST_LINE segment and its return),
+  `NarratorAndPaceInstrumentedTest` (pace time of the spoken lines).
+
+### Counts (from the result XML)
+
+`:core:test` **552/0/0** (541 + 11), `:app:testDebugUnitTest` **509/0/0** (507 + 2), `:desktop:test` **25/0/0**, all 0
+skipped; `:app:lintDebug` **0 errors, 69 warnings** (unchanged). `:app:connectedDebugAndroidTest`, `-gpu host`, one
+device after the other: **chess36 (API 36) 184 tests, 0 failures, 0 errors, 0 skipped (1871 s); chess34 (API 34) 184,
+0, 0, 0 (1268 s)** (178 + 6 new). An earlier chess36 run (before the icon fix and three test corrections) had 183 tests
+with 3 failures, all test-side: "Narrator voice" is both the row and the picker title (two nodes), the voice is asked
+one sentence at a time, and the fit test's synthetic report had no class counts; fixed and re-run green.
+Audit: `lines` 2646 / 0 WRONG, `after` 144 texts / 0 WRONG, `mutate` 0 missed (21 card + 7 line).
+
+### Files
+
+- core: `analysis/MaterialBalance.kt` (new), `narration/NarrationContract.kt` (`SegmentKind.BEST_LINE`,
+  `BoardDirective.Card.boardFen`, `SegmentBestLine.spoken/backToGame`, `VideoScript.qualityCounts`, `QualityCount`,
+  `QUALITY_TABLE_CLASSES`), `NarrationStrings.kt` + `EnglishNarration.kt` + `NarrationCatalogue.kt` (`LineMove`,
+  `BackToTheGame`, PivotOut reworded, `CardFinalCountsLine` removed), `VideoScriptGenerator.kt` (intro on the board,
+  quality counts, `paced` inserts the spoken line, `lineCostMs`, `speak`); tests listed above.
+- app: `video/BoardFrameRenderer.kt` (portrait frame, `drawBoard`, title on the board, material, quality table,
+  small-icon outline), `video/SegmentFrameBuilder.kt`, `video/CardLayout.kt` (`QualityTable`, `QualityTableGeometry`),
+  `video/VideoExporter.kt`, `ui/video/VideoPlayerController.kt` (no `speechMs`), `ui/screens/VideoScreen.kt` (portrait
+  frame, gear, sheet), `ui/screens/SettingsScreen.kt` (`VideoSection` internal + `heading`), `ui/navigation/ChessAnalyzerNavHost.kt`,
+  `res/values/strings.xml` (`video_voice_and_pace`); tests listed above.
+- scripts: `audit_commentary.py`. docs: `ANALYSIS_SPEC.md` (§9.7, §9.8), `COMMENTARY_STYLE.md` (2 rows, §7),
+  `COMMENTARY_AUDIT.md` ("V4"), `screenshots/v4_*.png` (15), `voice_samples/v4/` (9 WAVs), CLAUDE.md (one emulator
+  gotcha), RUN_PLAN.md, this log.
+
+### Deviations
+
+1. "Full screen in portrait" is read as "Show me"'s presentation, which keeps the system bars and the top bar: the
+   picture fills the width in a 3:4 portrait layout under the bar, with the controls under it. The old landscape
+   immersive full screen is kept behind its icon (the exported video stays 16:9).
+2. The detours already spoke every move; only their return gained "Back to the game now." (and their PivotOut wording
+   lost its own "back"). The Walkthrough and the Board's line mode are not narrated (they have no player voice).
+3. A spoken line costs more pace time than a silent one, so two one-ply lines no longer fit their cap (game01's
+   13...Bc6, the scholar's mate's 3...Nf6) and keep their arrow; the cap and the story budget were not raised.
+4. The quality table leaves out Forced (chess.com's summary has no such row; the Summary folds it into Book/Forced),
+   and is two columns of five rather than one of ten (one column did not fit the 720p card).
+5. A line move is on screen at least the line rate by the speech *estimate*; a real clip shorter than the estimate can
+   leave it a little shorter (the detours' moves work the same way).
+6. Notification permission was declined on the emulator's prompt during the exports (as in V3).
+7. Not mine, left as found: `docs/LLM_REPHRASE_DESIGN.md` (untracked) appeared in the main checkout during the run.
+
+**Device state restored.** Both emulators shut down; the exported MP4s deleted from chess36 (kept on the host only);
+Gradle uninstalled the app and the test APK; font scale 1.0; adb server stopped. chess34 still holds the stray
+`net.palaya.chessanalyzer.engine.test` package noted since C1-device.

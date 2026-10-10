@@ -193,8 +193,11 @@ class NarratorAndPaceInstrumentedTest {
                 val mate = script.segments.last()
                 val lead = assertNotNull(mate.leadIn).let { mate.leadIn!! }
                 assertEquals(pace.keyLeadInMs, lead.pauseMs)
-                // V2: a best line played after a key moment's speech is pace time too (inside its segment's hold).
-                pacing[pace] = script.segments.sumOf { it.leadInMs + (it.bestLine?.durationMs ?: 0L) } + mate.holdAfterMs
+                // V2 + V4: a best line's moves are segments of their own; their words are the same at every pace,
+                // so only their holds are pace time that differs between paces.
+                pacing[pace] = script.segments.sumOf { it.leadInMs } +
+                    script.segments.filter { it.kind == net.palaya.chessanalyzer.core.narration.SegmentKind.BEST_LINE }.sumOf { it.holdAfterMs } +
+                    mate.holdAfterMs
 
                 val exporter = VideoExporter(app)
                 val out = exporter.export(script, "v3_pace_${pace.name.lowercase()}", null)

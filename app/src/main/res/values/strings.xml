@@ -470,6 +470,8 @@
     <string name="video_pause">Pause</string>
     <string name="video_enter_fullscreen">Enter full screen</string>
     <string name="video_exit_fullscreen">Exit full screen</string>
+    <!-- V4: the gear on the Video screen that opens the narrator voice and the pace (the Settings screen's Video section). -->
+    <string name="video_voice_and_pace">Voice and pace</string>
     <!-- Language (Round 10, i18n groundwork). English only for now; see AppLanguage.kt for how a
          language is added. Hebrew resources must live in values-iw, not values-he. -->
     <string name="settings_language_header">Language</string>
