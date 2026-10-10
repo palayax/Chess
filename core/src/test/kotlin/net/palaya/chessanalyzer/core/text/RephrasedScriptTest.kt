@@ -59,8 +59,10 @@ class RephrasedScriptTest {
 
     @Test
     fun `the allowlist covers the prose kinds, and a kind outside it is denied`() {
-        val all = SegmentKind.values().toSet()
-        assertEquals(all, RephrasedScript.ALLOWED_KINDS) // today every kind is prose; a new kind must be added on purpose
+        // V4's spoken best line (one template sentence per engine move, then "Back to the game now.") is not prose to
+        // reword and stays denied; every other kind today is prose. A new kind must be added on purpose.
+        assertEquals(SegmentKind.values().toSet() - SegmentKind.BEST_LINE, RephrasedScript.ALLOWED_KINDS)
+        assertTrue(SegmentKind.BEST_LINE !in RephrasedScript.ALLOWED_KINDS)
         val seg = script.segments.first { RephrasedScript.eligible(it) }
         assertTrue(RephrasedScript.eligible(seg))
         assertTrue(!RephrasedScript.eligible(seg.copy(narration = seg.caption)))

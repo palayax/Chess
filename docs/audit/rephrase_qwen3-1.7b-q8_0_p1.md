@@ -5,6 +5,7 @@ Written by `RephraseMeasurementDumpTest` from `docs/audit/rephrase/raw_qwen3-1.7
 Verdicts by the Kotlin `ClaimChecker`; `scripts/audit_commentary.py rephrase` re-checks them independently.
 Corpus: every distinct card text of the three audited games (no side, White, Black) and every eligible
 narration beat of the five pacing games at the Normal pace (three sides).
+Texts of this run that today's generator no longer writes (V4 changed three connectives after the run): 1.
 
 ## Verdicts (design §5.5: rejection = REJECT / all; bar <= 25 % cards, <= 35 % narration)
 

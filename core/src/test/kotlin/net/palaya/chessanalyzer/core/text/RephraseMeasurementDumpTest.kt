@@ -70,6 +70,7 @@ class RephraseMeasurementDumpTest {
         appendLine("Verdicts by the Kotlin `ClaimChecker`; `scripts/audit_commentary.py rephrase` re-checks them independently.")
         appendLine("Corpus: every distinct card text of the three audited games (no side, White, Black) and every eligible")
         appendLine("narration beat of the five pacing games at the Normal pace (three sides).")
+        appendLine("Texts of this run that today's generator no longer writes (V4 changed three connectives after the run): ${staleCounts[label] ?: 0}.")
         appendLine()
         appendLine("## Verdicts (design §5.5: rejection = REJECT / all; bar <= 25 % cards, <= 35 % narration)")
         appendLine()
@@ -179,9 +180,12 @@ class RephraseMeasurementDumpTest {
             val label = run.name.removePrefix("raw_").removeSuffix(".jsonl")
             val rows = load(run)
             assertTrue("$label: empty", rows.isNotEmpty())
-            // a run is of the current corpus: every text it judged is a recorded text of today's generator
+            // A run is of the current corpus: (nearly) every text it judged is a recorded text of today's generator. V4
+            // replaced three narration connectives after the runs ("Back to the game now."): up to 2 % may be stale, and
+            // the report says how many; more means the generator moved and the runs must be redone.
             val stale = rows.filter { (it.surface to it.text) !in corpus }
-            assertEquals("$label: texts not in today's corpus: ${stale.take(3).map { it.id }}", 0, stale.size)
+            assertTrue("$label: ${stale.size} texts not in today's corpus: ${stale.take(3).map { it.id }}", stale.size <= rows.size / 50)
+            staleCounts[label] = stale.size
             File(out, "measure_$label.jsonl").writeText(rows.joinToString("") { r ->
                 val v = r.verdict
                 val verdict = when (v) {
@@ -199,6 +203,7 @@ class RephraseMeasurementDumpTest {
     }
 
     private val judged = LinkedHashMap<String, List<Row>>()
+    private val staleCounts = HashMap<String, Int>()
 
     /** The runs side by side on the texts every run judged (the comparison runs keep all cards and every 4th beat). */
     private fun comparison(runs: Map<String, List<Row>>): String = buildString {

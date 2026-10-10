@@ -5,6 +5,7 @@ Written by `RephraseMeasurementDumpTest` from `docs/audit/rephrase/raw_qwen2.5-1
 Verdicts by the Kotlin `ClaimChecker`; `scripts/audit_commentary.py rephrase` re-checks them independently.
 Corpus: every distinct card text of the three audited games (no side, White, Black) and every eligible
 narration beat of the five pacing games at the Normal pace (three sides).
+Texts of this run that today's generator no longer writes (V4 changed three connectives after the run): 3.
 
 ## Verdicts (design §5.5: rejection = REJECT / all; bar <= 25 % cards, <= 35 % narration)
 
@@ -50,10 +51,10 @@ Key moments per game (the cards of class BLUNDER/MISTAKE/MISS/BRILLIANT/GREAT, n
 | Game | Beats reworded | Story before | Story after | Change | Budget |
 |---|---|---|---|---|---|
 | scholars | 2 of 5 | 52.5 s | 52.5 s | -0.0 s | 60.0 s |
-| chesscom | 14 of 30 | 308.8 s | 302.9 s | -5.9 s | 358.0 s |
-| immortal | 23 of 47 | 420.1 s | 406.6 s | -13.5 s | 442.0 s |
-| game01 | 28 of 70 | 546.7 s | 540.6 s | -6.1 s | 582.0 s |
-| byrne_fischer | 32 of 59 | 535.4 s | 524.9 s | -10.5 s | 694.0 s |
+| chesscom | 13 of 31 | 310.8 s | 304.6 s | -6.2 s | 358.0 s |
+| immortal | 21 of 48 | 423.9 s | 410.9 s | -13.1 s | 442.0 s |
+| game01 | 27 of 71 | 548.5 s | 543.1 s | -5.4 s | 582.0 s |
+| byrne_fischer | 30 of 59 | 539.2 s | 529.2 s | -10.0 s | 694.0 s |
 
 ## Quality sample: original vs accepted rewrite (owner: fill the A/B column, prefer = R or O)
 
