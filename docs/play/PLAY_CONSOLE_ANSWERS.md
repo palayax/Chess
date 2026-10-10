@@ -94,6 +94,9 @@ The review names the ideas on both sides of the board: forks, pins, skewers, dis
 Practise your own mistakes
 Turn the positions you got wrong into puzzles and try them again until you find the right move.
 
+Learn from the classics
+91 famous games are built in, from the Immortal Game to modern classics. Pick one and get the same full review, move by move.
+
 A report that tells you something
 Accuracy for both players, an estimated performance rating, a count of every kind of move, an evaluation graph and the moments the game turned on.
 
@@ -116,6 +119,8 @@ Palaya Chess is free software under the GNU GPL v3. Source code: https://github.
 
 Palaya Chess is not affiliated with, endorsed by or connected to Chess.com or Lichess. Games exported from those sites work because PGN is an open standard.
 ```
+
+**Entered 2026-10-09** (main store listing saved; the famous-games paragraph above was added, 2,547 characters). On the listing's Review step the Console now asks whether assets are AI-generated: answered **Don't label assets** (the icon and feature graphic are drawn by `make_graphics.py` from our own art, the screenshots are real app captures).
 
 ### 2.2 Graphics
 

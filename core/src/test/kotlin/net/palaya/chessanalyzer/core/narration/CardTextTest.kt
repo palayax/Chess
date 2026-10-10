@@ -119,4 +119,47 @@ class CardTextTest {
         }
         assertNotNull(games)
     }
+
+    // -----------------------------------------------------------------------
+    // V4: the intro on the board, and the final numbers' move-quality table
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `the intro card is drawn on the game's starting position, with the engine's number for it`() {
+        for ((name, g) in games) {
+            val s = script(g)
+            val introSegment = s.segments.first()
+            assertEquals(name, SegmentKind.INTRO, introSegment.kind)
+            val intro = introSegment.board as BoardDirective.Card
+            val report = g.report()
+            assertEquals(name, report.annotations.first().fenBefore, intro.boardFen)
+            assertNotNull("$name: an eval bar from the first frame", introSegment.eval)
+            // Still a title card: the same words as before V4.
+            assertEquals(name, 2, intro.lines.size)
+        }
+    }
+
+    @Test
+    fun `the final-numbers table counts every class but Forced for each side, in the app's order`() {
+        for ((name, g) in games) for (user in listOf<Color?>(null, Color.WHITE, Color.BLACK)) {
+            val report = g.report(user)
+            val s = VideoScriptGenerator(user).generate(report, g.pgn, NarrationOptions())
+            assertEquals(name, QUALITY_TABLE_CLASSES, s.qualityCounts.map { it.classification })
+            assertEquals(name, 10, s.qualityCounts.size)
+            for (row in s.qualityCounts) {
+                // Each count is the number of that side's moves with that class: nothing else feeds it.
+                val white = report.annotations.count { it.color == Color.WHITE && it.classification == row.classification }
+                val black = report.annotations.count { it.color == Color.BLACK && it.classification == row.classification }
+                assertEquals("$name ${row.classification} White", white, row.white)
+                assertEquals("$name ${row.classification} Black", black, row.black)
+            }
+            // The counts the table does not show are exactly the forced moves.
+            val shown = s.qualityCounts.sumOf { it.white + it.black }
+            val forced = report.annotations.count { it.classification == net.palaya.chessanalyzer.core.analysis.MoveClassification.FORCED }
+            assertEquals(name, report.annotations.size, shown + forced)
+            // The card's old counts line is gone: the table is the one place the counts are printed.
+            val outro = card(s, SegmentKind.OUTRO_SUMMARY)
+            assertTrue(name, outro.lines.none { it.contains("Blunders") || it.contains("Mistakes") })
+        }
+    }
 }

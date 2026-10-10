@@ -24,6 +24,7 @@ import net.palaya.chessanalyzer.data.models.FaultHttpServer
 import net.palaya.chessanalyzer.data.models.TestManifests
 import net.palaya.chessanalyzer.data.models.UpdateChecker
 import net.palaya.chessanalyzer.data.models.UpdateUiState
+import net.palaya.chessanalyzer.data.models.UpstreamChecker
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -71,6 +72,7 @@ class UpdateCheckNetworkTest {
         ProxySelector.setDefault(original)
         scenario?.close()
         app.updateCheckerForTesting = null
+        app.upstreamCheckerForTesting = null
         server?.close()
     }
 
@@ -98,6 +100,9 @@ class UpdateCheckNetworkTest {
             facts = { app.appFacts().copy(baseUrl = s.baseUrl) },
             diagnostics = app.diagnostics.log,
         )
+        // A4: this test is about the signed check alone ("exactly two requests"); the upstream half has its own
+        // (UpdateCheckUpstreamTest), so it is given no sources here.
+        app.upstreamCheckerForTesting = UpstreamChecker(app.modelDownloader, app.networkStatus, emptyList())
 
         ProxySelector.setDefault(recorder)
         // The instrument works: a real connection through the platform stack IS recorded.

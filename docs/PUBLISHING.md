@@ -14,7 +14,7 @@ downloading build; the owner's own to-do list is at the top of `HANDOFF.md`.
 | What Play delivers | the App Bundle (`app-release.aab`), about **14.5 MB** to a 64-bit phone (§3) |
 | First run | the Setup screen; a tap on **Download** fetches the engine net (98,511,183 B) and the voice (`kokoro-int8-en-v0_19.tar.gz`, 102,543,452 B, unpacks to 158,269,440 B): **201 MB** from GitHub, about 400 MB free space at the peak, 257 MB on disk after |
 | Where from | `https://github.com/palayax/Chess/releases/download/models-2026.10/<file>` (the owner's repo, created 2026-10-07; §4c) |
-| Network | only after a tap: the setup download, and Settings > Check for updates (`models.json` + `.sig`, then a file only on "Download and install"). Nothing in the background, nothing uploaded |
+| Network | only after a tap: the setup download, and Settings > Check for updates (`models.json` + `.sig`, three GitHub API release lists for the upstream versions, then a file only on "Download and install"). Nothing in the background, nothing uploaded |
 | Permissions | `INTERNET`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_MEDIA_PROCESSING`, `POST_NOTIFICATIONS` (checked with aapt2 on the release APK, D2f) |
 | Foreground services | `ModelDownloadService` (dataSync), `VideoExportService` (mediaProcessing on Android 15+, dataSync on 10-14) |
 | Privacy policy | `docs/PRIVACY_POLICY.md`, live at https://palayax.github.io/Chess/privacy/ (GitHub Pages, `gh-pages` branch) |
@@ -365,10 +365,19 @@ reading of the form, not a legal conclusion; confirm against the form's wording 
 - **Network use, for the reviewer's understanding:** the app downloads two data files from GitHub on the
   first run (only after the user taps Download), a third, optional one (the wording model, C2) only if the user
   ticks it at setup or taps Download for it in Settings, and the update manifest, its signature and, on request, a
-  model file when the user taps Check for updates in Settings. GitHub receives the device's IP address and a
-  User-Agent (`PalayaChess/<version> (Android <SDK>)`) as part of serving the download, as with any web
-  request; the app transmits nothing else, and the developer receives nothing (GitHub shows publishers only
-  aggregate download counts). The usual reading of the form is that data which never leaves the device,
+  model file when the user taps Check for updates in Settings. Since A4 that same tap also reads three
+  public release lists from GitHub's unauthenticated REST API (`api.github.com`: the latest release of
+  official-stockfish/Stockfish and of k2-fsa/sherpa-onnx, and the asset list of sherpa-onnx's `tts-models`
+  release, where the Kokoro voice comes from; about 0.1 MB on the wire, gzip) to show, per component,
+  whether upstream has a newer version. It is information only: nothing from those projects is downloaded
+  (engine code never is), a rate limit (60 requests an hour per address) or an outage only turns that row
+  into "couldn't check", and it cannot change the signed result. Hugging Face is not contacted. GitHub receives the
+  device's IP address and a User-Agent (`PalayaChess/<version> (Android <SDK>)`) as part of serving each
+  request, as with any web request; the app transmits nothing else (no key, cookie, account or identifier;
+  every request goes through `ModelDownloader.fetchSmall`, https only and size-capped, pinned by
+  `NetworkCallSitesTest`, `UpstreamCheckerTest` and `UpdateCheckUpstreamTest`), and the developer receives
+  nothing (GitHub shows publishers only aggregate download counts). **Data safety stays "no data collected,
+  none shared".** The usual reading of the form is that data which never leaves the device,
   and the ordinary connection metadata of a request the app makes to fetch content from a host, are not
   "collected"; the owner should confirm that reading against the form's help text on the day.
 - **No library fetches anything on the app's behalf.** androidx.emoji2 (a Compose dependency) would ask Play

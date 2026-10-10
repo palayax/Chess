@@ -490,4 +490,121 @@ class CommentaryClaimsTest {
         }
         assertTrue("$checked captions, $materialClaims material claims, $exchangeClaims exchange claims", checked > 300 && materialClaims > 0)
     }
+
+    // -----------------------------------------------------------------------
+    // V4: the spoken best line and the way back to the game
+    // -----------------------------------------------------------------------
+
+    /** The sentence V4 added for a line move, as a template: a move in words, nothing else. */
+    private val lineMoveTemplate = Regex(
+        "^(?:Castles (?:kingside|queenside)|(?:The )?(?:Pawn|Knight|Bishop|Rook|Queen|King|pawn|knight|bishop|rook|queen|king)" +
+            "(?: on [a-h] (?:one|two|three|four|five|six|seven|eight))? " +
+            "(?:to|from [a-h] (?:one|two|three|four|five|six|seven|eight) to|takes(?: the (?:pawn|knight|bishop|rook|queen))? on) " +
+            "[a-h] (?:one|two|three|four|five|six|seven|eight)" +
+            "(?:, en passant)?(?:, promoting to a (?:knight|bishop|rook|queen))?)(?:, with check|, and that is checkmate)?\\.$"
+    )
+
+    private val rankWords = listOf("one", "two", "three", "four", "five", "six", "seven", "eight")
+    private val pieceWords = mapOf(
+        PieceType.PAWN to "pawn", PieceType.KNIGHT to "knight", PieceType.BISHOP to "bishop",
+        PieceType.ROOK to "rook", PieceType.QUEEN to "queen", PieceType.KING to "king",
+    )
+
+    private fun spokenSquare(sq: Square) = "${'a' + sq.file} ${rankWords[sq.rank]}"
+
+    /**
+     * What a line move must say, worked out here from the board alone (not through the narration's own
+     * vocabulary): the piece that stands on the from-square, its square when another piece of its kind could
+     * also reach the target, the target, the piece standing there for a capture, en passant, the promotion,
+     * and check or mate read off the position after the move.
+     */
+    private fun expectedLineMove(before: Position, uci: String): String {
+        val move = before.parseUci(uci)
+        val after = before.makeMove(move)
+        val mover = before.pieceAt(move.from)!!
+        assertEquals(mover.type, move.piece)
+        val base = if (move.isCastle) {
+            if (move.to.file > move.from.file) "castles kingside" else "castles queenside"
+        } else {
+            val name = pieceWords.getValue(mover.type)
+            val twin = before.legalMoves().any { it.to == move.to && it.from != move.from && before.pieceAt(it.from)?.type == mover.type }
+            val who = if (twin) "the $name on ${spokenSquare(move.from)}" else name
+            val victim = before.pieceAt(move.to)
+            val core = when {
+                move.isEnPassant -> "$who takes on ${spokenSquare(move.to)}, en passant"
+                victim != null -> "$who takes the ${pieceWords.getValue(victim.type)} on ${spokenSquare(move.to)}"
+                twin -> "the $name from ${spokenSquare(move.from)} to ${spokenSquare(move.to)}"
+                else -> "$who to ${spokenSquare(move.to)}"
+            }
+            core + (move.promotion?.let { ", promoting to a ${pieceWords.getValue(it)}" } ?: "")
+        }
+        val outcome = when {
+            after.isCheckmate() -> ", and that is checkmate"
+            after.isInCheck() -> ", with check"
+            else -> ""
+        }
+        return base.replaceFirstChar { it.uppercaseChar() } + outcome + "."
+    }
+
+    @Test
+    fun `every spoken best-line move says exactly the move on its board, and the line ends back on the game`() {
+        var moves = 0
+        var returns = 0
+        var excursionReturns = 0
+        for ((name, g) in games) {
+            for (side in sides) {
+                val report = reports.getValue(name to side)
+                for (pace in VideoPace.entries) {
+                    val s = VideoScriptGenerator(side).generate(report, g.pgn, NarrationOptions(speechWpm = 169, pace = pace))
+                    for ((i, seg) in s.segments.withIndex()) {
+                        val tag = "$name/$side/$pace segment $i [${seg.narration}]"
+                        assertEquals(tag, i, seg.index)
+                        if (seg.kind == SegmentKind.BEST_LINE) {
+                            moves++
+                            val d = seg.board as BoardDirective.PlayMove
+                            val before = Position.fromFen(d.fen)
+                            assertEquals(tag, expectedLineMove(before, d.uci), seg.narration)
+                            assertTrue(tag, lineMoveTemplate.matches(seg.narration))
+                            // The SAN on screen is the same move.
+                            assertEquals(tag, before.moveToSan(before.parseUci(d.uci)), d.san)
+                            // A hypothetical move: no verdict and no swing.
+                            assertEquals(tag, null, seg.classification)
+                            assertEquals(tag, null, seg.evalSwingCp)
+                        }
+                        if (seg.narration.contains("Back to the game now.")) {
+                            // Said once, first, and only where a simulated line has just ended.
+                            assertTrue(tag, seg.narration.startsWith("Back to the game now."))
+                            assertEquals(tag, 1, Regex("Back to the game now\\.").findAll(seg.narration).count())
+                            val prev = s.segments[i - 1]
+                            val a = report.annotations[seg.ply!! - 1]
+                            val board = seg.board as BoardDirective.Annotate
+                            // ...and the board really is the game's again: the position before the move it is about.
+                            assertEquals(tag, Position.fromFen(a.fenBefore), Position.fromFen(board.fen))
+                            when (prev.kind) {
+                                SegmentKind.BEST_LINE -> {
+                                    returns++
+                                    assertEquals(tag, "Back to the game now.", seg.narration)
+                                    // The line that just ended is the one the key moment before it named.
+                                    val key = s.segments.subList(0, i).last { it.kind != SegmentKind.BEST_LINE }
+                                    val line = key.bestLine!!
+                                    assertEquals(tag, line.backToGame, seg.narration)
+                                    assertEquals(tag, line.spoken, s.segments.subList(key.index + 1, i).map { it.narration })
+                                    assertEquals(tag, key.board, seg.board)
+                                }
+                                SegmentKind.MISSED_TACTIC -> excursionReturns++
+                                else -> throw AssertionError("$tag follows a ${prev.kind}, not a simulated line")
+                            }
+                        }
+                    }
+                    // Every line is followed by its moves and its return, and nothing else.
+                    for (seg in s.segments) {
+                        val line = seg.bestLine ?: continue
+                        val after = s.segments.subList(seg.index + 1, seg.index + 2 + line.uci.size)
+                        assertEquals(List(line.uci.size) { SegmentKind.BEST_LINE } + SegmentKind.KEY_MOMENT, after.map { it.kind })
+                    }
+                }
+            }
+        }
+        assertTrue("$moves spoken moves, $returns returns after a best line, $excursionReturns after a detour", moves > 20 && returns > 3)
+    }
 }

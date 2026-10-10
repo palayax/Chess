@@ -4,15 +4,18 @@ import net.palaya.chessanalyzer.core.analysis.BestLines
 import net.palaya.chessanalyzer.core.analysis.GameReport
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.chess.Color
+import net.palaya.chessanalyzer.core.chess.Position
+import net.palaya.chessanalyzer.core.chess.parseUci
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ANALYSIS_SPEC 9.8 (V2): a key moment whose narration names the better move plays the engine's best line
- * after its speech, instead of leaving the better move as an arrow. These tests pin how the line fits the
- * video timeline at Relaxed, Normal and Brisk: inside the segment's hold (pace time, outside the story
- * budget), starting when the speech ends, never longer than the Board's line for the same move.
+ * ANALYSIS_SPEC 9.8 (V2, narrated since V4): a key moment whose narration names the better move is followed
+ * by the engine's best line, one spoken [SegmentKind.BEST_LINE] segment per move and then "Back to the game
+ * now." These tests pin how the line sits in the script at Relaxed, Normal and Brisk: right after its key
+ * moment, the same moves as the Board's line, each on screen at least the pace's line rate, all of it pace
+ * time (outside the story budget, inside the cap), and the same words at every pace.
  */
 class BestLineVideoTest {
 
@@ -28,6 +31,10 @@ class BestLineVideoTest {
         val report = game.report(side)
         return report to VideoScriptGenerator(side).generate(report, game.pgn, NarrationOptions(speechWpm = 169, pace = pace))
     }
+
+    /** The segments a key moment's line put after it: its moves, then the return. */
+    private fun lineSegments(s: VideoScript, key: ScriptSegment): List<ScriptSegment> =
+        s.segments.subList(key.index + 1, key.index + 2 + key.bestLine!!.uci.size)
 
     @Test
     fun `the best line is played on the key moments that name the better move, at every pace`() {
@@ -53,89 +60,112 @@ class BestLineVideoTest {
                     assertEquals(name, boardLine.ucis.take(line.uci.size), line.uci)
                     assertEquals(name, boardLine.sans.take(line.uci.size), line.san)
                     assertEquals(line.uci.size, line.captions.size)
+                    assertEquals(line.uci.size, line.spoken.size)
                     assertTrue(line.captions.last(), line.captions.last().startsWith("Best line — "))
                     assertTrue(line.captions.last(), line.captions.last().contains(line.san.last()))
+                    // V4: the beats after it play exactly those moves, each from the position the previous one left,
+                    // and say them; then the board is the game's position again and the voice says so.
+                    val after = lineSegments(s, seg)
+                    var pos = Position.fromFen(line.fen)
+                    for ((k, ls) in after.dropLast(1).withIndex()) {
+                        assertEquals(SegmentKind.BEST_LINE, ls.kind)
+                        val d = ls.board as BoardDirective.PlayMove
+                        assertEquals(pos, Position.fromFen(d.fen))
+                        assertEquals(line.uci[k], d.uci)
+                        assertEquals(line.san[k], d.san)
+                        assertEquals(line.spoken[k], ls.narration)
+                        assertEquals(line.captions[k], ls.caption)
+                        assertEquals(a.ply, ls.ply)
+                        assertEquals(seg.eval, ls.eval)
+                        pos = pos.makeMove(pos.parseUci(d.uci))
+                    }
+                    val back = after.last()
+                    assertEquals(SegmentKind.KEY_MOMENT, back.kind)
+                    assertEquals("Back to the game now.", back.narration)
+                    assertEquals(seg.board, back.board)
+                    assertEquals(a.classification, back.classification)
                 }
             }
         }
     }
 
     @Test
-    fun `the line fits the segment's hold at Relaxed, Normal and Brisk, at the pace's line rate`() {
+    fun `each line move is on screen at least the pace's line rate, and the final position is held`() {
         for ((name, g) in games) {
             for (pace in VideoPace.entries) {
                 val (_, s) = script(g, pace)
                 val cap = VideoScriptGenerator.pacingCapMs((g.pgn.moves.size + 1) / 2)
+                assertTrue("$name $pace ${s.pacingMs} vs $cap", s.pacingMs <= cap)
                 for (seg in s.segments) {
                     val line = seg.bestLine ?: continue
-                    // The lines only use the room the V3 pace time leaves under the cap, so nothing is scaled:
-                    // every line moves at the pace's own rate and holds its own final time.
+                    // The lines only use the room the V3 pace time leaves under the cap, so nothing is scaled.
                     assertEquals("$name $pace", pace.lineMoveMinMs, line.stepMs)
                     assertEquals("$name $pace", pace.lineFinalHoldMs, line.finalHoldMs)
-                    assertTrue("$name $pace ${s.pacingMs} vs $cap", s.pacingMs <= cap)
-                    assertTrue(line.stepMs >= PaceTimes.MIN_LINE_STEP_MS)
-                    assertEquals(line.uci.size * line.stepMs + line.finalHoldMs, line.durationMs)
-                    // Laid out the way the app's timeline lays a segment out: lead-in, speech (with its floor),
-                    // then the hold, which begins with the line; then the gap. The line ends inside the segment.
-                    val speech = maxOf(seg.estimatedSpeechMs, ScriptTiming.MIN_SEGMENT_MS)
-                    val segmentMs = seg.leadInMs + speech + seg.holdAfterMs + ScriptTiming.INTER_SEGMENT_GAP_MS
-                    val lineStart = seg.leadInMs + speech
-                    assertTrue("$name $pace", seg.holdAfterMs >= line.durationMs)
-                    assertTrue("$name $pace", lineStart + line.durationMs <= segmentMs - ScriptTiming.INTER_SEGMENT_GAP_MS)
-                    // Every move is on screen at least the line rate: the slide plus a rest.
-                    assertTrue(line.stepMs > ScriptTiming.MOVE_ANIMATION_MS)
+                    val moves = lineSegments(s, seg).dropLast(1)
+                    for ((k, m) in moves.withIndex()) {
+                        // Laid out the way the app's timeline lays a segment out: speech (with its floor), hold, gap.
+                        val onScreen = maxOf(m.estimatedSpeechMs, ScriptTiming.MIN_SEGMENT_MS) + m.holdAfterMs + ScriptTiming.INTER_SEGMENT_GAP_MS
+                        val last = k == moves.lastIndex
+                        assertTrue("$name $pace ${m.caption}: $onScreen ms", onScreen >= pace.lineMoveMinMs + if (last) pace.lineFinalHoldMs else 0L)
+                        assertTrue(onScreen > ScriptTiming.MOVE_ANIMATION_MS)
+                        assertEquals(0L, m.leadInMs)
+                    }
+                    // The return holds nothing extra: the next beat continues the game.
+                    assertEquals(0L, lineSegments(s, seg).last().holdAfterMs)
                 }
             }
         }
     }
 
     @Test
-    fun `the line is pace time, so the story, its words and the budget are untouched`() {
+    fun `the line is pace time, so the story and the budget are untouched, and every pace says the same words`() {
         for ((name, g) in games) {
             val scripts = VideoPace.entries.map { script(g, it).second }
             for (s in scripts) {
-                val lines = s.segments.sumOf { it.bestLine?.durationMs ?: 0L }
-                assertTrue("$name: lines $lines within pace time ${s.pacingMs}", lines <= s.pacingMs)
+                val lineMs = s.segments.withIndex().sumOf { (i, x) ->
+                    val afterLine = i > 0 && s.segments[i - 1].kind == SegmentKind.BEST_LINE && x.kind != SegmentKind.BEST_LINE
+                    if (x.kind == SegmentKind.BEST_LINE || afterLine) x.estimatedSpeechMs + x.holdAfterMs else 0L
+                }
+                assertTrue("$name: lines $lineMs within pace time ${s.pacingMs}", lineMs <= s.pacingMs)
                 assertEquals(s.segments.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs }, s.totalEstimatedMs)
                 assertTrue(s.pacingMs <= VideoScriptGenerator.pacingCapMs((g.pgn.moves.size + 1) / 2))
+                assertTrue("$name story ${s.storyMs}", s.storyMs <= VideoScriptGenerator.budgetMs((g.pgn.moves.size + 1) / 2))
             }
-            // The same segments at every pace, with a line on the same ones: only its timing differs.
-            val withLine = scripts.map { s -> s.segments.filter { it.bestLine != null }.map { it.index } }
-            assertEquals(name, withLine[0], withLine[1])
-            assertEquals(name, withLine[0], withLine[2])
-            assertEquals(name, scripts[0].storyMs, scripts[2].storyMs)
-            assertEquals(name, scripts[0].segments.map { it.bestLine?.uci }, scripts[1].segments.map { it.bestLine?.uci })
-            assertEquals(name, scripts[0].segments.map { it.bestLine?.uci }, scripts[2].segments.map { it.bestLine?.uci })
+            // The same segments at every pace, with a line on the same ones and the same words: only time differs.
+            for (other in scripts.drop(1)) {
+                assertEquals(name, scripts[0].segments.map { it.narration }, other.segments.map { it.narration })
+                assertEquals(name, scripts[0].segments.map { it.bestLine?.uci }, other.segments.map { it.bestLine?.uci })
+                assertEquals(name, scripts[0].storyMs, other.storyMs)
+            }
         }
     }
 
-    /** The measurement behind RUN_LOG V2: per game and pace, the moments with a line and their time before and after. */
+    /** The measurement behind RUN_LOG V4: per game and pace, the moments with a line and what they add. */
     @Test
-    fun `measurement - writes core build pace v2_best_lines txt`() {
+    fun `measurement - writes core build pace v4_best_lines txt`() {
         val out = StringBuilder()
         for ((name, g) in games) {
             for (pace in VideoPace.entries) {
                 val (_, s) = script(g, pace)
-                val withLine = s.segments.filter { it.bestLine != null }
-                val lineMs = withLine.sumOf { it.bestLine!!.durationMs }
+                val keys = s.segments.filter { it.bestLine != null }
                 val moves = (g.pgn.moves.size + 1) / 2
+                val lineMs = keys.sumOf { k -> lineSegments(s, k).sumOf { it.estimatedSpeechMs + it.holdAfterMs } }
                 out.appendLine(
-                    "$name $pace: ${withLine.size} moments with a line, line time ${lineMs} ms, pace time ${s.pacingMs} ms " +
-                        "(cap ${VideoScriptGenerator.pacingCapMs(moves)}), story ${s.storyMs} ms, total ${s.totalEstimatedMs} ms"
+                    "$name $pace: ${keys.size} moments with a line, ${keys.sumOf { it.bestLine!!.uci.size }} plies, line time $lineMs ms, " +
+                        "pace time ${s.pacingMs} ms (cap ${VideoScriptGenerator.pacingCapMs(moves)}), story ${s.storyMs} ms, " +
+                        "total ${s.totalEstimatedMs} ms, ${s.segments.size} segments"
                 )
-                for (seg in withLine) {
-                    val line = seg.bestLine!!
-                    val speech = maxOf(seg.estimatedSpeechMs, ScriptTiming.MIN_SEGMENT_MS)
-                    val after = seg.leadInMs + speech + seg.holdAfterMs + ScriptTiming.INTER_SEGMENT_GAP_MS
-                    val before = after - line.durationMs
+                for (k in keys) {
+                    val segs = lineSegments(s, k)
                     out.appendLine(
-                        "  ply ${seg.ply} [${seg.caption}] ${seg.kind}: on screen ${before} ms -> ${after} ms; line " +
-                            "${line.san.joinToString(" ")} (${line.uci.size} x ${line.stepMs} + ${line.finalHoldMs}) from ${seg.leadInMs + speech} ms"
+                        "  ply ${k.ply} [${k.caption}]: " + segs.joinToString(" | ") { x ->
+                            "${x.narration} (${x.estimatedSpeechMs}+${x.holdAfterMs})"
+                        }
                     )
                 }
             }
         }
-        java.io.File("build/pace/v2_best_lines.txt").apply { parentFile.mkdirs() }.writeText(out.toString())
+        java.io.File("build/pace/v4_best_lines.txt").apply { parentFile.mkdirs() }.writeText(out.toString())
         assertTrue(out.isNotEmpty())
     }
 
@@ -151,6 +181,19 @@ class BestLineVideoTest {
                 val theirs = other.segments.mapNotNull { seg -> seg.bestLine?.let { seg.ply to it.uci } }.toMap()
                 for ((ply, uci) in theirs) mine[ply]?.let { assertEquals("$name ply $ply", it, uci) }
             }
+        }
+    }
+
+    @Test
+    fun `chapters still point at the segments they named before the lines were inserted`() {
+        for ((name, g) in games) {
+            val (_, s) = script(g, VideoPace.RELAXED)
+            for (c in s.chapters) {
+                val first = s.segments[c.startSegmentIndex]
+                assertTrue("$name ${c.title} starts on a ${first.kind}", first.kind != SegmentKind.BEST_LINE)
+            }
+            assertEquals(s.chapters.map { it.startSegmentIndex }.sorted(), s.chapters.map { it.startSegmentIndex })
+            assertEquals((0 until s.segments.size).toList(), s.segments.map { it.index })
         }
     }
 }

@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
@@ -58,6 +59,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -137,6 +140,14 @@ private fun Context.findActivity(): Activity? {
 private const val FULLSCREEN_CONTROLS_AUTO_HIDE_MS = 3_500L
 
 /**
+ * The picture's shape when the phone is upright (V4): 3:4, taller than wide, so the board can be as wide as
+ * the screen, as in the Walkthrough ("Show me"). [net.palaya.chessanalyzer.video.BoardFrameRenderer] lays a
+ * taller-than-wide frame out in portrait (player bars above and below the board, the move and the evaluation
+ * under it). Landscape and the landscape full screen keep the exported video's 16:9.
+ */
+internal const val PORTRAIT_FRAME_ASPECT = 3f / 4f
+
+/**
  * Plays a [VideoScript] live in-app (board + TTS + captions, chaptered) and offers exporting the
  * same script to a shareable MP4. The board is drawn by [BoardSurfaceView] — a thin
  * [android.view.View] wrapper around [net.palaya.chessanalyzer.video.BoardFrameRenderer] — so
@@ -154,6 +165,12 @@ fun VideoScreen(
      * voice narrates meanwhile (the existing fallback); a one-line notice says so, with "Finish setup".
      */
     onFinishSetup: (() -> Unit)? = null,
+    /**
+     * V4: the narrator voice and the pace, offered from this screen (a gear in the bar opens them in a sheet,
+     * chess.com's player-settings pattern). The caller passes the Settings screen's own Video section, so the
+     * voice picker and the pace control are the same components; null hides the gear.
+     */
+    voiceAndPaceSettings: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -181,6 +198,7 @@ fun VideoScreen(
 
     var isFullScreen by remember { mutableStateOf(false) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var settingsOpen by remember { mutableStateOf(false) }
 
     fun setFullScreen(value: Boolean) {
         isFullScreen = value
@@ -313,6 +331,14 @@ fun VideoScreen(
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
+                        if (voiceAndPaceSettings != null) {
+                            IconButton(onClick = {
+                                controller.pause()
+                                settingsOpen = true
+                            }) {
+                                Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.video_voice_and_pace))
+                            }
+                        }
                         IconButton(onClick = { setFullScreen(true) }) {
                             Icon(Icons.Filled.Fullscreen, contentDescription = stringResource(R.string.video_enter_fullscreen))
                         }
@@ -349,6 +375,8 @@ fun VideoScreen(
                 onExitFullScreen = { setFullScreen(false) },
             )
         } else {
+            // Upright, the picture is the portrait frame (V4): the board as wide as the screen, like "Show me".
+            val portrait = !isLandscape()
             val surface: @Composable () -> Unit = {
                 VideoBoardSurface(
                     script = script,
@@ -356,6 +384,7 @@ fun VideoScreen(
                     fillAvailableSpace = false,
                     onDoubleTap = { setFullScreen(true) },
                     modifier = Modifier.fillMaxWidth(),
+                    aspectRatio = if (portrait) PORTRAIT_FRAME_ASPECT else VIDEO_ASPECT,
                 )
             }
             // Everything under (or, in landscape, beside) the picture.
@@ -438,6 +467,10 @@ fun VideoScreen(
         }
     }
 
+    if (settingsOpen && voiceAndPaceSettings != null) {
+        VoiceAndPaceSheet(onDismiss = { settingsOpen = false }, content = voiceAndPaceSettings)
+    }
+
     // Driven purely off the service's state: Idle means "no export to report", anything else
     // means there is one — including an export started before this composition existed.
     if (exportState !is VideoExporter.State.Idle) {
@@ -453,6 +486,39 @@ fun VideoScreen(
         )
     }
 
+}
+
+/** The exported video's own shape, 16:9. */
+private const val VIDEO_ASPECT = VideoExporter.VIDEO_WIDTH.toFloat() / VideoExporter.VIDEO_HEIGHT.toFloat()
+
+/**
+ * "Voice & pace" (V4): a bottom sheet over the player with the narrator voice and the pace, opened from the
+ * gear in the bar. Chess.com's video player keeps its playback settings behind a gear on the player in the
+ * same way (pattern only). The content is the Settings screen's Video section itself, so the two can never
+ * differ; a change rebuilds the script (pace) or the narration identity (voice) through the same settings.
+ */
+@Composable
+private fun VoiceAndPaceSheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+        ) {
+            content()
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.End).padding(horizontal = 16.dp).heightIn(min = 48.dp),
+            ) {
+                Text(stringResource(R.string.common_done))
+            }
+        }
+    }
 }
 
 /** "Narrated with the phone's voice until setup is finished." + Finish setup; wraps at a large font. */
@@ -489,6 +555,7 @@ private fun VideoBoardSurface(
     modifier: Modifier = Modifier,
     onSingleTap: () -> Unit = {},
     onDoubleTap: () -> Unit = {},
+    aspectRatio: Float = VIDEO_ASPECT,
 ) {
     // pointerInput(Unit) never restarts its gesture-detection coroutine across recompositions, so
     // it would otherwise close over the *first* composition's lambdas — rememberUpdatedState keeps
@@ -502,7 +569,7 @@ private fun VideoBoardSurface(
     AndroidView(
         modifier = modifier
             .then(if (fillAvailableSpace) Modifier else Modifier.fillMaxWidth())
-            .aspectRatio(VideoExporter.VIDEO_WIDTH.toFloat() / VideoExporter.VIDEO_HEIGHT.toFloat())
+            .aspectRatio(aspectRatio)
             .semantics { contentDescription = frameDescription }
             .pointerInput(Unit) {
                 detectTapGestures(

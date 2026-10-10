@@ -285,7 +285,11 @@ private class ScriptBuilder(
             recap = GameRecap.build(
                 report, header.whiteName, header.blackName,
                 userColor.takeIf { options.addressUserAsYou }, strings, options.viewerGender
-            )
+            ),
+            // V4: the final-numbers card's table, straight from the report's counts.
+            qualityCounts = if (annotations.isEmpty()) emptyList() else QUALITY_TABLE_CLASSES.map {
+                QualityCount(it, count(report.white, it), count(report.black, it))
+            }
         )
     }
 
@@ -348,6 +352,8 @@ private class ScriptBuilder(
             // [subtitle, accuracy], each fact once. The subtitle is the result with the move count, then
             // the opening, on ONE line; the accuracy line is whole percent, as the Summary writes it.
             // The names are in the heading only and are not repeated by the renderer.
+            // V4: the card is drawn on the game's starting position, so the board is there from the first
+            // frame (chess.com's Game Review opens on the board, the players and the coach's words around it).
             board = BoardDirective.Card(
                 heading = videoTitle(),
                 lines = listOf(
@@ -356,8 +362,11 @@ private class ScriptBuilder(
                         report.openingName?.let { say(Sentence.CardOpeningLine(it, report.openingEco)) },
                     ).joinToString(CARD_SEPARATOR),
                     say(Sentence.CardAccuracyLine(accuracyWhole(report.white.accuracy), accuracyWhole(report.black.accuracy)))
-                )
-            )
+                ),
+                boardFen = annotations.firstOrNull()?.fenBefore?.takeIf { it.isNotBlank() } ?: game.startFen ?: Position.STANDARD_START_FEN
+            ),
+            // The eval bar beside that board: the engine's number for the starting position.
+            eval = if (annotations.isNotEmpty()) evalBefore(1) else null
         )
     }
 
@@ -652,9 +661,10 @@ private class ScriptBuilder(
     // -----------------------------------------------------------------------
 
     /**
-     * [script] with [NarrationOptions.pace] laid over it: silent board time around the key moves, and
-     * nothing else. Same segments, same indices, same words; only [ScriptSegment.leadIn] and
-     * [ScriptSegment.holdAfterMs] change, and [VideoScript.pacingMs] says by how much in total.
+     * [script] with [NarrationOptions.pace] laid over it: board time around the key moves, and the narrated
+     * best lines. The story's segments keep their words and their order; only [ScriptSegment.leadIn] and
+     * [ScriptSegment.holdAfterMs] change on them, the best lines' segments are inserted after their key
+     * moments (V4), and [VideoScript.pacingMs] says how much all of it adds in total.
      *
      *  - A **key move** (see [isKeyMoveBeat]) gets a lead-in: the one or two game moves the story
      *    skipped since the board last showed a game position are played first, at the line rate, and
@@ -666,17 +676,19 @@ private class ScriptBuilder(
      *  - Every move of a played-out line (a detour's hypothetical moves) is on screen for at least
      *    [VideoPace.lineMoveMinMs], and the line's final position for [VideoPace.lineFinalHoldMs] more.
      *  - A key moment on a MISTAKE, MISS or BLUNDER whose narration names the better move over a still
-     *    board plays the engine's best line after its speech (V2, [SegmentBestLine], [bestLinePlan]): at
-     *    most [BestLines.VIDEO_MAX_PLIES] plies at [VideoPace.lineMoveMinMs] each, the final position held
-     *    [VideoPace.lineFinalHoldMs], all of it inside the segment's hold and inside the room the rest of
-     *    the pace time leaves under the cap at the slowest pace.
+     *    board is followed by the engine's best line (V2, [SegmentBestLine], [bestLinePlan]), narrated since
+     *    V4: one [SegmentKind.BEST_LINE] segment per move that says the move ([Sentence.LineMove]), each on
+     *    screen at least [VideoPace.lineMoveMinMs], the final position held [VideoPace.lineFinalHoldMs] more,
+     *    then "Back to the game now." ([Sentence.BackToTheGame]) over the game's position again. At most
+     *    [BestLines.VIDEO_MAX_PLIES] plies, and all of it (speech included) is pace time inside the room the
+     *    rest of the pace time leaves under the cap at the slowest pace, so the §9.7 story is untouched.
      */
     fun paced(script: VideoScript): VideoScript {
         val times = PaceTimes.of(options.pace)
         val cap = VideoScriptGenerator.pacingCapMs((annotations.size + 1) / 2)
         // V2: which key moments play their best line, and how many plies each, is decided once, at the
-        // slowest pace, from the room the V3 pace time leaves under the cap. So every pace plays the same
-        // moves, and the lines never push the V3 pauses and holds down (spec 9.8).
+        // slowest pace, from the room the V3 pace time leaves under the cap. So every pace plays (and says)
+        // the same moves, and the lines never push the V3 pauses and holds down (spec 9.8).
         val headroom = cap - paced(script, PaceTimes.of(VideoPace.RELAXED), emptyMap()).pacingMs
         val plan = bestLinePlan(script, headroom)
         val full = paced(script, times, plan)
@@ -691,8 +703,9 @@ private class ScriptBuilder(
      * the beats that name the better move over a still board ([betterMoveBeats]) on a MISTAKE, MISS or
      * BLUNDER (an inaccuracy is BRIEF, "never a walk of the missed line", spec 9.7), most important first
      * (tier, then loss, then the earlier move). Each gets up to [BestLines.VIDEO_MAX_PLIES] plies while the
-     * line's time at [VideoPace.RELAXED] fits in [headroomMs], and as many as fit (at least one) when four
-     * do not; a moment for which not even one ply fits keeps its arrow. Keyed by segment index.
+     * line's time at [VideoPace.RELAXED] ([lineCostMs]: since V4 its spoken moves and its "back to the game"
+     * sentence included) fits in [headroomMs], and as many as fit (at least one) when four do not; a moment
+     * for which not even one ply fits keeps its arrow. Keyed by segment index.
      */
     private fun bestLinePlan(script: VideoScript, headroomMs: Long): Map<Int, Int> {
         if (headroomMs <= 0) return emptyMap()
@@ -702,32 +715,57 @@ private class ScriptBuilder(
             .mapNotNull { seg ->
                 val a = annotations.getOrNull((seg.ply ?: return@mapNotNull null) - 1) ?: return@mapNotNull null
                 if (!isErrorClass(a)) return@mapNotNull null
-                if (boardKey((seg.board as BoardDirective.Annotate).fen) != boardKey(a.fenBefore)) return@mapNotNull null
-                val line = BestLines.bestFor(a) ?: return@mapNotNull null
-                Triple(seg.index, a, line.steps.size)
+                val board = seg.board as BoardDirective.Annotate
+                if (boardKey(board.fen) != boardKey(a.fenBefore)) return@mapNotNull null
+                val line = bestLineTail(seg, board, relaxed, BestLines.VIDEO_MAX_PLIES) ?: return@mapNotNull null
+                Triple(seg.index, a, line)
             }
             .sortedWith(
-                compareByDescending<Triple<Int, MoveAnnotation, Int>> { tiers[it.second.ply] ?: PacingTier.SKIP }
+                compareByDescending<Triple<Int, MoveAnnotation, SegmentBestLine>> { tiers[it.second.ply] ?: PacingTier.SKIP }
                     .thenByDescending { it.second.loss }
                     .thenBy { it.second.ply }
             )
         val plan = LinkedHashMap<Int, Int>()
         var left = headroomMs
-        for ((index, _, available) in candidates) {
-            val most = minOf(BestLines.VIDEO_MAX_PLIES, available)
-            val plies = (most downTo 1).firstOrNull { k -> k * relaxed.lineMoveMinMs + relaxed.lineFinalHoldMs <= left } ?: continue
+        for ((index, _, line) in candidates) {
+            val plies = (line.uci.size downTo 1).firstOrNull { k -> lineCostMs(line, k, relaxed) <= left } ?: continue
             plan[index] = plies
-            left -= plies * relaxed.lineMoveMinMs + relaxed.lineFinalHoldMs
+            left -= lineCostMs(line, plies, relaxed)
         }
         return plan
+    }
+
+    /**
+     * The pace time the first [plies] moves of [line] add at [pace] (V4): what [bestLineSegments] puts into
+     * the script for them, i.e. each move's speech estimate plus the hold that keeps it on screen at least
+     * [PaceTimes.lineMoveMinMs] (the timeline's 900 ms floor and 250 ms gap counted, as the excursion's
+     * moves count them), the final position's [PaceTimes.lineFinalHoldMs], and the "back to the game"
+     * sentence.
+     */
+    private fun lineCostMs(line: SegmentBestLine, plies: Int, pace: PaceTimes): Long {
+        var total = 0L
+        for (k in 0 until minOf(plies, line.uci.size)) {
+            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm)
+            total += speech + lineMoveHold(speech, pace)
+        }
+        return total + pace.lineFinalHoldMs + VideoScriptGenerator.estimateSpeechMs(line.backToGame, options.speechWpm)
+    }
+
+    /** The hold that keeps a spoken line move on screen at least [PaceTimes.lineMoveMinMs] (floor and gap counted). */
+    private fun lineMoveHold(speechMs: Long, pace: PaceTimes): Long {
+        val onScreen = max(speechMs, ScriptTiming.MIN_SEGMENT_MS) + ScriptTiming.INTER_SEGMENT_GAP_MS
+        return (pace.lineMoveMinMs - onScreen).coerceAtLeast(0L)
     }
 
     private fun paced(script: VideoScript, pace: PaceTimes, linePlan: Map<Int, Int>): VideoScript {
         val segs = script.segments
         val out = ArrayList<ScriptSegment>(segs.size)
+        // Where each of the story's segments lands once the best lines' segments are inserted (V4).
+        val newIndex = IntArray(segs.size)
         var pacing = 0L
         for ((i, s) in segs.withIndex()) {
             var seg = s
+            var after: List<ScriptSegment> = emptyList()
             val d = s.board
             if (d is BoardDirective.PlayMove && isKeyMoveBeat(s)) {
                 val a = annotations[s.ply!! - 1]
@@ -773,17 +811,23 @@ private class ScriptBuilder(
                 seg = seg.copy(holdAfterMs = seg.holdAfterMs + pace.lineFinalHoldMs)
                 pacing += pace.lineFinalHoldMs
             } else if (d is BoardDirective.Annotate && linePlan.containsKey(s.index)) {
-                // V2: the better move the narration named is played out after the speech, not left as an arrow.
+                // V2 + V4: the better move the narration named is played out after the speech, one spoken
+                // move at a time, and then the board comes back to the game.
                 bestLineTail(s, d, pace, linePlan.getValue(s.index))?.let { line ->
-                    seg = seg.copy(bestLine = line, holdAfterMs = seg.holdAfterMs + line.durationMs)
-                    pacing += line.durationMs
+                    seg = seg.copy(bestLine = line)
+                    after = bestLineSegments(s, d, line, pace)
+                    pacing += after.sumOf { it.estimatedSpeechMs + it.holdAfterMs }
                 }
             }
+            newIndex[i] = out.size
             out.add(seg)
+            out.addAll(after)
         }
+        val segments = out.mapIndexed { k, x -> if (x.index == k) x else x.copy(index = k) }
         return script.copy(
-            segments = out,
-            totalEstimatedMs = out.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs },
+            segments = segments,
+            chapters = script.chapters.map { c -> c.copy(startSegmentIndex = newIndex.getOrElse(c.startSegmentIndex) { segments.size }) },
+            totalEstimatedMs = segments.sumOf { it.estimatedSpeechMs + it.leadInMs + it.holdAfterMs },
             pacingMs = pacing
         )
     }
@@ -792,9 +836,9 @@ private class ScriptBuilder(
      * The engine's best line for the key moment [s] is about, as the video plays it after the speech
      * (ANALYSIS_SPEC 9.8, V2): the same line the Board's line mode shows ([BestLines.bestFor], so the
      * same legal moves and the same depth rule), cut to [plies] (at most [BestLines.VIDEO_MAX_PLIES], from
-     * [bestLinePlan]), one move every [PaceTimes.lineMoveMinMs] and the final position held
-     * [PaceTimes.lineFinalHoldMs]. Null when the annotation has no line or the line does not start from
-     * the position the beat shows.
+     * [bestLinePlan]), with the pace's line rate and final hold, each move's caption and (V4) the sentence
+     * that says it, and the sentence said when the board comes back. Null when the annotation has no line or
+     * the line does not start from the position the beat shows.
      */
     private fun bestLineTail(s: ScriptSegment, d: BoardDirective.Annotate, pace: PaceTimes, plies: Int): SegmentBestLine? {
         val a = annotations.getOrNull((s.ply ?: return null) - 1) ?: return null
@@ -803,6 +847,14 @@ private class ScriptBuilder(
         val steps = line.steps.take(minOf(plies, BestLines.VIDEO_MAX_PLIES))
         if (steps.isEmpty()) return null
         val first = steps.first()
+        // What each move's segment says: the move in words, read off the board it is played on.
+        val spoken = ArrayList<String>(steps.size)
+        var pos = safeFen(line.startFen)
+        for (step in steps) {
+            val move = SpokenChess.moveOrNull(pos, step.uci) ?: return null
+            spoken.add(speak(Sentence.LineMove(SpokenChess.describe(pos, move))))
+            pos = pos.makeMove(move)
+        }
         return SegmentBestLine(
             fen = line.startFen,
             uci = steps.map { it.uci },
@@ -811,9 +863,72 @@ private class ScriptBuilder(
                 say(Sentence.CaptionBestLine(first.moveNumber, first.color, steps.take(k + 1).map { it.san }))
             },
             stepMs = pace.lineMoveMinMs,
-            finalHoldMs = pace.lineFinalHoldMs
+            finalHoldMs = pace.lineFinalHoldMs,
+            spoken = spoken,
+            backToGame = speak(Sentence.BackToTheGame)
         )
     }
+
+    /**
+     * The segments that play [line] after the key moment [s] (V4): one [SegmentKind.BEST_LINE] `PlayMove` per
+     * move, which says the move and shows the line so far in its caption, held so it is on screen at least the
+     * line rate (the last one also [PaceTimes.lineFinalHoldMs]); then the board back on the game's position
+     * ([d], the beat's own picture) with "Back to the game now." Indices are set by the caller. None of the
+     * line's moves was played, so they carry no verdict and no swing; the eval bar keeps the beat's (the
+     * engine's best play from that position is what its evaluation already assumes).
+     */
+    private fun bestLineSegments(s: ScriptSegment, d: BoardDirective.Annotate, line: SegmentBestLine, pace: PaceTimes): List<ScriptSegment> {
+        val a = annotations[s.ply!! - 1]
+        val out = ArrayList<ScriptSegment>()
+        var pos = safeFen(line.fen)
+        for (k in line.uci.indices) {
+            val move = SpokenChess.moveOrNull(pos, line.uci[k]) ?: break
+            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm)
+            val last = k == line.uci.lastIndex
+            out.add(
+                ScriptSegment(
+                    index = -1,
+                    kind = SegmentKind.BEST_LINE,
+                    ply = a.ply,
+                    narration = line.spoken[k],
+                    caption = line.captions[k],
+                    board = BoardDirective.PlayMove(fen = pos.toFen(), uci = line.uci[k], san = line.san[k]),
+                    estimatedSpeechMs = speech,
+                    holdAfterMs = lineMoveHold(speech, pace) + if (last) pace.lineFinalHoldMs else 0L,
+                    speakerColor = move.color,
+                    eval = s.eval,
+                    moveNumber = s.moveNumber
+                )
+            )
+            pos = pos.makeMove(move)
+        }
+        out.add(
+            ScriptSegment(
+                index = -1,
+                kind = SegmentKind.KEY_MOMENT,
+                ply = a.ply,
+                narration = line.backToGame,
+                caption = say(Sentence.CaptionBackToGame(a.moveNumber, a.color, a.san)),
+                board = d,
+                estimatedSpeechMs = VideoScriptGenerator.estimateSpeechMs(line.backToGame, options.speechWpm),
+                speakerColor = a.color,
+                eval = s.eval,
+                moveNumber = s.moveNumber,
+                evalSwingCp = s.evalSwingCp,
+                classification = s.classification
+            )
+        )
+        return out
+    }
+
+    /**
+     * A sentence with one wording, rendered without the phrase rotation: the best line's words are decided
+     * in [paced], which runs more than once per script (once per pace measured), so they must not depend on
+     * how often the picker was asked. Cleaned the way [add] cleans every narration ([NotationGuard]).
+     */
+    private fun speak(sentence: Sentence): String =
+        NotationGuard.scrub(strings.render(sentence, options.style).first(), strings.vocabulary)
+            .replace(Regex("\\s+"), " ").replace(" .", ".").trim()
 
     private fun isAfterLineMove(segs: List<ScriptSegment>, i: Int): Boolean {
         val prev = segs.getOrNull(i - 1) ?: return false
@@ -1589,7 +1704,8 @@ private class ScriptBuilder(
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
-            narration = say(Sentence.PivotOut),
+            // V4: the same words wherever a simulated line ends and the board is the game's again.
+            narration = say(Sentence.BackToTheGame) + " " + say(Sentence.PivotOut),
             caption = say(Sentence.CaptionBackToGame(a.moveNumber, a.color, a.san)),
             board = BoardDirective.Annotate(a.fenBefore, arrows = playedArrow(a)),
             speakerColor = a.color,
@@ -1755,12 +1871,8 @@ private class ScriptBuilder(
                     // Names are bidi-isolated so a Hebrew name cannot reorder the numbers around it.
                     say(Sentence.CardFinalPlayerLine(isolate(whiteLabel), accuracyWhole(w.accuracy), w.estimatedRating)),
                     say(Sentence.CardFinalPlayerLine(isolate(blackLabel), accuracyWhole(b.accuracy), b.estimatedRating)),
-                    say(
-                        Sentence.CardFinalCountsLine(
-                            count(w, MoveClassification.BLUNDER), count(b, MoveClassification.BLUNDER),
-                            count(w, MoveClassification.MISTAKE), count(b, MoveClassification.MISTAKE)
-                        )
-                    ),
+                    // V4: the per-class counts are the card's table (VideoScript.qualityCounts), which replaced
+                    // the "Blunders 1–2 · Mistakes 0–1" line (each fact is printed once).
                     report.result
                 )
             )

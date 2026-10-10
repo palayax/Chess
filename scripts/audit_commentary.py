@@ -39,13 +39,19 @@ python-chess's, the line must be a prefix of the recorded engine PV cut by the r
 and nothing after a checkmate), alternatives must be within 2 win-percent and not the move played, and each
 sentence of the caption is re-derived (the engine's score as recorded, checkmate from the board, a material
 gain settled with python-chess's own exchange evaluation and named by the 40 cp rule, "the exchange" by
-the count of pieces).
+the count of pieces). Since V4 the video's line is spoken: each move's sentence ("Knight takes the pawn on f
+seven, with check.") is re-derived from python-chess's board and must be exactly that, over the position the
+line has reached, and "Back to the game now." must follow a simulated line (a best line, or a detour's payoff,
+from ``video_returns.jsonl`` next to the dump) and stand on the game's own position. ``mutate`` also breaks
+the spoken line (a wrong square or piece, a capture said as a quiet move, a check left out, the return over the
+wrong board) and every break must be flagged.
 
 The recordings (core/src/test/resources/pacing/*.analysis.json) are the engine data. ``before`` reads the
 text dump of the generator as it was before R1b, kept in docs/audit/ so the "before" table can be
 reproduced.
 """
 import json
+import os
 import math
 import re
 import sys
@@ -1222,6 +1228,46 @@ def numbered(board, sans):
     return " ".join(out)
 
 
+RANK_WORDS = ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+PIECE_WORDS = {chess.PAWN: "pawn", chess.KNIGHT: "knight", chess.BISHOP: "bishop", chess.ROOK: "rook",
+               chess.QUEEN: "queen", chess.KING: "king"}
+BACK_TO_THE_GAME = "Back to the game now."
+
+
+def square_words(sq):
+    """'f seven': the file letter and the spelled rank, as the narration says a square."""
+    return "%s %s" % (chess.square_name(sq)[0], RANK_WORDS[chess.square_rank(sq)])
+
+
+def expected_line_move(board, move):
+    """V4: what a spoken best-line move must say, from python-chess's board alone (ANALYSIS_SPEC 9.8):
+    the piece on the from-square, its square when another piece of its kind could also reach the target,
+    the target, the piece standing there for a capture, en passant, the promotion, and check or mate."""
+    mover = board.piece_at(move.from_square)
+    if board.is_castling(move):
+        base = "castles kingside" if board.is_kingside_castling(move) else "castles queenside"
+    else:
+        name = PIECE_WORDS[mover.piece_type]
+        twin = any(m.to_square == move.to_square and m.from_square != move.from_square
+                   and board.piece_at(m.from_square).piece_type == mover.piece_type for m in board.legal_moves)
+        who = "the %s on %s" % (name, square_words(move.from_square)) if twin else name
+        victim = board.piece_at(move.to_square)
+        if board.is_en_passant(move):
+            base = "%s takes on %s, en passant" % (who, square_words(move.to_square))
+        elif victim is not None:
+            base = "%s takes the %s on %s" % (who, PIECE_WORDS[victim.piece_type], square_words(move.to_square))
+        elif twin:
+            base = "the %s from %s to %s" % (name, square_words(move.from_square), square_words(move.to_square))
+        else:
+            base = "%s to %s" % (who, square_words(move.to_square))
+        if move.promotion:
+            base += ", promoting to a %s" % PIECE_WORDS[move.promotion]
+    after = board.copy()
+    after.push(move)
+    outcome = ", and that is checkmate" if after.is_checkmate() else (", with check" if after.is_check() else "")
+    return base[0].upper() + base[1:] + outcome + "."
+
+
 def audit_line_record(rec):
     """Every check on one move's displayed lines and video line; returns [(what, verdict, note)]."""
     out = []
@@ -1321,13 +1367,51 @@ def audit_line_record(rec):
                 if m not in b.legal_moves or b.san(m) != v["san"][k]:
                     ok = False
                     break
+                said = v.get("says", [None] * len(v["uci"]))[k]
+                if said is not None:
+                    # V4: each move is spoken over its own board, and says exactly that move.
+                    if chess.Board(v["sayFens"][k]).board_fen() != b.board_fen() or v["sayUci"][k] != u:
+                        out.append(("video spoken move", "W", "segment %d shows another position or move" % k))
+                    want_said = expected_line_move(b, m)
+                    out.append(("video spoken move", "S" if said == want_said else "W",
+                                said if said == want_said else "%r, expected %r" % (said, want_said)))
                 b.push(m)
                 want = "Best line — " + numbered(start, v["san"][:k + 1])
                 if v["captions"][k] != want:
                     out.append(("video caption", "W", "%r, expected %r" % (v["captions"][k], want)))
             out.append(("video", "S" if ok else "W", "%d plies" % len(v["uci"])))
+            if "says" in v:
+                if len(v["says"]) != len(v["uci"]) or v["sayKinds"] != ["BEST_LINE"] * len(v["uci"]) + ["KEY_MOMENT"]:
+                    out.append(("video segments", "W", "%d spoken moves, kinds %s" % (len(v["says"]), v["sayKinds"])))
+                # The return: said once, and the board really is the game's position before the move again.
+                back_ok = v["back"] == BACK_TO_THE_GAME and chess.Board(v["backFen"]).board_fen() == start.board_fen()
+                out.append(("video back to the game", "S" if back_ok else "W",
+                            v["back"] if back_ok else "%r on %s" % (v["back"], v["backFen"])))
         if rec["cls"] not in ("MISTAKE", "MISS", "BLUNDER"):
             out.append(("video", "W", "a line played on a %s" % rec["cls"]))
+    return out
+
+
+def audit_return(rec):
+    """V4: one place the narration says the board is back in the game. It must open with the sentence, say
+    it once, follow a simulated line (a best line's last move or a detour's payoff) and show the game's
+    position before the move it is about. Returns [(what, verdict, note)]."""
+    out = []
+    n = rec["narration"]
+    if not n.startswith(BACK_TO_THE_GAME) or n.count(BACK_TO_THE_GAME) != 1:
+        out.append(("return sentence", "W", "%r does not open with it exactly once" % n))
+    elif rec["prevKind"] == "BEST_LINE" and n != BACK_TO_THE_GAME:
+        out.append(("return sentence", "W", "%r adds to it after a best line" % n))
+    else:
+        out.append(("return sentence", "S", n))
+    if rec["prevKind"] not in ("BEST_LINE", "MISSED_TACTIC"):
+        out.append(("return place", "W", "follows a %s, not a simulated line" % rec["prevKind"]))
+    else:
+        out.append(("return place", "S", "after a %s" % rec["prevKind"]))
+    if rec["boardFen"] is None or chess.Board(rec["boardFen"]).board_fen() != chess.Board(rec["fenBefore"]).board_fen():
+        out.append(("return board", "W", "the board shows %s, the game was at %s" % (rec["boardFen"], rec["fenBefore"])))
+    else:
+        out.append(("return board", "S", "the game's position before ply %d" % rec["ply"]))
     return out
 
 
@@ -1342,13 +1426,25 @@ def main_lines(path):
             per_game[r["game"]][verdict] += 1
             if verdict == "W":
                 wrong.append((r["game"], r["side"], r["ply"], r["san"], what, note))
+    returns_path = os.path.join(os.path.dirname(path), "video_returns.jsonl")
+    returns = [json.loads(l) for l in open(returns_path, encoding="utf-8") if l.strip()] if os.path.exists(returns_path) else []
+    for r in returns:
+        for what, verdict, note in audit_return(r):
+            counts[verdict] += 1
+            per_game[r["game"]][verdict] += 1
+            if verdict == "W":
+                wrong.append((r["game"], r["side"], r["ply"], "", what, note))
     lines = sum(len(r["lines"]) for r in recs)
     alts = sum(1 for r in recs for l in r["lines"] if l["multiPv"] > 1)
     video = sum(1 for r in recs if r.get("video"))
     exchange = sum(1 for r in recs for l in r["lines"] if "the exchange" in l["caption"])
+    spoken = sum(len(r["video"].get("says", [])) for r in recs if r.get("video"))
+    after_detour = sum(1 for r in returns if r["prevKind"] == "MISSED_TACTIC")
     print("### Displayed engine lines (ANALYSIS_SPEC 6.2)\n")
     print("%d moves x sides, %d lines (%d alternatives), %d video lines, %d captions say 'the exchange'. %d checks: %d supported, %d WRONG.\n" % (
         len(recs), lines, alts, video, exchange, sum(counts.values()), counts["S"], counts["W"]))
+    print("V4: %d spoken line moves; %d returns to the game (%d after a best line, %d after a detour).\n" % (
+        spoken, len(returns), len(returns) - after_detour, after_detour))
     print("| Game | Checks | Supported | WRONG |")
     print("|---|---|---|---|")
     for g, c in sorted(per_game.items()):
@@ -1433,6 +1529,77 @@ MUTATIONS = [
 ]
 
 
+def _mutate_said(fn):
+    """A mutation of the first spoken line move of a record (None when it does not apply)."""
+    def f(rec):
+        v = rec.get("video")
+        if not v or not v.get("says"):
+            return None
+        for k, said in enumerate(v["says"]):
+            changed = fn(said)
+            if changed is not None and changed != said:
+                says = list(v["says"])
+                says[k] = changed
+                return dict(rec, video=dict(v, says=says))
+        return None
+    return f
+
+
+def _mutate_video(fn):
+    def f(rec):
+        v = rec.get("video")
+        if not v or not v.get("says"):
+            return None
+        return dict(rec, video=fn(dict(v)))
+    return f
+
+
+def _last_position(v):
+    b = chess.Board(v["fen"])
+    for u in v["uci"]:
+        b.push(chess.Move.from_uci(u))
+    return b.fen()
+
+
+LINE_MUTATIONS = [
+    ("a spoken line move on the wrong square", _mutate_said(lambda t: re.sub(r"([a-h]) (one|two|three|four|five|six|seven|eight)\.$",
+        lambda m: "%s %s." % ("a" if m.group(1) != "a" else "h", m.group(2)), t, count=1) if re.search(r"[a-h] \w+\.$", t) else None)),
+    ("a capture said as a quiet move", _mutate_said(lambda t: re.sub(r"takes the \w+ on", "to", t, count=1) if "takes the" in t else None)),
+    ("the wrong piece named", _mutate_said(lambda t: ("Bishop" + t[len("Knight"):]) if t.startswith("Knight") else (("Knight" + t[len("Pawn"):]) if t.startswith("Pawn") else None))),
+    ("a check left unsaid or added", _mutate_said(lambda t: t.replace(", with check.", ".") if ", with check." in t else t[:-1] + ", with check.")),
+    ("a notation word instead of the spoken move", _mutate_said(lambda t: "Nf3.")),
+    ("'Back to the game now.' over the line's last position", _mutate_video(lambda v: dict(v, backFen=_last_position(v)))),
+    ("the return sentence missing", _mutate_video(lambda v: dict(v, back="In the real game, this went on the board.")))
+]
+
+
+def main_mutate_lines(path):
+    recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip() and json.loads(l)["side"] is None]
+    print("\n### Negative controls: the spoken best line (V4)\n")
+    print("| Mutation | Record | Flagged |")
+    print("|---|---|---|")
+    missed = 0
+    for name, mutate in LINE_MUTATIONS:
+        rec, mutated = None, None
+        for r in recs:
+            mutated = mutate(r)
+            if mutated is not None:
+                rec = r
+                break
+        if rec is None:
+            print("| %s | (no record to apply it to) | n/a |" % name)
+            continue
+        before = [v for _, v, _ in audit_line_record(rec)]
+        after = audit_line_record(mutated)
+        flagged = "W" not in before and any(v == "W" for _, v, _ in after)
+        note = next((n for _, v, n in after if v == "W"), "")
+        print("| %s | %s %d %s | %s |" % (name, rec["game"], rec["ply"], rec["san"], ("WRONG: " + note).replace("|", "\\|") if flagged else "**NOT FLAGGED**"))
+        if not flagged:
+            missed += 1
+    print("\n%d line mutations not flagged." % missed)
+    return missed
+
+
 def main_mutate(path):
     recs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip() and json.loads(l)["side"] is None]
     print("### Negative controls: one template or term broken at a time\n")
@@ -1457,6 +1624,9 @@ def main_mutate(path):
         if not flagged:
             missed += 1
     print("\n%d mutations not flagged." % missed)
+    lines_path = os.path.join(os.path.dirname(path), "best_lines.jsonl")
+    if os.path.exists(lines_path):
+        missed += main_mutate_lines(lines_path)
     return 1 if missed else 0
 
 

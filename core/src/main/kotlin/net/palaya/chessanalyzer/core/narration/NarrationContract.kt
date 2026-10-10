@@ -52,8 +52,12 @@ sealed interface BoardDirective {
         val highlightSquares: List<String> = emptyList()
     ) : BoardDirective
 
-    /** A title/summary card with no board focus (intro, outro, chapter break). */
-    data class Card(val heading: String, val lines: List<String>) : BoardDirective
+    /**
+     * A title/summary card (intro, outro, chapter break). With [boardFen] the card is drawn ON that
+     * position instead of on an empty card (V4: the intro shows the starting position from the very first
+     * frame, its title on the board); without it, a card with no board.
+     */
+    data class Card(val heading: String, val lines: List<String>, val boardFen: String? = null) : BoardDirective
 }
 
 /** An arrow to draw, in algebraic squares, with a semantic role that decides its colour. */
@@ -86,6 +90,11 @@ enum class SegmentKind {
     THREAT_ALLOWED,
     /** "Pause here — can you see it?" — a deliberate beat before revealing a tactic. */
     PUZZLE_PROMPT,
+    /**
+     * One move of the engine's best line, played and spoken after a key moment that named the better move
+     * (ANALYSIS_SPEC 9.8, V2 + V4). A hypothetical move: it was never played, so it carries no verdict.
+     */
+    BEST_LINE,
     TURNING_POINT,
     OUTRO_SUMMARY,
     OUTRO_LESSONS
@@ -107,10 +116,10 @@ enum class SegmentKind {
  *   the game moves the story skipped are played first, then the position before the move is held
  *   still with the moving piece's square and its destination lit, and only then does the move (and
  *   the narration) start. Null for every other beat. See [SegmentLeadIn].
- * @param bestLine the engine's line played silently AFTER the speech (ANALYSIS_SPEC 9.8, V2), on a key
- *   moment whose narration names the better move. Its time is part of [holdAfterMs] (it is the first
- *   [SegmentBestLine.durationMs] of the hold), so a timeline needs nothing new to lay it out; a frame
- *   consumer draws it from the end of the speech. Null for every other beat.
+ * @param bestLine on a key moment whose narration names the better move (ANALYSIS_SPEC 9.8, V2 + V4): the
+ *   engine's line that the segments right after this one play, one [SegmentKind.BEST_LINE] segment per
+ *   move (each speaks its move), then one "back to the game" segment. A record of what follows, for the
+ *   tests and the audit; the time is in those segments, not in this one's hold. Null for every other beat.
  */
 data class ScriptSegment(
     val index: Int,
@@ -158,12 +167,12 @@ data class ScriptSegment(
 
 /**
  * The engine's better line, played on the board after a key moment's speech has named the better move
- * (ANALYSIS_SPEC 9.8, V2), instead of leaving the better move as an arrow only. Silent, and laid inside
- * the segment's [ScriptSegment.holdAfterMs] (pace time, outside the story budget):
- *
- *  1. from the end of the speech, one move every [stepMs] from [fen], each sliding in
- *     [ScriptTiming.MOVE_ANIMATION_MS] and then resting, with its own caption ([captions], the line so far);
- *  2. the line's final position held [finalHoldMs].
+ * (ANALYSIS_SPEC 9.8, V2), instead of leaving the better move as an arrow only. Since V4 it is narrated:
+ * the segments that follow the key moment are one [SegmentKind.BEST_LINE] segment per move, each a
+ * `PlayMove` from the position before it that speaks the move ([spoken], "Knight takes the pawn on f seven,
+ * with check.") over its caption ([captions], the line so far), on screen at least [stepMs]; the last one
+ * holds the final position [finalHoldMs] more; then one segment says [backToGame] ("Back to the game now.")
+ * over the game's position again. All of it is pace time (outside the story budget, inside the cap).
  *
  * At most `BestLines.VIDEO_MAX_PLIES` plies, and never more than the Board shows for the same line
  * (`BestLines.maxPliesFor` its depth), so the video and the Board cannot disagree on a move.
@@ -174,10 +183,12 @@ data class SegmentBestLine(
     val san: List<String>,
     val captions: List<String>,
     val stepMs: Long,
-    val finalHoldMs: Long
-) {
-    val durationMs: Long get() = uci.size * stepMs + finalHoldMs
-}
+    val finalHoldMs: Long,
+    /** What each move's segment says, in the script's language: the move in words, nothing else (V4). */
+    val spoken: List<String> = emptyList(),
+    /** What the segment after the line says as the board returns to the game (V4). */
+    val backToGame: String = ""
+)
 
 /**
  * The silent beat before a key move (ANALYSIS_SPEC 9.8). Played in this order, before the segment's
@@ -279,7 +290,13 @@ data class VideoScript(
      * ([totalEstimatedMs] does not include it). Null when the report has no moves.
      */
     val recap: VideoRecap? = null,
-    val pacingMs: Long = 0L
+    val pacingMs: Long = 0L,
+    /**
+     * How many moves of each class each side played, for the final-numbers card's table (V4), one row per
+     * class of [QUALITY_TABLE_CLASSES] in that order, zeros included. Each count equals the number of that
+     * side's moves with that classification (`PlayerReport.classificationCounts`). Empty for no moves.
+     */
+    val qualityCounts: List<QualityCount> = emptyList()
 ) {
     /** What the length budget holds (ANALYSIS_SPEC 9.7/9.8): speech and the puzzle pauses, without the pace. */
     val storyMs: Long get() = totalEstimatedMs - pacingMs
@@ -321,6 +338,16 @@ data class RecapSide(
 )
 
 data class RecapCount(val classification: MoveClassification, val count: Int)
+
+/** One row of the final-numbers card's move-quality table (V4): a class and each side's count of it. */
+data class QualityCount(val classification: MoveClassification, val white: Int, val black: Int)
+
+/**
+ * The rows of the final-numbers card's table, in the app's own order (best to worst), as chess.com's Game
+ * Review summary lists them: every class except FORCED, which is not a decision (a move with one legal
+ * reply) and which the Summary screen folds into "Book / Forced" anyway.
+ */
+val QUALITY_TABLE_CLASSES: List<MoveClassification> = MoveClassification.entries.filter { it != MoveClassification.FORCED }
 
 /** The move the recap names: full-move number, who played it, its SAN and the spec's verdict. */
 data class RecapMoment(

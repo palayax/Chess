@@ -286,7 +286,6 @@ class VideoExporter(private val context: Context) {
                     when (
                         val instruction = SegmentFrameBuilder.build(
                             script, timed.segment, elapsedInSegment, BoardOrientation.WHITE_DOWN, panelLabels,
-                            speechMs = timed.speechDurationMs,
                         )
                     ) {
                         is RenderInstruction.Board ->

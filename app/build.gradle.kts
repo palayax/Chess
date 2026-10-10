@@ -28,6 +28,12 @@ val modelBaseUrlOverride: String? = providers.gradleProperty("palayaModelBaseUrl
     }
 }
 
+// The Stockfish release this build compiles (vendor/STOCKFISH_VERSION.txt, "Tag:  sf_19"): the one source of truth
+// for "Check for updates" to compare the official-stockfish/Stockfish releases against (A4). The file is committed.
+val stockfishTag: String = rootProject.file("vendor/STOCKFISH_VERSION.txt").readLines()
+    .firstNotNullOfOrNull { Regex("""^\s*Tag:\s*(sf_\d+(?:\.\d+)*)\s*$""").find(it)?.groupValues?.get(1) }
+    ?: throw org.gradle.api.GradleException("vendor/STOCKFISH_VERSION.txt has no 'Tag: sf_<n>' line")
+
 android {
     namespace = "net.palaya.chessanalyzer"
     // Google Play requires targetSdk 36 (Android 16) for new apps and updates from 31 Aug 2026.
@@ -58,6 +64,8 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         // The sherpa-onnx runtime the voice model must be compatible with (D2e reads it for upgrades).
         buildConfigField("String", "SHERPA_ONNX_VERSION", "\"${libs.versions.sherpaOnnx.get()}\"")
+        // The Stockfish release compiled into :engine, e.g. "sf_19" (A4: compared with the upstream releases).
+        buildConfigField("String", "STOCKFISH_TAG", "\"$stockfishTag\"")
     }
     signingConfigs {
         if (hasReleaseSigning) {
@@ -214,6 +222,13 @@ val generateModelPins = tasks.register("generateModelPins") {
         val archiveUrl = prop("kokoro.archive.url")
         val tarName = archiveUrl.substringAfterLast('/').removeSuffix(".bz2")
         if (!Regex("""[A-Za-z0-9._-]+\.tar""").matches(tarName)) fail("cannot derive a .tar file name from $archiveUrl")
+        // A4: the upstream archive this voice was made from, so "Check for updates" can tell whether k2-fsa
+        // re-published that file (name, size and SHA-256 are all pinned by fetch_models.sh).
+        val archiveName = archiveUrl.substringAfterLast('/')
+        if (!Regex("""[A-Za-z0-9._-]+\.tar\.bz2""").matches(archiveName)) fail("cannot derive a .tar.bz2 file name from $archiveUrl")
+        val archiveSha = prop("kokoro.archive.sha256").lowercase()
+        if (!Regex("[0-9a-f]{64}").matches(archiveSha)) fail("kokoro.archive.sha256 is not 64 hex digits: $archiveSha")
+        val archiveSize = prop("kokoro.archive.size").toLongOrNull()?.takeIf { it > 0 } ?: fail("kokoro.archive.size is not a positive number")
         // D2f: what the app downloads is the tar gzipped (`gzip -9 -n`), pinned on its own.
         val gzName = "$tarName.gz"
         val gzSha = prop("kokoro.targz.sha256").lowercase()
@@ -302,6 +317,10 @@ val generateModelPins = tasks.register("generateModelPins") {
             |    const val VOICE_TAR_NAME: String = "$tarName"
             |    const val VOICE_SIZE_BYTES: Long = ${size}L
             |    const val VOICE_SHA256: String = "$sha"
+            |    /** The upstream archive (k2-fsa/sherpa-onnx, release tts-models) the tar was made from, for the A4 upstream check. */
+            |    const val VOICE_UPSTREAM_ARCHIVE_NAME: String = "$archiveName"
+            |    const val VOICE_UPSTREAM_ARCHIVE_SIZE_BYTES: Long = ${archiveSize}L
+            |    const val VOICE_UPSTREAM_ARCHIVE_SHA256: String = "$archiveSha"
             |    /** The GitHub release (immutable tag) holding both model files for a first-run download. */
             |    const val RELEASE_TAG: String = "$tag"
             |    /**

@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The pure logic behind the Summary hub (UX step U5): side chooser, key moments, grouped table. */
+/** The pure logic behind the Summary hub (UX step U5): side chooser, key moments, the move-quality table. */
 class SummaryLogicTest {
 
     // ---- Side chooser state ----
@@ -174,7 +174,7 @@ class SummaryLogicTest {
         assertTrue(selectSummaryMoments(report(PieceColor.WHITE, moment(3, MoveClassification.INACCURACY))).isEmpty)
     }
 
-    // ---- Grouped table ----
+    // ---- Move-quality table (A4) ----
 
     private fun counts(vararg pairs: Pair<MoveClassification, Int>): List<ClassificationCount> {
         val m = pairs.toMap()
@@ -191,38 +191,55 @@ class SummaryLogicTest {
         MoveClassification.FORCED to 2, MoveClassification.INACCURACY to 3, MoveClassification.MISS to 1,
     )
 
+    /** The ten classes the owner listed, in the app's own order. */
+    private val ownerTen = listOf(
+        MoveClassification.BRILLIANT, MoveClassification.GREAT, MoveClassification.BEST,
+        MoveClassification.EXCELLENT, MoveClassification.GOOD, MoveClassification.BOOK,
+        MoveClassification.INACCURACY, MoveClassification.MISTAKE, MoveClassification.MISS,
+        MoveClassification.BLUNDER,
+    )
+
     @Test
-    fun collapsedTableFoldsTheQuietClassesIntoTwoRowsAndDropsEmptyOnes() {
-        val rows = groupClassificationRows(white, black, showAll = false)
-        // BRILLIANT, GOOD_MOVES, INACCURACY, MISTAKE, MISS, BLUNDER, BOOK_FORCED; GREAT is 0/0 and hidden.
-        assertEquals(7, rows.size)
-        val good = rows.single { it.group == ClassificationGroup.GOOD_MOVES }
-        assertEquals(9 + 3 + 2, good.white)
-        assertEquals(6 + 5, good.black)
-        val book = rows.single { it.group == ClassificationGroup.BOOK_FORCED }
-        assertEquals(6, book.white)
-        assertEquals(5 + 2, book.black)
-        assertTrue(rows.none { it.badge == MoveClassification.GREAT })
-        // Mistakes are never folded: they are the point.
+    fun theTableAlwaysHasTheTenClassesInTheAppsOrderZerosIncluded() {
+        val rows = classificationRows(white, black)
+        // Forced is the eleventh class and black has two, so it is the last row; the ten come first, in order.
+        assertEquals(ownerTen + MoveClassification.FORCED, rows.map { it.badge })
+        // GREAT is 0 / 0 and still there.
+        val great = rows.single { it.badge == MoveClassification.GREAT }
+        assertEquals(0, great.white)
+        assertEquals(0, great.black)
+        // Nothing is folded into a neighbour: Best, Excellent and Good each keep their own count.
+        assertEquals(9, rows.single { it.badge == MoveClassification.BEST }.white)
+        assertEquals(3, rows.single { it.badge == MoveClassification.EXCELLENT }.white)
+        assertEquals(2, rows.single { it.badge == MoveClassification.GOOD }.white)
+        assertEquals(6, rows.single { it.badge == MoveClassification.BOOK }.white)
+        assertEquals(5, rows.single { it.badge == MoveClassification.BOOK }.black)
         assertEquals(1, rows.single { it.badge == MoveClassification.MISTAKE }.white)
         assertEquals(1, rows.single { it.badge == MoveClassification.MISS }.black)
+        assertEquals(1, rows.single { it.badge == MoveClassification.BLUNDER }.white)
+        assertEquals(3, rows.single { it.badge == MoveClassification.INACCURACY }.black)
     }
 
     @Test
-    fun showAllIsTheFlatElevenRowTableIncludingZeros() {
-        val rows = groupClassificationRows(white, black, showAll = true)
-        assertEquals(MoveClassification.entries, rows.map { it.badge })
-        assertEquals(11, rows.size)
-        assertTrue(rows.all { it.group == null })
-        assertEquals(0, rows.single { it.badge == MoveClassification.GREAT }.white)
+    fun forcedGetsARowOnlyWhenASideHasAForcedMove() {
+        val none = classificationRows(counts(MoveClassification.BEST to 4), counts(MoveClassification.GOOD to 4))
+        assertEquals(ownerTen, none.map { it.badge })
+        val oneSide = classificationRows(counts(MoveClassification.FORCED to 1), counts())
+        assertEquals(ownerTen + MoveClassification.FORCED, oneSide.map { it.badge })
+        assertEquals(1, oneSide.last().white)
     }
 
     @Test
-    fun groupingNeverLosesAMove() {
-        for (showAll in listOf(false, true)) {
-            val rows = groupClassificationRows(white, black, showAll)
-            assertEquals(white.sumOf { it.count }, rows.sumOf { it.white })
-            assertEquals(black.sumOf { it.count }, rows.sumOf { it.black })
-        }
+    fun anEmptyGameStillShowsEveryClassForBothSides() {
+        val rows = classificationRows(emptyList(), emptyList())
+        assertEquals(ownerTen, rows.map { it.badge })
+        assertTrue(rows.all { it.white == 0 && it.black == 0 })
+    }
+
+    @Test
+    fun theRowsNeverLoseAMove() {
+        val rows = classificationRows(white, black)
+        assertEquals(white.sumOf { it.count }, rows.sumOf { it.white })
+        assertEquals(black.sumOf { it.count }, rows.sumOf { it.black })
     }
 }

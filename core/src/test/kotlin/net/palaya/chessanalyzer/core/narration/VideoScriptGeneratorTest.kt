@@ -365,15 +365,18 @@ class VideoScriptGeneratorTest {
     }
 
     @Test
-    fun `cards and the intro carry no eval`() {
+    fun `the cards carry no eval, and the intro carries the starting position's`() {
         val s = script()
         for (seg in s.segments) {
-            if (seg.kind == SegmentKind.INTRO || seg.kind == SegmentKind.OUTRO_SUMMARY ||
-                seg.kind == SegmentKind.OUTRO_LESSONS
-            ) {
+            if (seg.kind == SegmentKind.OUTRO_SUMMARY || seg.kind == SegmentKind.OUTRO_LESSONS) {
                 assertEquals("segment ${seg.index} (${seg.kind}) should have no eval", null, seg.eval)
             }
         }
+        // V4: the intro is drawn on the starting position, so its eval bar shows the engine's number for it,
+        // the same White-relative value the first move's beat starts from.
+        val intro = s.segments.first { it.kind == SegmentKind.INTRO }
+        assertEquals(report.annotations.first().fenBefore, (intro.board as BoardDirective.Card).boardFen)
+        assertNotNull(intro.eval)
     }
 
     /**

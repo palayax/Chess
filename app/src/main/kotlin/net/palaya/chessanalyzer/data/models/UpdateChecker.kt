@@ -114,7 +114,7 @@ class UpdateChecker(
         return when (r.reason) {
             SmallFetchFailure.NOT_FOUND -> UpdateCheckResult.NotFound("$what ${r.detail}")
             SmallFetchFailure.TOO_LARGE, SmallFetchFailure.INSECURE -> UpdateCheckResult.ManifestInvalid("$what ${r.reason}")
-            SmallFetchFailure.NETWORK, SmallFetchFailure.SERVER -> UpdateCheckResult.ServerUnavailable("$what ${r.detail}")
+            SmallFetchFailure.NETWORK, SmallFetchFailure.SERVER, SmallFetchFailure.RATE_LIMITED -> UpdateCheckResult.ServerUnavailable("$what ${r.detail}")
         }
     }
 

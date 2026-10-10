@@ -466,10 +466,11 @@ private fun LanguageRow(selected: AppLanguage, onLanguageChange: (AppLanguage) -
 
 /**
  * V1 + V3: the Video section. "Narrator voice" opens the picker; "Pace" is Relaxed / Normal / Brisk
- * (ANALYSIS_SPEC 9.8), and goes through [onSettingsChange] like the other presets.
+ * (ANALYSIS_SPEC 9.8), and goes through [onSettingsChange] like the other presets. V4: also the content of
+ * the Video screen's "Voice and pace" sheet (the same component, under that [heading]).
  */
 @Composable
-private fun VideoSection(
+internal fun VideoSection(
     settings: EngineSettings,
     onSettingsChange: (EngineSettings) -> Unit,
     narrationVoiceSettings: NarrationVoiceSettings,
@@ -479,11 +480,12 @@ private fun VideoSection(
     onPlayVoiceSample: (Int) -> Unit,
     onStopVoiceSample: () -> Unit,
     onVoicePickerClosed: () -> Unit,
+    heading: String = stringResource(R.string.settings_video_header),
 ) {
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     Column {
         Text(
-            text = stringResource(R.string.settings_video_header),
+            text = heading,
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier
                 .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)

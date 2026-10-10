@@ -118,42 +118,75 @@ class LinePlaybackLogicTest {
     }
 
     // ---------------------------------------------------------------------------------------------
-    // The video timeline (V2 + V3): the line starts when the speech ends, at every pace
+    // The video timeline (V2 + V4): the line's moves are segments of their own, spoken, at every pace
     // ---------------------------------------------------------------------------------------------
 
-    private fun segmentWithLine(pace: VideoPace, plies: Int): ScriptSegment {
+    /** A key moment, its spoken line ([plies] moves) and the return, as the generator lays them out (V4). */
+    private fun scriptWithLine(pace: VideoPace, plies: Int): VideoScript {
+        val sans = listOf("e4", "e5", "Nf3", "Nc6").take(plies)
+        val spoken = listOf("Pawn to e four.", "Pawn to e five.", "Knight to f three.", "Knight to c six.").take(plies)
         val line = SegmentBestLine(
-            fen = start, uci = pv.take(plies), san = listOf("e4", "e5", "Nf3", "Nc6").take(plies),
+            fen = start, uci = pv.take(plies), san = sans,
             captions = (1..plies).map { "Best line — $it" }, stepMs = pace.lineMoveMinMs, finalHoldMs = pace.lineFinalHoldMs,
+            spoken = spoken, backToGame = "Back to the game now.",
         )
-        return ScriptSegment(
-            index = 1, kind = SegmentKind.BLUNDER, ply = 3, narration = "White plays a3. Pawn to e four was the move.",
-            caption = "2. a3 ?", board = BoardDirective.Annotate(start), estimatedSpeechMs = 4_000L,
-            holdAfterMs = line.durationMs, classification = CoreClass.MISTAKE, bestLine = line,
+        val annotate = BoardDirective.Annotate(start)
+        val intro = ScriptSegment(0, SegmentKind.INTRO, null, "Hello.", "", BoardDirective.Hold(start), 1_000L)
+        val key = ScriptSegment(
+            index = 1, kind = SegmentKind.BLUNDER, ply = 1, narration = "White plays a3. Pawn to e four was the move.",
+            caption = "1. a3 ?", board = annotate, estimatedSpeechMs = 4_000L, classification = CoreClass.MISTAKE, bestLine = line,
         )
+        var pos = Position.fromFen(start)
+        val moves = (0 until plies).map { k ->
+            val fen = pos.toFen()
+            pos = pos.makeMove(pos.legalMoves().first { it.toUci() == pv[k] })
+            ScriptSegment(
+                index = 2 + k, kind = SegmentKind.BEST_LINE, ply = 1, narration = spoken[k], caption = line.captions[k],
+                board = BoardDirective.PlayMove(fen, pv[k], sans[k]), estimatedSpeechMs = 1_660L,
+                holdAfterMs = if (k == plies - 1) pace.lineFinalHoldMs else 0L,
+            )
+        }
+        val back = ScriptSegment(
+            index = 2 + plies, kind = SegmentKind.KEY_MOMENT, ply = 1, narration = "Back to the game now.",
+            caption = "Back to the game — 1. a3", board = annotate, estimatedSpeechMs = 2_015L, classification = CoreClass.MISTAKE,
+        )
+        val segs = listOf(intro, key) + moves + back
+        return VideoScript("t", "s", segs, emptyList(), segs.sumOf { it.estimatedSpeechMs + it.holdAfterMs }, null)
     }
 
     @Test
-    fun `the timeline lays the line inside the segment after the real speech, at Relaxed, Normal and Brisk`() {
+    fun `the timeline gives each spoken line move its own real speech, and the frames play the line then return`() {
         for (pace in VideoPace.entries) {
             for (plies in 1..4) {
-                val intro = ScriptSegment(0, SegmentKind.INTRO, null, "Hello.", "", BoardDirective.Hold(start), 1_000L)
-                val seg = segmentWithLine(pace, plies)
-                val script = VideoScript("t", "s", listOf(intro, seg), emptyList(), 0L, null)
-                // The real voice took 3.1 s, not the 4 s estimate: the line starts when it ends.
-                val tl = TimelineBuilder.build(script, listOf(NarrationSynthesizer.Result.Synthesized(1, File("x.wav"), 3_100)))
-                val timed = tl.segments[1]
-                val line = seg.bestLine!!
-                assertEquals(plies * pace.lineMoveMinMs + pace.lineFinalHoldMs, line.durationMs)
-                assertEquals(3_100L + line.durationMs + TimelineBuilder.INTER_SEGMENT_GAP_MS, timed.totalDurationMs)
-                val lineStart = SegmentFrameBuilder.bestLineStartMs(seg, timed.speechDurationMs)
-                assertEquals(3_100L, lineStart)
-                assertTrue("$pace $plies", lineStart + line.durationMs <= timed.totalDurationMs - TimelineBuilder.INTER_SEGMENT_GAP_MS)
-                // Before any audio exists (no synthesis), the estimate with the timeline's floor is used.
-                assertEquals(4_000L, SegmentFrameBuilder.bestLineStartMs(seg, null))
-                // A lead-in comes first.
-                val led = seg.copy(leadIn = net.palaya.chessanalyzer.core.narration.SegmentLeadIn(fen = start, pauseMs = pace.keyLeadInMs))
-                assertEquals(pace.keyLeadInMs + 3_100L, SegmentFrameBuilder.bestLineStartMs(led, 3_100L))
+                val script = scriptWithLine(pace, plies)
+                // The real voice took 1.4 s per move, not the 1.66 s estimate: each move's segment follows its own audio.
+                val real = script.segments.filter { it.kind == SegmentKind.BEST_LINE }.map { NarrationSynthesizer.Result.Synthesized(it.index, File("x.wav"), 1_400) }
+                val tl = TimelineBuilder.build(script, real)
+                for (k in 0 until plies) {
+                    val timed = tl.segments[2 + k]
+                    assertEquals(1_400L, timed.speechDurationMs)
+                    // At its first frame the move slides, in the excursion's colours, with no verdict.
+                    val first = (SegmentFrameBuilder.build(script, timed.segment, 0L, net.palaya.chessanalyzer.ui.board.BoardOrientation.WHITE_DOWN)
+                        as net.palaya.chessanalyzer.video.RenderInstruction.Board).spec
+                    assertTrue(first.animating != null)
+                    assertTrue(first.excursionActive)
+                    assertEquals("Engine's best line", first.excursionLabel)
+                    assertNull(first.classification)
+                    assertNull(first.segmentKind)
+                    assertEquals("Best line — ${k + 1}", first.caption)
+                    // The material of the shown position rides along: nothing has been captured in this line.
+                    assertEquals(0, first.material!!.advantage)
+                }
+                // Back to the game: the key moment's own picture again, no excursion, the verdict back.
+                val backTimed = tl.segments.last()
+                val back = (SegmentFrameBuilder.build(script, backTimed.segment, 0L, net.palaya.chessanalyzer.ui.board.BoardOrientation.WHITE_DOWN)
+                    as net.palaya.chessanalyzer.video.RenderInstruction.Board).spec
+                assertFalse(back.excursionActive)
+                assertEquals(CoreClass.MISTAKE, back.classification)
+                // The line's moves are not game moves: "recent moves" never lists them.
+                assertTrue(back.recentMoves.isEmpty())
+                // Contiguous: every segment starts where the previous one ended.
+                for (i in 1 until tl.segments.size) assertEquals(tl.segments[i - 1].endMs, tl.segments[i].startMs)
             }
         }
     }

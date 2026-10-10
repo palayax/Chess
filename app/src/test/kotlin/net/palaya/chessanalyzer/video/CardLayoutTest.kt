@@ -112,11 +112,13 @@ class CardLayoutTest {
     @Test
     fun `the final numbers and the lesson cards keep their lines and add nothing`() {
         val s = script()
-        val lines = listOf("${fsi}MorphyFan1857$pdi — 84%, est. 1650", "${fsi}DukeAndCount$pdi — 79%, est. 1500", "Blunders 1–2 · Mistakes 0–1", "1-0")
+        val lines = listOf("${fsi}MorphyFan1857$pdi — 84%, est. 1650", "${fsi}DukeAndCount$pdi — 79%, est. 1500", "1-0")
         val outro = CardContents.forSegment(s, SegmentKind.OUTRO_SUMMARY, "Final numbers", lines)
         assertEquals(CardTitle.Plain("Final numbers"), outro.title)
         assertEquals(lines, outro.body.map { it.text })
         assertTrue("no structured sub-lines repeating the accuracy", outro.facts.isEmpty())
+        // A script with no counts (no moves) has no table.
+        assertEquals(null, outro.table)
         // The accuracy and each name appear once on the card.
         val all = outro.allText.joinToString("\n")
         assertEquals(1, occurrences(all, "84%"))
@@ -317,5 +319,67 @@ class CardLayoutTest {
         val fit = fitParagraphToHeight(36f, 24f, 5f, { 100f }, { 30f }, { 4 })
         assertTrue(fit.truncated)
         assertEquals(1, fit.lineCount)
+    }
+
+    // -----------------------------------------------------------------------
+    // V4: the final numbers' move-quality table
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `the final numbers carry the move-quality table, every class but Forced, in the app's order, zeros included`() {
+        val counts = net.palaya.chessanalyzer.core.narration.QUALITY_TABLE_CLASSES.mapIndexed { i, c ->
+            net.palaya.chessanalyzer.core.narration.QualityCount(c, white = i % 3, black = (i + 1) % 2)
+        }
+        val s = script().copy(qualityCounts = counts)
+        val outro = CardContents.forSegment(
+            s, SegmentKind.OUTRO_SUMMARY, "Final numbers", listOf("a", "b"),
+            className = { "name of ${it.name}" }, sideName = { if (it == Color.WHITE) "Wh" else "Bl" },
+        )
+        val table = outro.table!!
+        assertEquals("Wh", table.whiteHeader)
+        assertEquals("Bl", table.blackHeader)
+        assertEquals(
+            listOf(
+                MoveClassification.BRILLIANT, MoveClassification.GREAT, MoveClassification.BEST, MoveClassification.EXCELLENT,
+                MoveClassification.GOOD, MoveClassification.BOOK, MoveClassification.INACCURACY, MoveClassification.MISTAKE,
+                MoveClassification.MISS, MoveClassification.BLUNDER,
+            ),
+            table.rows.map { it.classification },
+        )
+        for ((row, count) in table.rows.zip(counts)) {
+            assertEquals(count.white, row.white)
+            assertEquals(count.black, row.black)
+            assertEquals("name of ${row.classification.name}", row.label)
+            assertEquals(row.classification.glyph, row.glyph)
+        }
+        // The lesson cards and the intro have none.
+        assertEquals(null, CardContents.forSegment(s, SegmentKind.OUTRO_LESSONS, "What to work on", listOf("x")).table)
+        assertEquals(null, CardContents.forSegment(s, SegmentKind.INTRO, "A vs B", listOf("1-0", "White 1% · Black 2%")).table)
+    }
+
+    @Test
+    fun `the table is two columns of five and fits the 720p final-numbers card with the two player lines`() {
+        val h = 720f
+        val rows = 10
+        // At the card's full scale: the table, plus the most the card's other parts can take (R6c's limits): a one-line
+        // title at its largest size, three body paragraphs of two lines at the body's largest size with their gaps.
+        val table = QualityTableGeometry.height(h, rows, 1f)
+        val title = h * 0.09f * 1.3f
+        val titleGap = h * 0.06f
+        val bodyLine = h * 0.05f * 1.15f * 1.2f
+        val body = 3 * 2 * bodyLine + 3 * h * 0.03f
+        val available = CardGeometry.contentBottom(h) - CardGeometry.contentTop(h)
+        // The renderer steps every size down together until the block fits (to 0.55 at most); the worst case (both
+        // player lines wrapped to two lines) fits at 0.75, a usual card (one line each, and the result) at 0.95.
+        val worst = (title + titleGap + body) * 0.75f + QualityTableGeometry.height(h, rows, 0.75f)
+        assertTrue("worst case $worst px in $available px", worst <= available)
+        val usual = (title + titleGap + 3 * bodyLine + 3 * h * 0.03f) * 0.95f + QualityTableGeometry.height(h, rows, 0.95f)
+        assertTrue("usual $usual px in $available px", usual <= available)
+        // Five rows per column plus the header row; the rows stay readable (at least 2.4 percent of the frame high).
+        assertEquals(QualityTableGeometry.gapAbove(h, 1f) + 6 * QualityTableGeometry.rowHeight(h, 1f), table, 0.01f)
+        assertTrue(QualityTableGeometry.maxTextSize(h, 0.75f) >= h * 0.024f)
+        // In a narrow column (the portrait player) the text shrinks with the column, never past it.
+        assertTrue(QualityTableGeometry.textSize(h, 200f, 1f) <= 200f * 0.075f + 0.001f)
+        assertEquals(QualityTableGeometry.maxTextSize(h, 1f), QualityTableGeometry.textSize(h, 2_000f, 1f), 0.001f)
     }
 }

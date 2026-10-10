@@ -1,5 +1,8 @@
 package net.palaya.chessanalyzer.video
 
+import net.palaya.chessanalyzer.core.analysis.MoveClassification
+import net.palaya.chessanalyzer.core.chess.Color as CoreColor
+import net.palaya.chessanalyzer.core.narration.QualityCount
 import net.palaya.chessanalyzer.core.narration.SegmentKind
 import net.palaya.chessanalyzer.core.narration.VideoGameHeader
 import net.palaya.chessanalyzer.core.narration.VideoScript
@@ -91,16 +94,66 @@ data class CardParagraph(val text: String, val maxLines: Int = FILL) {
 }
 
 /**
- * A card as strings: the title, grey body paragraphs, and bold green fact lines under a rule. The
- * renderer fits each part; nothing here knows a pixel.
+ * A card as strings: the title, grey body paragraphs, bold green fact lines under a rule, and (the final
+ * numbers, V4) the move-quality table. The renderer fits each part; nothing here knows a pixel.
  */
 data class CardContent(
     val title: CardTitle,
     val body: List<CardParagraph> = emptyList(),
     val facts: List<String> = emptyList(),
+    val table: QualityTable? = null,
 ) {
     /** Everything the card prints, in reading order. */
-    val allText: List<String> get() = listOf(title.text) + body.map { it.text } + facts
+    val allText: List<String> get() = listOf(title.text) + body.map { it.text } + facts + (table?.allText ?: emptyList())
+}
+
+/**
+ * The final-numbers card's move-quality table (V4): how many moves of each class each side played, in the
+ * app's order and colours (chess.com's Game Review summary is the pattern: the class with its icon, White's
+ * count on one side and Black's on the other). [rows] are the script's `qualityCounts`, zeros included, so
+ * every class is always in the same place; [whiteHeader] / [blackHeader] head the two count columns.
+ */
+data class QualityTable(
+    val whiteHeader: String,
+    val blackHeader: String,
+    val rows: List<QualityTableRow>,
+) {
+    val allText: List<String> get() = listOf(whiteHeader, blackHeader) + rows.map { it.label }
+}
+
+/** One class: its badge glyph and name (in the app's language) and the two counts. */
+data class QualityTableRow(val classification: MoveClassification, val glyph: String, val label: String, val white: Int, val black: Int)
+
+/**
+ * Where the move-quality table goes, as fractions of the frame (pure, so a host test can check the card
+ * still fits, R6c). The ten classes are laid out as two columns of five (the praised half, then Book and
+ * the four errors) under one header row: one column of ten would not fit the 720p card with the two player
+ * lines above it at a readable size.
+ */
+object QualityTableGeometry {
+    /** Rows per column. */
+    const val ROWS_PER_COLUMN = 5
+
+    /** One row's height at frame height [h] and the card's [scale]. */
+    fun rowHeight(h: Float, scale: Float): Float = h * 0.046f * scale
+
+    /** The text size of a row; also capped by the column width (a narrow portrait frame), see [textSize]. */
+    fun maxTextSize(h: Float, scale: Float): Float = h * 0.032f * scale
+
+    /** The text size for a column [columnWidth] wide: the frame's size, or smaller when the column is narrow. */
+    fun textSize(h: Float, columnWidth: Float, scale: Float): Float = minOf(maxTextSize(h, scale), columnWidth * 0.075f)
+
+    /** Air above the table (a rule sits in it). */
+    fun gapAbove(h: Float, scale: Float): Float = h * 0.035f * scale
+
+    /** The table's whole height: the air above it, the header row and [rows] split over two columns. */
+    fun height(h: Float, rows: Int, scale: Float): Float {
+        val perColumn = (rows + 1) / 2
+        return gapAbove(h, scale) + rowHeight(h, scale) * (perColumn + 1)
+    }
+
+    /** The gap between the two columns, as a share of the text width. */
+    const val COLUMN_GAP = 0.06f
 }
 
 // ---------------------------------------------------------------------------
@@ -120,10 +173,37 @@ object CardContents {
      *    names are already in the lines, so the structured sub-lines the card used to add are gone.
      *  - anything else (the lesson cards): one paragraph that takes the room it needs.
      */
-    fun forSegment(script: VideoScript, kind: SegmentKind, heading: String, lines: List<String>): CardContent = when (kind) {
+    fun forSegment(
+        script: VideoScript,
+        kind: SegmentKind,
+        heading: String,
+        lines: List<String>,
+        /** The class name in the app's language, for the final numbers' table (V4). */
+        className: (MoveClassification) -> String = { it.displayName },
+        /** The side word ("White"), heading each count column. */
+        sideName: (CoreColor) -> String = { if (it == CoreColor.WHITE) "White" else "Black" },
+    ): CardContent = when (kind) {
         SegmentKind.INTRO -> intro(script, heading, lines)
-        SegmentKind.OUTRO_SUMMARY -> CardContent(CardTitle.Plain(heading), lines.map { CardParagraph(it, maxLines = 2) })
+        SegmentKind.OUTRO_SUMMARY -> CardContent(
+            CardTitle.Plain(heading),
+            lines.map { CardParagraph(it, maxLines = 2) },
+            table = qualityTable(script.qualityCounts, className, sideName),
+        )
         else -> CardContent(CardTitle.Plain(heading), lines.map { CardParagraph(it) })
+    }
+
+    /** The table of [counts] (the script's, in its order), or null when there are none (no moves). */
+    fun qualityTable(
+        counts: List<QualityCount>,
+        className: (MoveClassification) -> String,
+        sideName: (CoreColor) -> String,
+    ): QualityTable? {
+        if (counts.isEmpty()) return null
+        return QualityTable(
+            whiteHeader = sideName(CoreColor.WHITE),
+            blackHeader = sideName(CoreColor.BLACK),
+            rows = counts.map { QualityTableRow(it.classification, it.classification.glyph, className(it.classification), it.white, it.black) },
+        )
     }
 
     /** The caption bar under a card: the intro and the final numbers already say it all in the card. */

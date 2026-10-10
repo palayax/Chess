@@ -64,7 +64,7 @@ class CardFrameFitInstrumentedTest {
 
     private fun scriptFor(white: String, black: String, openingName: String = "Sicilian Defense: Najdorf Variation, English Attack"): VideoScript {
         fun player(color: Color, name: String, acc: Double) =
-            PlayerReport(color, name, acc, 1650, false, emptyMap(), emptyList(), emptyList())
+            PlayerReport(color, name, acc, 1650, false, mapOf(MoveClassification.GOOD to 17), emptyList(), emptyList())
         val report = GameReport(
             white = player(Color.WHITE, white, 84.1), black = player(Color.BLACK, black, 79.5),
             annotations = (1..34).map { annotation(it) }, openingName = openingName, openingEco = "B90",
@@ -77,12 +77,26 @@ class CardFrameFitInstrumentedTest {
         return VideoScriptGenerator(null).generate(report, pgn, NarrationOptions())
     }
 
-    private fun renderSegment(script: VideoScript, segment: ScriptSegment, withCaption: Boolean = true, chapter: String? = null): Bitmap {
-        val instruction = SegmentFrameBuilder.build(script, segment, 0L, BoardOrientation.WHITE_DOWN)
-        val card = instruction as RenderInstruction.Card
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    /**
+     * The card's words drawn as a card. Since V4 the intro is drawn on the starting position; its words are the
+     * same fitted card ([BoardFrameRenderer.BoardFrameSpec.titleCard]), checked here on their own as before, and
+     * on the board by [theIntroIsTheStartingPositionWithItsTitleOnTheBoard].
+     */
+    private fun renderSegment(
+        script: VideoScript,
+        segment: ScriptSegment,
+        withCaption: Boolean = true,
+        chapter: String? = null,
+        width: Int = w,
+        height: Int = h,
+    ): Bitmap {
+        val (content, caption) = when (val instruction = SegmentFrameBuilder.build(script, segment, 0L, BoardOrientation.WHITE_DOWN)) {
+            is RenderInstruction.Card -> instruction.content to instruction.caption
+            is RenderInstruction.Board -> instruction.spec.titleCard!! to instruction.spec.caption
+        }
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         BoardFrameRenderer.renderCardFrame(
-            Canvas(bitmap), w, h, card.content, if (withCaption) card.caption else "", chapter,
+            Canvas(bitmap), width, height, content, if (withCaption) caption else "", chapter,
         )
         return bitmap
     }
@@ -103,6 +117,8 @@ class CardFrameFitInstrumentedTest {
     }
 
     private fun assertInsideTheBox(bitmap: Bitmap, tag: String) {
+        val w = bitmap.width
+        val h = bitmap.height
         val barEnd = (w * 0.015f).toInt() + 1
         val textLeft = (w * CardGeometry.TEXT_LEFT).toInt()
         val textRight = (w * (CardGeometry.TEXT_LEFT + CardGeometry.TEXT_WIDTH)).toInt()
@@ -199,5 +215,127 @@ class CardFrameFitInstrumentedTest {
         assertTrue("an intro card draws no caption bar, so the two frames are identical", a.contentEquals(b))
         withCaption.recycle()
         without.recycle()
+    }
+
+    // -----------------------------------------------------------------------
+    // V4: the intro on the board, the final numbers' table, and the player's portrait frame
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun theIntroIsTheStartingPositionWithItsTitleOnTheBoard() {
+        for ((i, pair) in names.withIndex()) {
+            val (white, black) = pair
+            val script = scriptFor(white, black)
+            val intro = script.segments.first { it.kind == SegmentKind.INTRO }
+            val spec = (SegmentFrameBuilder.build(script, intro, 0L, BoardOrientation.WHITE_DOWN) as RenderInstruction.Board).spec
+            // The board is there at the first frame: the starting position, all 32 pieces.
+            assertEquals(32, spec.boardState.pieces.size)
+            assertTrue(spec.titleCard != null)
+            val withTitle = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            BoardFrameRenderer.renderBoardFrame(Canvas(withTitle), w, h, spec)
+            val plain = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            BoardFrameRenderer.renderBoardFrame(Canvas(plain), w, h, spec.copy(titleCard = null))
+            save(withTitle, "intro_on_board_$i")
+            // The title changes pixels only on the board itself (the band over its middle), never the panel, the
+            // eval bar or the caption bar, and it leaves the top and bottom ranks of the board visible.
+            val captionHeight = BoardFrameRenderer.captionBarHeight(h)
+            val margin = h * 0.025f
+            val boardSize = h - captionHeight - 2 * margin
+            val boardLeft = margin + h * 0.06f + h * 0.015f
+            val a = IntArray(w * h)
+            val b = IntArray(w * h)
+            withTitle.getPixels(a, 0, w, 0, 0, w, h)
+            plain.getPixels(b, 0, w, 0, 0, w, h)
+            var outside = 0
+            var inside = 0
+            for (y in 0 until h) for (x in 0 until w) {
+                if (a[y * w + x] == b[y * w + x]) continue
+                val onBoard = x >= boardLeft - 1 && x <= boardLeft + boardSize + 1 && y >= margin - 1 && y <= margin + boardSize + 1
+                val inEdgeRanks = y < margin + boardSize / 8f || y > margin + boardSize * 7f / 8f
+                if (!onBoard || inEdgeRanks) outside++ else inside++
+            }
+            assertEquals("intro \"$white\" vs \"$black\": pixels changed off the band", 0, outside)
+            assertTrue("the title is drawn", inside > 5_000)
+            withTitle.recycle()
+            plain.recycle()
+        }
+    }
+
+    @Test
+    fun theFinalNumbersTableIsOnTheCardAndFitsInThePortraitPlayerToo() {
+        val script = scriptFor("MorphyFan1857", "DukeAndCount")
+        val outro = script.segments.first { it.kind == SegmentKind.OUTRO_SUMMARY }
+        val card = SegmentFrameBuilder.build(script, outro, 0L, BoardOrientation.WHITE_DOWN) as RenderInstruction.Card
+        val table = card.content.table!!
+        assertEquals(10, table.rows.size)
+        // The synthetic game is 34 GOOD moves: 17 each (the report says so), every other class zero.
+        assertEquals(17, table.rows.single { it.classification == MoveClassification.GOOD }.white)
+        assertEquals(17, table.rows.single { it.classification == MoveClassification.GOOD }.black)
+        assertEquals(0, table.rows.filter { it.classification != MoveClassification.GOOD }.sumOf { it.white + it.black })
+        // The class names are the app's own words.
+        assertEquals(context.getString(net.palaya.chessanalyzer.R.string.classification_blunder), table.rows.last().label)
+        // At the player's portrait size (3:4) every card still fits its box.
+        for ((name, segment) in listOf("outro" to outro, "intro" to script.segments.first { it.kind == SegmentKind.INTRO })) {
+            val bitmap = renderSegment(script, segment, withCaption = true, width = 1080, height = 1440)
+            save(bitmap, "portrait_$name")
+            assertInsideTheBox(bitmap, "portrait $name")
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun thePortraitFrameDrawsTheBoardAsWideAsTheFrame() {
+        val script = scriptFor("MorphyFan1857", "DukeAndCount")
+        val intro = script.segments.first { it.kind == SegmentKind.INTRO }
+        val spec = (SegmentFrameBuilder.build(script, intro, 0L, BoardOrientation.WHITE_DOWN) as RenderInstruction.Board).spec
+        val pw = 1080
+        val ph = 1440
+        val bitmap = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
+        BoardFrameRenderer.renderBoardFrame(Canvas(bitmap), pw, ph, spec.copy(titleCard = null))
+        save(bitmap, "portrait_board")
+        // The light and dark squares of the board's top rank span more than 85 percent of the frame's width.
+        val row = IntArray(pw)
+        var best = 0
+        for (y in (ph * 0.08f).toInt() until (ph * 0.2f).toInt() step 4) {
+            bitmap.getPixels(row, 0, pw, 0, y, pw, 1)
+            val light = 0xFFEBECD0.toInt()
+            val dark = 0xFF739552.toInt()
+            val first = row.indexOfFirst { it == light || it == dark }
+            val last = row.indexOfLast { it == light || it == dark }
+            if (first >= 0) best = maxOf(best, last - first)
+        }
+        assertTrue("board width $best px of $pw", best > pw * 0.85)
+        bitmap.recycle()
+    }
+
+    @Test
+    fun theCapturedPiecesAndTheLeadAreDrawnBesideThePlayersInBothFrames() {
+        // The Immortal Game after 20... Na6: White is missing two pawns, a bishop, both rooks; Black three pawns.
+        val fen = "r1b1k1nr/p2p1ppp/n2B4/1p1NPN1P/6P1/3P1Q2/P1P1K3/q5b1 w kq - 2 21"
+        val material = net.palaya.chessanalyzer.core.analysis.MaterialBalance.fromFen(fen)
+        val spec = BoardFrameRenderer.BoardFrameSpec(
+            boardState = net.palaya.chessanalyzer.data.mapper.fenToBoardState(fen),
+            header = net.palaya.chessanalyzer.core.narration.VideoGameHeader("Adolf Anderssen", "Lionel Kieseritzky", result = "1-0"),
+            caption = "20... Na6",
+            evalWinPercentWhite = 99.0, evalCp = 900,
+        )
+        for ((tag, size) in listOf("landscape" to (w to h), "portrait" to (1080 to 1440))) {
+            val (fw, fh) = size
+            val with = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+            BoardFrameRenderer.renderBoardFrame(Canvas(with), fw, fh, spec.copy(material = material))
+            val without = Bitmap.createBitmap(fw, fh, Bitmap.Config.ARGB_8888)
+            BoardFrameRenderer.renderBoardFrame(Canvas(without), fw, fh, spec)
+            save(with, "material_$tag")
+            val a = IntArray(fw * fh)
+            val b = IntArray(fw * fh)
+            with.getPixels(a, 0, fw, 0, 0, fw, fh)
+            without.getPixels(b, 0, fw, 0, 0, fw, fh)
+            // The material is drawn (a few hundred pixels of icons and "+N"), and only beside the names: never on the board.
+            val changed = a.indices.count { a[it] != b[it] }
+            assertTrue("$tag: $changed pixels of material", changed > 800)
+            with.recycle()
+            without.recycle()
+        }
+        assertEquals(13, material.lead(Color.BLACK))
     }
 }

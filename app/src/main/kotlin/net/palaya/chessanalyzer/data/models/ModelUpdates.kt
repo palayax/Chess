@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** What the "Check for updates" sheet shows (one process-wide state, like the setup service's). */
@@ -38,6 +39,11 @@ class ModelUpdates(
     private val scope: CoroutineScope,
     /** Called with the time of every finished check ("Last checked: …"). */
     private val onChecked: suspend (Long) -> Unit = {},
+    /**
+     * The upstream half of a check (A4): null when there is none. Asked in its own coroutine at every [check],
+     * after nothing of the signed check's, so it can neither delay nor change [state].
+     */
+    private val upstream: (() -> UpstreamChecker)? = null,
     private val clock: () -> Long = System::currentTimeMillis,
     private val elapsed: () -> Long = System::nanoTime,
 ) {
@@ -46,12 +52,19 @@ class ModelUpdates(
 
     @Volatile private var job: Job? = null
 
+    /** The upstream rows (A4): empty until a check runs (or when there is no upstream check); never part of [state]. */
+    private val _upstream = MutableStateFlow<List<UpstreamRow>>(emptyList())
+    val upstreamRows: StateFlow<List<UpstreamRow>> = _upstream.asStateFlow()
+
+    @Volatile private var upstreamJob: Job? = null
+
     val busy: Boolean get() = job?.isActive == true
 
     /** The tap on the Settings row (or Try again). False when a check or an install already runs. */
     fun check(): Boolean {
         if (busy) return false
         _state.value = UpdateUiState.Checking
+        startUpstreamCheck()
         job = scope.launch {
             val result = try {
                 checker().check()
@@ -65,6 +78,29 @@ class ModelUpdates(
             _state.value = UpdateUiState.Checked(result, (result as? UpdateCheckResult.Available)?.offers.orEmpty())
         }
         return true
+    }
+
+    /** Starts (or restarts) the upstream half beside the signed check. A failure there stays in its own rows. */
+    private fun startUpstreamCheck() {
+        upstreamJob?.cancel()
+        val provider = upstream ?: return
+        val checker = try {
+            provider()
+        } catch (e: Exception) {
+            _upstream.value = emptyList()
+            return
+        }
+        _upstream.value = checker.pendingRows()
+        upstreamJob = scope.launch {
+            try {
+                checker.check { row -> _upstream.update { rows -> rows.map { if (it.component == row.component) row else it } } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // check() reports failures as rows; this is only a bug guard. The rows still say "checking" otherwise.
+                _upstream.update { rows -> rows.map { if (it.status == UpstreamStatus.Checking) it.copy(status = UpstreamStatus.Failed(UpstreamFailure.UNREADABLE)) else it } }
+            }
+        }
     }
 
     /** "Download and install" for [offer]. False when something already runs. */

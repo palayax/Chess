@@ -93,6 +93,7 @@ class FaultHttpServer : Closeable {
 
     private val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
     private val files = ConcurrentHashMap<String, Body>()
+    private val encodings = ConcurrentHashMap<String, String>()
     private val queued = ConcurrentHashMap<String, MutableList<Fault>>()
     private val always = ConcurrentHashMap<String, Fault>()
     private val closed = AtomicBoolean(false)
@@ -114,7 +115,23 @@ class FaultHttpServer : Closeable {
 
     fun serve(path: String, body: ByteArray): FaultHttpServer = serveBody(path, ArrayBody(body))
 
-    fun serveBody(path: String, body: Body): FaultHttpServer = apply { files["/" + path.trimStart('/')] = body }
+    fun serveBody(path: String, body: Body): FaultHttpServer = apply {
+        files["/" + path.trimStart('/')] = body
+        encodings.remove("/" + path.trimStart('/'))
+    }
+
+    /**
+     * Serves [plain] gzip-compressed with `Content-Encoding: gzip` (A4: GitHub's release lists come that way).
+     * The Content-Length is the compressed size, as a real server's is.
+     */
+    fun serveGzipped(path: String, plain: ByteArray): FaultHttpServer {
+        val bytes = java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.GZIPOutputStream(out).use { it.write(plain) }
+        }.toByteArray()
+        serveBody(path, ArrayBody(bytes))
+        encodings["/" + path.trimStart('/')] = "gzip"
+        return this
+    }
 
     /** Queues [fault] for the next request to [path] (each queued fault is used once, in order). */
     fun fault(path: String, fault: Fault): FaultHttpServer = apply {
@@ -208,11 +225,11 @@ class FaultHttpServer : Closeable {
                 writeHead(out, 302, "Found", mapOf("Location" to url(path), "Content-Length" to "0"))
                 return
             }
-            else -> sendBody(socket, out, body, headers["range"], fault)
+            else -> sendBody(socket, out, body, headers["range"], fault, encodings[path])
         }
     }
 
-    private fun sendBody(socket: Socket, out: OutputStream, body: Body, range: String?, fault: Fault?) {
+    private fun sendBody(socket: Socket, out: OutputStream, body: Body, range: String?, fault: Fault?, encoding: String? = null) {
         val size = body.size
         var start = 0L
         var partial = false
@@ -231,6 +248,7 @@ class FaultHttpServer : Closeable {
         val claimed = (fault as? Fault.WrongTotalSize)?.claimedTotal
         val head = LinkedHashMap<String, String>()
         head["Content-Type"] = "application/octet-stream"
+        if (encoding != null) head["Content-Encoding"] = encoding
         if (partial) {
             head["Content-Length"] = length.toString()
             head["Content-Range"] = "bytes $start-${size - 1}/${claimed ?: size}"

@@ -36,6 +36,8 @@ import net.palaya.chessanalyzer.data.mapper.toUiColor
 import net.palaya.chessanalyzer.data.mapper.toUiReport
 import net.palaya.chessanalyzer.rephrase.RephraseService
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
+import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.gameAnalysisDepth
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameReport
@@ -337,6 +339,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     /** The side a registered game opens with, when it is not [SideChoice.UNKNOWN] (a famous game: "Not me"). */
     private val pendingSideByGameId = mutableMapOf<String, SideChoice>()
 
+    /**
+     * The depth a registered game is analysed at when it is not the Settings default (A4): the strength a game
+     * was analysed with when it is reopened, or the one picked for a re-analyse. Absent = the Settings default.
+     */
+    private val pendingDepthByGameId = mutableMapOf<String, Int>()
+
     private var analysisJob: Job? = null
     private val idCounter = AtomicInteger(1)
 
@@ -435,7 +443,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             return PendingAnalysisStore.Request(
                 gameId = gameId,
                 pgnText = text,
-                depth = current.depth,
+                // A4: a re-analyse's pick, else the strength a reopened game was analysed with, else the Settings default.
+                depth = gameAnalysisDepth(
+                    explicit = pendingDepthByGameId[gameId],
+                    stored = app.gameRepository.load(gameId)?.depth,
+                    settingsDefault = current.depth,
+                ),
                 multiPv = current.multiPv,
                 username = current.username,
                 startedAtMs = System.currentTimeMillis(),
@@ -595,6 +608,33 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 AnalysisService.Outcome.Cancelled -> Unit
             }
         }
+    }
+
+    /**
+     * "Re-analyse" on the Summary (A4): analyse [gameId] again with [strength] instead of the one it has. The
+     * game's text and its answer to "Which side were you?" are kept; its in-memory result is dropped so the
+     * next [runAnalysis] runs (or reads the eval cache of that strength: the budget is in the key, so an
+     * earlier run at the same strength is instant). The choice is stored with the game once the run finishes,
+     * so reopening the game keeps it; a cancelled run leaves the old result and the old strength untouched.
+     *
+     * The Summary showing now keeps its report until the new one replaces it (the screen pops itself when a
+     * report disappears). Returns false when the game is not in memory.
+     */
+    fun reanalyseGame(gameId: String, strength: AnalysisStrength): Boolean {
+        val pgnText = games[gameId]?.pgnText?.takeIf { it.isNotBlank() } ?: return false
+        pendingPgnByGameId[gameId] = pgnText
+        pendingDepthByGameId[gameId] = strength.depth
+        // The side the game opened with must not come back (a famous game's "Not me" is an answer the user
+        // may have changed); the stored answer is what runAnalysis reads.
+        pendingSideByGameId.remove(gameId)
+        activeRequest = null
+        games.remove(gameId)
+        videoScripts.keys.removeAll { it.startsWith("$gameId:") }
+        practiceSets.keys.removeAll { it.startsWith("$gameId:") }
+        solvedPuzzlePlies.remove(gameId)
+        _error.value = null
+        diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "re-analysing $gameId at ${strength.name.lowercase()} (depth ${strength.depth})")
+        return true
     }
 
     /**
