@@ -781,10 +781,11 @@ model's cache folder purged. No manifest entry is published yet (there is no new
 
 **Integration (§6.2):** cards: the key moments of the current side at the end of the analysis ("Polishing the
 commentary (on-device AI)… 2 of 5", Skip), then every other card in a background job (key moments first, then by ply);
-a card on screen keeps its words until it is drawn again. The narration post-pass is implemented and tested in `:core`
-(`RephrasedScript`) and exposed by `AnalysisViewModel` (`rephrasedVideoScriptFor`, `polishNarration`,
-`narrationPolishPending`), but **not wired into the Video screen** (V4 owned those files): see the "V4 INTEGRATION
-HOOK" comment. The "Report this wording" item (§9.2) is not built.
+a card on screen keeps its words until it is drawn again. Narration (after V4 merged): the Video route runs the post-pass
+as a pre-step before the screen opens ("Polishing the narration (on-device AI)… N of M", Skip) and hands the
+reworded script (`rephrasedVideoScriptFor`) to the VideoScreen, so the player, Save video and the exporter read the
+finished words and the export never calls the model. V4's spoken best line (`SegmentKind.BEST_LINE`) is not on the
+allowlist. The "Report this wording" item (§9.2) is not built.
 
 **Measurement (§5.5):** host CPU only (llama.cpp b11190, the corpus = every distinct card text of the three audited
 games for three sides, 190, and every eligible narration beat of the five pacing games, 388). The other candidates
