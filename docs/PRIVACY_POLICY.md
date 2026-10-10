@@ -16,8 +16,8 @@ Security LTD ("we"). You can reach us at **Chess@palaya.net**.
 - Palaya Chess works on your phone. Your games, analyses, videos and settings stay on your phone.
 - We do not collect personal data. There are no accounts, no ads, no analytics and no tracking.
 - The app uses the internet only when you ask it to: once, to download the chess engine's data and the
-  narration voice, and whenever you tap **Check for updates**. Those files come from GitHub, which sees
-  your device's IP address when it sends them, as with any download.
+  narration voice, and whenever you tap **Check for updates**. Those requests go to GitHub, which sees
+  your device's IP address when it answers them, as with any download or web page. Nothing else is sent.
 - The app's diagnostic log stays on your phone unless you choose to share it.
 
 ## What the app does on your phone
@@ -51,12 +51,23 @@ anything in the background and never uploads anything.
    (about 100 MB) and the narration voice (about 110 MB). The Setup screen says this and downloads them only
    when you tap **Download**. If you are on mobile data it asks you first. If the download is interrupted,
    it continues only when you tap **Resume**.
-2. **Check for updates (only when you tap it).** In Settings, **Check for updates** downloads a small list
-   of the latest engine data and voice files and its digital signature. If a newer file is available, it is
-   downloaded only if you tap **Download and install**.
+2. **Check for updates (only when you tap it).** In Settings, **Check for updates** does two things at
+   once:
+   - It downloads a small list of the latest engine data and voice files and its digital signature from
+     our GitHub page (github.com/palayax/Chess). If a newer file is available, it is downloaded only if you
+     tap **Download and install**.
+   - It asks GitHub's public information service (api.github.com) for the latest released versions of the
+     open-source projects the app is built from: Stockfish (official-stockfish/Stockfish), the voice
+     runtime sherpa-onnx (k2-fsa/sherpa-onnx) and the list of voice models published with it (the Kokoro
+     voice). These are three small text answers (about 0.1 MB together), asked for without any account
+     or key. The sheet then shows, for each project, whether this app is up to date or a newer version
+     exists. This part is for your information only: **nothing from those projects is downloaded**. A
+     newer version of the engine or voice software reaches you only as an update of the app itself,
+     through Google Play. If GitHub is busy or limits requests, that line simply says it could not check;
+     it never affects the first part.
 
-These files are published on GitHub (github.com/palayax/Chess), a code-hosting service run by
-GitHub, Inc. The app checks every file against fingerprints built into the app (or, for updates, against
+The files in the first part are published on GitHub (github.com/palayax/Chess), a code-hosting service run
+by GitHub, Inc. The app checks every file against fingerprints built into the app (or, for updates, against
 the signed list) before it uses it. The files are data for the engine and the voice; no program code is
 ever downloaded.
 
@@ -65,13 +76,14 @@ opens your web browser; the app itself sends nothing.
 
 ## What GitHub sees
 
-To send you a file, GitHub receives what any web server receives with a download request: your device's IP
-address, the time, the file asked for, and a short "user agent" text that says the app's name and version
-and your Android version (for example "PalayaChess/1.1 (Android 16)"). The app sends no account, no
-identifier, no game data and nothing else. GitHub handles this information under its own privacy
+To answer the app, GitHub (both the download pages and its information service, api.github.com) receives
+what any web server receives with a request: your device's IP address, the time, the page or file asked
+for, and a short "user agent" text that says the app's name and version and your Android version (for
+example "PalayaChess/1.1 (Android 16)"). The app sends no account, no key, no cookie, no identifier, no
+game data and nothing else. GitHub handles this information under its own privacy
 statement: https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement
 
-We do not receive your IP address or any information about you from these downloads. Like anyone who
+We do not receive your IP address or any information about you from these requests. Like anyone who
 publishes files on GitHub, we can see only how many times each file has been downloaded in total.
 
 ## The diagnostic log

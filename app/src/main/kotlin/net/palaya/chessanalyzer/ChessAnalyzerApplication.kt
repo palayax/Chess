@@ -27,7 +27,10 @@ import net.palaya.chessanalyzer.data.models.ModelSetup
 import net.palaya.chessanalyzer.data.models.ModelUpdateInstaller
 import net.palaya.chessanalyzer.data.models.ModelUpdates
 import net.palaya.chessanalyzer.data.models.NetworkStatus
+import net.palaya.chessanalyzer.data.models.OurComponents
 import net.palaya.chessanalyzer.data.models.UpdateChecker
+import net.palaya.chessanalyzer.data.models.UpstreamChecker
+import net.palaya.chessanalyzer.data.models.UpstreamSources
 import net.palaya.chessanalyzer.diagnostics.AppDiagnostics
 import net.palaya.chessanalyzer.diagnostics.DiagnosticLog
 import net.palaya.chessanalyzer.engine.NetStore
@@ -71,10 +74,13 @@ class ChessAnalyzerApplication : Application() {
     /** Whether the phone is on Wi-Fi, mobile data or nothing; read only when the user taps Download. */
     val networkStatus: NetworkStatus by lazy { ConnectivityNetworkStatus(this) }
 
+    /** The one User-Agent every request carries: the app and its version, the Android API level, nothing about the user. */
+    private val userAgent: String get() = "PalayaChess/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.SDK_INT})"
+
     /** The one class that opens network connections, used only by [modelSetup] and "Check for updates". */
     val modelDownloader: ModelDownloader by lazy {
         ModelDownloader(
-            userAgent = "PalayaChess/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.SDK_INT})",
+            userAgent = userAgent,
             // http to 10.0.2.2 / 127.0.0.1 / localhost (scripts/model_test_server.py, FaultHttpServer)
             // only in a debug build; release is https only.
             allowCleartextLoopback = BuildConfig.DEBUG,
@@ -211,6 +217,50 @@ class ChessAnalyzerApplication : Application() {
     @Volatile
     var updateCheckerForTesting: UpdateChecker? = null
 
+    // ---- "Check for updates", the upstream half (A4): the latest releases of Stockfish, sherpa-onnx and Kokoro ----
+
+    /**
+     * A second [ModelDownloader] for the upstream list: the same class, rules and User-Agent, with shorter
+     * timeouts, because these answers are information and a slow GitHub must not keep the sheet spinning.
+     */
+    val upstreamDownloader: ModelDownloader by lazy {
+        ModelDownloader(
+            userAgent = userAgent,
+            allowCleartextLoopback = BuildConfig.DEBUG,
+            connectTimeoutMs = 8_000,
+            readTimeoutMs = 12_000,
+            log = { line -> diagnostics.log.log(ModelSetup.TAG, line) },
+        )
+    }
+
+    /** What this build contains of each upstream component, as those projects name it. */
+    fun ourComponents(): OurComponents = OurComponents(
+        stockfishTag = BuildConfig.STOCKFISH_TAG,
+        sherpaOnnxVersion = BuildConfig.SHERPA_ONNX_VERSION,
+        voiceTarName = net.palaya.chessanalyzer.data.models.GeneratedModelPins.VOICE_TAR_NAME,
+        voiceArchiveName = net.palaya.chessanalyzer.data.models.GeneratedModelPins.VOICE_UPSTREAM_ARCHIVE_NAME,
+        voiceArchiveSizeBytes = net.palaya.chessanalyzer.data.models.GeneratedModelPins.VOICE_UPSTREAM_ARCHIVE_SIZE_BYTES,
+        voiceArchiveSha256 = net.palaya.chessanalyzer.data.models.GeneratedModelPins.VOICE_UPSTREAM_ARCHIVE_SHA256,
+    )
+
+    private val defaultUpstreamChecker: UpstreamChecker by lazy {
+        UpstreamChecker(
+            downloader = upstreamDownloader,
+            networkStatus = networkStatus,
+            sources = UpstreamSources.defaults(ourComponents()),
+            diagnostics = diagnostics.log,
+        )
+    }
+
+    /**
+     * Test seam only (A4): `UpdateCheckUpstreamTest` points the upstream rows at an in-process `FaultHttpServer`
+     * (the base URL of [UpstreamSources.defaults] is injectable); `UpdateCheckNetworkTest` sets a checker with no
+     * sources, so its "exactly two requests" stays about the signed check. Null in the app.
+     */
+    @VisibleForTesting
+    @Volatile
+    var upstreamCheckerForTesting: UpstreamChecker? = null
+
     val modelUpdateInstaller: ModelUpdateInstaller by lazy {
         ModelUpdateInstaller(
             downloader = modelDownloader,
@@ -230,6 +280,7 @@ class ChessAnalyzerApplication : Application() {
             installer = { modelUpdateInstaller },
             scope = appScope,
             onChecked = { at -> settingsRepository.setLastUpdateCheckMs(at) },
+            upstream = { upstreamCheckerForTesting ?: defaultUpstreamChecker },
         )
     }
     val settingsRepository: SettingsRepository by lazy { SettingsRepository(this) }

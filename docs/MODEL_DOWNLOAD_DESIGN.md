@@ -170,6 +170,31 @@ The button is disabled, with "Finish or cancel the current analysis first" / "�
 `AnalysisViewModel.analysisRunning` or `VideoExportService.running` is true. `last checked` is one `long` in the
 general settings DataStore (`models_last_update_check_ms`).
 
+### 1.8b Upstream versions in the update sheet (A4)
+
+The same tap also asks the original projects what they have released, and the sheet shows one row per component under
+the signed result: a check mark and "Up to date", an arrow and "Newer upstream version X available — comes with an app
+update", an "Upstream has re-published this file" note, or "Couldn't check: …" (no internet / GitHub is limiting
+requests / GitHub isn't answering / its answer couldn't be read). Information only: nothing upstream is downloaded and
+engine code never can be (Play, §3b of `docs/PUBLISHING.md`), so a newer upstream version always "comes with an app
+update". The rows are a list of sources (`UpstreamSources.defaults`), so an LLM row is one more source and one name string.
+
+| Row | Request (GitHub REST, unauthenticated) | Ours | Newer when |
+|---|---|---|---|
+| Stockfish | `GET repos/official-stockfish/Stockfish/releases/latest` (`tag_name`, e.g. `sf_19`) | `BuildConfig.STOCKFISH_TAG`, read by the build from `vendor/STOCKFISH_VERSION.txt` | the tag's number is higher |
+| sherpa-onnx | `GET repos/k2-fsa/sherpa-onnx/releases/latest` (`tag_name`, e.g. `v1.13.8`) | `BuildConfig.SHERPA_ONNX_VERSION` (the version catalog) | higher semver |
+| Kokoro voice | `GET repos/k2-fsa/sherpa-onnx/releases/tags/tts-models` (the asset list `scripts/fetch_models.sh` takes the voice from) | the tar's name (`kokoro-int8-en-v0_19` = v0.19) and the pinned archive (`VOICE_UPSTREAM_ARCHIVE_*`, from `MODELS.lock`) | a `kokoro-int8-*-vX_Y` asset has a higher X.Y; or "re-published" when our archive is gone or its size / SHA-256 differ |
+
+Rules: only on the tap, next to the signed check and never in its way (its own coroutine and state flow in `ModelUpdates`,
+so a rate limit, an outage or garbage upstream only changes that row); every request through `ModelDownloader.fetchSmall`
+(https only, redirects checked, size-capped, one attempt), by a second `ModelDownloader` with shorter timeouts (8 s / 12 s)
+and the same User-Agent; no key, cookie or identifier. The release lists are 0.5 to 1 MB of JSON, so these three ask for
+gzip (`fetchSmall(..., acceptGzip = true)`: the cap applies to the INFLATED size, a gzip bomb is refused): about 36 KB +
+73 KB + 5 KB on the wire. GitHub's anonymous limit is 60 requests an hour per address; a check costs 3 of them (403 / 429
+become `SmallFetchFailure.RATE_LIMITED`, shown as a calm per-row line). Hugging Face is not asked: the pinned source is the
+k2-fsa release. Tests: `UpstreamVersionsTest`, `UpstreamCheckerTest`, `UpdateUpstreamIsolationTest` (host, `FaultHttpServer`),
+`UpdateCheckUpstreamTest` (device); the base URL is injectable (`ChessAnalyzerApplication.upstreamCheckerForTesting`).
+
 ## 2. Download engine
 
 ### 2.1 Pieces

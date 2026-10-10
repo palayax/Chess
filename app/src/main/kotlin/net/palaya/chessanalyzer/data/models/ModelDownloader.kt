@@ -59,6 +59,12 @@ enum class SmallFetchFailure {
 
     /** Longer than the caller's cap. */
     TOO_LARGE,
+
+    /**
+     * 403 / 429: a host that rate-limits (GitHub's unauthenticated API allows 60 requests an hour per address)
+     * is asking us to wait. Not an error in the app and not worth a retry loop; the caller says so.
+     */
+    RATE_LIMITED,
 }
 
 /** The result of [ModelDownloader.fetchSmall]. */
@@ -225,8 +231,13 @@ class ModelDownloader(
      * One small GET into memory (the update manifest and its signature, D2e): a single attempt (the user's
      * tap is the retry), the same https / redirect / timeout / User-Agent rules as [download], no Range,
      * and at most [maxBytes] (a longer body is refused, not truncated). Never logs more than the host.
+     *
+     * [acceptGzip] (A4, the upstream version check): asks for a gzip body and inflates it here; [maxBytes] then
+     * caps the INFLATED size (a gzip bomb is refused as TOO_LARGE, not unpacked), and a declared Content-Length is
+     * checked against the bytes that actually came over the wire. GitHub's release lists are 0.5 to 1 MB of JSON and
+     * about a tenth of that compressed. Off by default: the manifest and its signature ask for identity.
      */
-    suspend fun fetchSmall(url: String, maxBytes: Int): SmallFetch = withContext(Dispatchers.IO) {
+    suspend fun fetchSmall(url: String, maxBytes: Int, acceptGzip: Boolean = false): SmallFetch = withContext(Dispatchers.IO) {
         val name = url.substringAfterLast('/')
         if (!isAllowed(url)) {
             log("$name: refused, not an https URL (host ${hostOf(url)})")
@@ -244,7 +255,7 @@ class ModelDownloader(
                 conn.readTimeout = readTimeoutMs
                 conn.useCaches = false
                 conn.setRequestProperty("User-Agent", userAgent)
-                conn.setRequestProperty("Accept-Encoding", "identity")
+                conn.setRequestProperty("Accept-Encoding", if (acceptGzip) "gzip" else "identity")
                 val code = try {
                     conn.responseCode
                 } catch (e: IOException) {
@@ -269,6 +280,10 @@ class ModelDownloader(
                         log("$name: HTTP $code from host ${hostOf(current)}")
                         return@withContext SmallFetch.Failed(SmallFetchFailure.NOT_FOUND, "HTTP $code")
                     }
+                    403, 429 -> {
+                        log("$name: HTTP $code from host ${hostOf(current)} (rate limited?)")
+                        return@withContext SmallFetch.Failed(SmallFetchFailure.RATE_LIMITED, "HTTP $code")
+                    }
                     else -> {
                         log("$name: HTTP $code from host ${hostOf(current)}")
                         return@withContext SmallFetch.Failed(SmallFetchFailure.SERVER, "HTTP $code")
@@ -279,8 +294,12 @@ class ModelDownloader(
                     return@withContext SmallFetch.Failed(SmallFetchFailure.TOO_LARGE, "Content-Length $declared > $maxBytes")
                 }
                 val out = java.io.ByteArrayOutputStream()
+                var raw: CountingInputStream? = null
                 try {
-                    conn.inputStream.use { input ->
+                    raw = CountingInputStream(conn.inputStream)
+                    val body: java.io.InputStream =
+                        if (acceptGzip && conn.contentEncoding.equals("gzip", ignoreCase = true)) java.util.zip.GZIPInputStream(raw) else raw
+                    body.use { input ->
                         val buffer = ByteArray(8 * 1024)
                         while (true) {
                             coroutineContext.ensureActive()
@@ -296,8 +315,10 @@ class ModelDownloader(
                     log("$name: the answer from host ${hostOf(current)} broke off (${e.javaClass.simpleName})")
                     return@withContext SmallFetch.Failed(SmallFetchFailure.NETWORK, "${e.javaClass.simpleName} while reading")
                 }
-                if (declared != null && declared != out.size().toLong()) {
-                    return@withContext SmallFetch.Failed(SmallFetchFailure.NETWORK, "body ended at ${out.size()} of $declared bytes")
+                // Compared with what came over the wire (the compressed size when gzip was inflated).
+                val received = raw?.count ?: out.size().toLong()
+                if (declared != null && declared != received) {
+                    return@withContext SmallFetch.Failed(SmallFetchFailure.NETWORK, "body ended at $received of $declared bytes")
                 }
                 log("$name: ${out.size()} bytes from host ${hostOf(current)}")
                 return@withContext SmallFetch.Ok(out.toByteArray())
@@ -472,4 +493,14 @@ class ModelDownloader(
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
+}
+
+/** Counts the bytes read through it: what actually came over the wire, before any inflating. */
+private class CountingInputStream(source: java.io.InputStream?) : java.io.FilterInputStream(source) {
+    var count = 0L
+        private set
+
+    override fun read(): Int = super.read().also { if (it >= 0) count++ }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) count += it }
 }

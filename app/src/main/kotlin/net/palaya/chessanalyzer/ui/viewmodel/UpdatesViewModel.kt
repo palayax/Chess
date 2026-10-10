@@ -16,6 +16,7 @@ import net.palaya.chessanalyzer.data.models.JournalRecord
 import net.palaya.chessanalyzer.data.models.ModelDownloadService
 import net.palaya.chessanalyzer.data.models.UpdateOffer
 import net.palaya.chessanalyzer.data.models.UpdateUiState
+import net.palaya.chessanalyzer.data.models.UpstreamRow
 import net.palaya.chessanalyzer.ui.model.SetupPrecheck
 import net.palaya.chessanalyzer.ui.model.UpdateBlock
 import net.palaya.chessanalyzer.ui.model.setupPrecheck
@@ -36,6 +37,9 @@ class UpdatesViewModel(application: Application) : AndroidViewModel(application)
     private val updates get() = app.modelUpdates
 
     val state: StateFlow<UpdateUiState> = updates.state
+
+    /** The upstream rows (A4), beside [state] and independent of it. */
+    val upstream: StateFlow<List<UpstreamRow>> = updates.upstreamRows
 
     val lastCheckedMs: StateFlow<Long?> = app.settingsRepository.lastUpdateCheckMs
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)

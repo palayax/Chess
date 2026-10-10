@@ -8,6 +8,10 @@ import net.palaya.chessanalyzer.data.models.UpdateInstallOutcome
 import net.palaya.chessanalyzer.data.models.UpdateOffer
 import net.palaya.chessanalyzer.data.models.UpdatePhase
 import net.palaya.chessanalyzer.data.models.UpdateUiState
+import net.palaya.chessanalyzer.data.models.UpstreamComponent
+import net.palaya.chessanalyzer.data.models.UpstreamFailure
+import net.palaya.chessanalyzer.data.models.UpstreamRow
+import net.palaya.chessanalyzer.data.models.UpstreamStatus
 
 /*
  * The pure logic behind Settings › "Check for updates" and its sheet (D2e, docs/MODEL_DOWNLOAD_DESIGN.md
@@ -150,3 +154,50 @@ fun updateSheetView(state: UpdateUiState, block: UpdateBlock?, maxRetries: Int =
 
 private fun rows(offers: List<UpdateOffer>, enabled: Boolean): List<UpdateOfferRow> =
     offers.map { UpdateOfferRow(it, it.kind, it.entry.version, it.entry.sizeBytes, enabled) }
+
+// ---- Upstream versions (A4) ----
+
+/**
+ * What one upstream row says. Information only: nothing upstream is downloaded, and a newer version "comes with
+ * an app update" because engine code cannot be downloaded (Play policy) and the runtime and voice are built into
+ * the release. A problem never reads as an error in the app: it is about the check.
+ */
+enum class UpstreamLine(val isProblem: Boolean, val isGood: Boolean = false) {
+    CHECKING(false),
+    UP_TO_DATE(false, isGood = true),
+    NEWER(false),
+    CHANGED(false),
+    NO_INTERNET(true),
+    RATE_LIMITED(true),
+    UNAVAILABLE(true),
+    UNREADABLE(true),
+}
+
+/** One drawn row: [latest] is set only for [UpstreamLine.NEWER]. */
+data class UpstreamRowView(
+    val component: UpstreamComponent,
+    val ours: String,
+    val line: UpstreamLine,
+    val latest: String? = null,
+)
+
+/** The rows in the list's fixed order (the component order), so a late answer never reshuffles the list. */
+fun upstreamRowViews(rows: List<UpstreamRow>): List<UpstreamRowView> =
+    rows.sortedBy { it.component.ordinal }.map { row ->
+        when (val s = row.status) {
+            UpstreamStatus.Checking -> UpstreamRowView(row.component, row.ours, UpstreamLine.CHECKING)
+            UpstreamStatus.UpToDate -> UpstreamRowView(row.component, row.ours, UpstreamLine.UP_TO_DATE)
+            is UpstreamStatus.Newer -> UpstreamRowView(row.component, row.ours, UpstreamLine.NEWER, s.latest)
+            UpstreamStatus.Changed -> UpstreamRowView(row.component, row.ours, UpstreamLine.CHANGED)
+            is UpstreamStatus.Failed -> UpstreamRowView(
+                row.component,
+                row.ours,
+                when (s.reason) {
+                    UpstreamFailure.NO_INTERNET -> UpstreamLine.NO_INTERNET
+                    UpstreamFailure.RATE_LIMITED -> UpstreamLine.RATE_LIMITED
+                    UpstreamFailure.UNAVAILABLE -> UpstreamLine.UNAVAILABLE
+                    UpstreamFailure.UNREADABLE -> UpstreamLine.UNREADABLE
+                },
+            )
+        }
+    }

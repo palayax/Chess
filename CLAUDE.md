@@ -112,7 +112,9 @@ conflict.
   the `python3` on the PATH may be the Store alias that only prints a hint: scripts must pick a python that
   actually runs.
 - **"Check for updates" runs only on the tap** (`UpdateChecker.check()` from the Settings sheet; exactly two
-  requests, `models.json` and `.sig`, through `ModelDownloader.fetchSmall`), and every entry is judged again by
+  requests, `models.json` and `.sig`, through `ModelDownloader.fetchSmall`; since A4 the same tap also starts
+  `UpstreamChecker` beside it, three more GitHub API requests for the latest Stockfish / sherpa-onnx / Kokoro releases,
+  information only, in its own coroutine and state so a failure there can never touch the signed result), and every entry is judged again by
   `ModelCompatibility` right before a download (`ModelUpdateInstaller`), so an incompatible file can never be
   fetched. `UpdateCheckNetworkTest` drives the real Settings UI against `FaultHttpServer`
   (`ChessAnalyzerApplication.updateCheckerForTesting`, tests only).

@@ -57,9 +57,38 @@ data class MaterialBalance(
         return out
     }
 
+    // The Summary/Board view of the same numbers (A4, merged with V4's class): the difference, the side ahead
+    // and the captures most valuable first, as the screens list them.
+
+    /** White's points minus Black's (the same number as [advantage]). */
+    val difference: Int get() = advantage
+
+    /** The side ahead on material, or null when it is level. */
+    val ahead: Color?
+        get() = when {
+            advantage > 0 -> Color.WHITE
+            advantage < 0 -> Color.BLACK
+            else -> null
+        }
+
+    /** How many points [color] is ahead by, or 0 when it is level or behind (the same as [lead]). */
+    fun advantage(color: Color): Int = lead(color)
+
+    /** Black's pieces that White has taken, most valuable first (queen, rook, bishop, knight, pawn). */
+    val capturedByWhite: List<PieceType> get() = captured(Color.WHITE).reversed()
+
+    /** White's pieces that Black has taken, most valuable first. */
+    val capturedByBlack: List<PieceType> get() = captured(Color.BLACK).reversed()
+
+    /** The pieces [color] has taken, most valuable first. */
+    fun capturedBy(color: Color): List<PieceType> = if (color == Color.WHITE) capturedByWhite else capturedByBlack
+
     private fun countsOf(color: Color): Map<PieceType, Int> = if (color == Color.WHITE) white else black
 
     companion object {
+        /** The standard value of one piece of [type] (the king counts nothing). */
+        fun valueOf(type: PieceType): Int = POINTS.getValue(type)
+
         /** The teaching values a score line uses (the king counts nothing). */
         val POINTS: Map<PieceType, Int> = mapOf(
             PieceType.PAWN to 1,

@@ -63,6 +63,7 @@ import net.palaya.chessanalyzer.ui.viewmodel.SetupViewModel
 import net.palaya.chessanalyzer.data.models.ModelDownloadService
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.homeSetupCard
+import net.palaya.chessanalyzer.ui.model.upstreamRowViews
 import net.palaya.chessanalyzer.ui.screens.SetupScreen
 import net.palaya.chessanalyzer.ui.screens.FamousGamesScreen
 import net.palaya.chessanalyzer.ui.screens.FamousGamesState
@@ -388,6 +389,17 @@ fun ChessAnalyzerNavHost(
                     onLearnPattern = { type -> navController.navigate(Destination.Reference.createRoute(type)) },
                     onWatchReviewClick = { navController.navigate(Destination.Video.createRoute(gameId)) },
                     onOpenBoardClick = { navController.navigate(Destination.Review.createRoute(gameId)) },
+                    // A4: the material at the end, and the strength this game has with a way to change it.
+                    finalFen = viewModel.games[gameId]?.moves?.lastOrNull()?.fenAfter,
+                    analysisDepth = viewModel.games[gameId]?.analysisDepth?.takeIf { it > 0 },
+                    onReanalyse = { strength ->
+                        // The Summary is replaced by the Analysing screen, which ends on a new Summary.
+                        if (viewModel.reanalyseGame(gameId, strength)) {
+                            navController.navigate(Destination.AnalysisProgress.createRoute(gameId)) {
+                                popUpTo(Destination.GameReport.route) { inclusive = true }
+                            }
+                        }
+                    },
                     onBack = { navController.popBackStack() },
                 )
             } else {
@@ -556,6 +568,7 @@ fun ChessAnalyzerNavHost(
             // D2e: "Check for updates". The view model is this screen's; the work is the application's.
             val updatesViewModel: UpdatesViewModel = viewModel()
             val updateState by updatesViewModel.state.collectAsState()
+            val upstreamRows by updatesViewModel.upstream.collectAsState()
             val lastUpdateCheckMs by updatesViewModel.lastCheckedMs.collectAsState()
             val updateBlock by updatesViewModel.block.collectAsState()
             val checkBlock by updatesViewModel.checkBlock.collectAsState()
@@ -602,6 +615,7 @@ fun ChessAnalyzerNavHost(
             if (updateSheetOpen) {
                 UpdateSheet(
                     view = updateSheetView(updateState, updateBlock),
+                    upstream = upstreamRowViews(upstreamRows),
                     block = updateBlock,
                     precheckError = updatePrecheck,
                     meteredOffer = meteredOffer,

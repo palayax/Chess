@@ -3,6 +3,21 @@
 package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NewReleases
+import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import net.palaya.chessanalyzer.data.models.UpstreamComponent
+import net.palaya.chessanalyzer.ui.model.UpstreamLine
+import net.palaya.chessanalyzer.ui.model.UpstreamRowView
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -64,6 +79,7 @@ import net.palaya.chessanalyzer.ui.model.progressMegabytes
 @Composable
 fun UpdateSheet(
     view: UpdateSheetView,
+    upstream: List<UpstreamRowView>,
     block: UpdateBlock?,
     precheckError: SetupPrecheck?,
     meteredOffer: UpdateOffer?,
@@ -76,7 +92,7 @@ fun UpdateSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        UpdateSheetContent(view, block, precheckError, onInstall, onCancel, onCheckAgain, onDismiss)
+        UpdateSheetContent(view, upstream, block, precheckError, onInstall, onCancel, onCheckAgain, onDismiss)
     }
     if (meteredOffer != null) {
         AlertDialog(
@@ -95,6 +111,7 @@ fun UpdateSheet(
 @Composable
 fun UpdateSheetContent(
     view: UpdateSheetView,
+    upstream: List<UpstreamRowView>,
     block: UpdateBlock?,
     precheckError: SetupPrecheck?,
     onInstall: (UpdateOffer) -> Unit,
@@ -157,6 +174,10 @@ fun UpdateSheetContent(
             )
         }
 
+        // A4: what the projects this app is built from have released lately. Information only, and drawn
+        // apart from the result above: a problem here never changes what the signed check found.
+        if (upstream.isNotEmpty() && !view.showProgress) UpstreamSection(upstream)
+
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (view.showCancel) {
                 OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.update_cancel)) }
@@ -197,6 +218,93 @@ private fun OfferCard(row: UpdateOfferRow, onInstall: (UpdateOffer) -> Unit) {
             }
         }
     }
+}
+
+/** "The projects this app is built from": one row per component, an icon and words for each state. */
+@Composable
+private fun UpstreamSection(rows: List<UpstreamRowView>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.upstream_title),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.asHeading(),
+        )
+        Text(
+            text = stringResource(R.string.upstream_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                rows.forEachIndexed { i, row ->
+                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    UpstreamRowItem(row)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpstreamRowItem(row: UpstreamRowView) {
+    val name = stringResource(upstreamNameRes(row.component))
+    val ours = stringResource(R.string.upstream_ours, row.ours)
+    val status = upstreamLineText(row)
+    // One TalkBack stop per component: "Stockfish. This app has 19. Up to date".
+    val spoken = stringResource(R.string.cd_upstream_row, name, ours, status)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(vertical = 8.dp)
+            .clearAndSetSemantics { contentDescription = spoken },
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            when (row.line) {
+                UpstreamLine.CHECKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                UpstreamLine.UP_TO_DATE -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                UpstreamLine.NEWER -> Icon(Icons.Filled.NewReleases, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                UpstreamLine.CHANGED -> Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
+                else -> Icon(Icons.Filled.WarningAmber, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = name, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = ours,
+                style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                color = if (row.line.isProblem) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+private fun upstreamNameRes(component: UpstreamComponent): Int = when (component) {
+    UpstreamComponent.STOCKFISH -> R.string.upstream_stockfish
+    UpstreamComponent.SHERPA_ONNX -> R.string.upstream_sherpa_onnx
+    UpstreamComponent.KOKORO_VOICE -> R.string.upstream_kokoro
+}
+
+@Composable
+private fun upstreamLineText(row: UpstreamRowView): String = when (row.line) {
+    UpstreamLine.CHECKING -> stringResource(R.string.upstream_checking)
+    UpstreamLine.UP_TO_DATE -> stringResource(R.string.upstream_up_to_date)
+    UpstreamLine.NEWER -> stringResource(R.string.upstream_newer, row.latest.orEmpty())
+    UpstreamLine.CHANGED -> stringResource(R.string.upstream_changed)
+    UpstreamLine.NO_INTERNET -> stringResource(R.string.upstream_no_internet)
+    UpstreamLine.RATE_LIMITED -> stringResource(R.string.upstream_rate_limited)
+    UpstreamLine.UNAVAILABLE -> stringResource(R.string.upstream_unavailable)
+    UpstreamLine.UNREADABLE -> stringResource(R.string.upstream_unreadable)
 }
 
 private fun blockText(block: UpdateBlock): Int = when (block) {

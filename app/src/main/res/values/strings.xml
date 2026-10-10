@@ -251,10 +251,47 @@
         <item quantity="one">To save time, %1$d position was searched less deeply than the rest.</item>
         <item quantity="other">To save time, %1$d positions were searched less deeply than the rest.</item>
     </plurals>
-    <string name="report_group_good_moves">Good moves (Best, Excellent, Good)</string>
-    <string name="report_group_book_forced">Book / Forced</string>
-    <string name="report_table_show_all">Show all %1$d</string>
-    <string name="report_table_show_fewer">Show fewer</string>
+    <!-- A4: the analysis strength belongs to the game; Re-analyse on the Summary. %1$s = "Quick", "Standard", "Deep" or "Custom (16)". -->
+    <string name="reanalyse_analysed_at">Analysed at %1$s</string>
+    <string name="reanalyse_button">Re-analyse…</string>
+    <string name="reanalyse_title">Analyse this game again</string>
+    <string name="reanalyse_body">This game was analysed at %1$s. Pick another strength to analyse it again. Other games keep the strength set in Settings.</string>
+    <string name="reanalyse_hint_quick">Fastest, looks a little less deeply.</string>
+    <string name="reanalyse_hint_standard">A good balance of speed and accuracy.</string>
+    <string name="reanalyse_hint_deep">Slowest, the most accurate.</string>
+    <string name="reanalyse_current">current</string>
+    <string name="reanalyse_confirm">Re-analyse</string>
+    <string name="reanalyse_cancel">Cancel</string>
+    <!-- A4: material on the Board and at the end of the game on the Summary. -->
+    <string name="summary_move_quality">Move quality</string>
+    <string name="summary_final_material">Material at the end</string>
+    <string name="summary_material_level">Material was level at the end.</string>
+    <!-- %1$s = the side ahead (a name), %2$d = points. -->
+    <string name="summary_material_ahead">%1$s was ahead by %2$d.</string>
+    <plurals name="taken_pawns">
+        <item quantity="one">%1$d pawn</item>
+        <item quantity="other">%1$d pawns</item>
+    </plurals>
+    <plurals name="taken_knights">
+        <item quantity="one">%1$d knight</item>
+        <item quantity="other">%1$d knights</item>
+    </plurals>
+    <plurals name="taken_bishops">
+        <item quantity="one">%1$d bishop</item>
+        <item quantity="other">%1$d bishops</item>
+    </plurals>
+    <plurals name="taken_rooks">
+        <item quantity="one">%1$d rook</item>
+        <item quantity="other">%1$d rooks</item>
+    </plurals>
+    <plurals name="taken_queens">
+        <item quantity="one">%1$d queen</item>
+        <item quantity="other">%1$d queens</item>
+    </plurals>
+    <!-- %1$s = a player\'s name, %2$s = "2 pawns, 1 knight". -->
+    <string name="cd_material_taken">%1$s: captured %2$s</string>
+    <string name="cd_material_none">%1$s: nothing captured yet</string>
+    <string name="cd_material_ahead">, ahead by %1$d</string>
 
     <!-- Settings (UX step U9): Your name, Language, Advanced (collapsed), About Palaya Chess. -->
     <string name="settings_title">Settings</string>
@@ -268,7 +305,7 @@
     <string name="settings_depth_quick">Quick</string>
     <string name="settings_depth_standard">Standard</string>
     <string name="settings_depth_deep">Deep</string>
-    <string name="settings_depth_help">Deeper is more accurate and slower.</string>
+    <string name="settings_depth_help">Deeper is more accurate and slower. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
     <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
     <string name="settings_custom_value">Custom (%1$s)</string>
     <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->
@@ -643,5 +680,24 @@
     <string name="update_low_storage">Not enough free space for this update. Free up some space and try again.</string>
     <string name="update_incompatible">This update doesn\'t fit this version of Palaya Chess. Nothing was changed.</string>
     <string name="update_failed">The update couldn\'t be installed. Nothing was changed.</string>
+    <!-- A4: the projects this app is built from, and what they have released. Information only. -->
+    <string name="upstream_title">The projects this app is built from</string>
+    <string name="upstream_note">For your information. Nothing from these projects is downloaded here: a newer version reaches you with an app update.</string>
+    <string name="upstream_stockfish">Stockfish (chess engine)</string>
+    <string name="upstream_sherpa_onnx">sherpa-onnx (voice runtime)</string>
+    <string name="upstream_kokoro">Kokoro (narration voice)</string>
+    <!-- %1$s = the version this build has, e.g. "19", "1.13.8", "v0.19". -->
+    <string name="upstream_ours">This app has %1$s</string>
+    <string name="upstream_checking">Checking…</string>
+    <string name="upstream_up_to_date">Up to date</string>
+    <!-- %1$s = the newer upstream version. -->
+    <string name="upstream_newer">Newer upstream version %1$s available — comes with an app update</string>
+    <string name="upstream_changed">Upstream has re-published this file. The app keeps the copy it was built with.</string>
+    <string name="upstream_no_internet">Couldn\'t check: no internet connection</string>
+    <string name="upstream_rate_limited">Couldn\'t check: GitHub is limiting requests right now. Try again in a while.</string>
+    <string name="upstream_unavailable">Couldn\'t check: GitHub isn\'t answering right now</string>
+    <string name="upstream_unreadable">Couldn\'t check: GitHub\'s answer couldn\'t be read</string>
+    <!-- %1$s = the component, %2$s = "This app has 19", %3$s = its status. -->
+    <string name="cd_upstream_row">%1$s. %2$s. %3$s</string>
     <string name="update_metered_body">This update is about %1$s. Download now, or wait until you\'re on Wi-Fi.</string>
 </resources>

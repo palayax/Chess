@@ -89,6 +89,10 @@ import net.palaya.chessanalyzer.ui.board.BoardBadge
 import net.palaya.chessanalyzer.ui.board.ChessBoard
 import net.palaya.chessanalyzer.ui.components.CommentCard
 import net.palaya.chessanalyzer.ui.components.EvalBar
+import net.palaya.chessanalyzer.ui.components.MaterialRowHeight
+import net.palaya.chessanalyzer.ui.components.PlayerMaterialRow
+import net.palaya.chessanalyzer.ui.model.SideMaterial
+import net.palaya.chessanalyzer.ui.model.materialViewOrNull
 import net.palaya.chessanalyzer.ui.components.MoveList
 import net.palaya.chessanalyzer.ui.model.BoardState
 import net.palaya.chessanalyzer.ui.model.ImportedGame
@@ -114,7 +118,7 @@ private val BOARD_SIDE_PADDING = 12.dp
  * transport (56 dp + padding) and a card of at least 120 dp. The board shrinks below its
  * width-based size only when the window is too short for all of that (landscape, split-screen).
  */
-private val BELOW_BOARD_MIN_HEIGHT = 48.dp + 12.dp + 64.dp + 120.dp + 16.dp
+private val BELOW_BOARD_MIN_HEIGHT = 48.dp + 12.dp + 64.dp + 120.dp + 16.dp + MaterialRowHeight * 2
 
 /**
  * The Board: look at one position and step through the game (docs/MOBILE_UX_DESIGN.md 6.4).
@@ -240,7 +244,7 @@ fun ReviewScreen(
         // The pieces of the screen, defined once and arranged two ways: stacked (portrait) or board on
         // the left and everything else on the right (landscape, where a phone is only ~360 dp tall
         // and the stacked layout pushed the controls and the card off the bottom).
-        val boardRow: @Composable (Dp) -> Unit = { boardSize ->
+        val barAndBoard: @Composable (Dp) -> Unit = { boardSize ->
             Row(modifier = Modifier.height(boardSize)) {
                 EvalBar(
                     // In line mode the bar shows the engine's score for the line (White-relative, §9.4).
@@ -263,6 +267,31 @@ fun ReviewScreen(
                         modifier = Modifier.size(boardSize),
                     )
                 }
+            }
+        }
+        // A4: the two players' names above and below the board, each with the pieces that player has
+        // captured and "+N" for the side ahead (chess.com's pattern), for the position on the board now.
+        val boardFen: String = if (activeLine != null) {
+            playback.positions.getOrNull(playback.step)?.toFen() ?: activeLine.startFen
+        } else {
+            currentMove?.fenAfter ?: Position.STANDARD_START_FEN
+        }
+        val material = remember(boardFen) { materialViewOrNull(boardFen) }
+        val whiteAtBottom = orientation == net.palaya.chessanalyzer.ui.board.BoardOrientation.WHITE_DOWN
+        val boardRow: @Composable (Dp) -> Unit = { boardSize ->
+            Column {
+                @Composable
+                fun strip(color: PieceColor) {
+                    PlayerMaterialRow(
+                        name = if (color == PieceColor.WHITE) game.header.white else game.header.black,
+                        side = material?.of(color) ?: SideMaterial(color, emptyList(), 0),
+                        // Aligned with the board, not with the eval bar beside it.
+                        modifier = Modifier.padding(start = EVAL_BAR_WIDTH + EVAL_BAR_GAP),
+                    )
+                }
+                strip(if (whiteAtBottom) PieceColor.BLACK else PieceColor.WHITE)
+                barAndBoard(boardSize)
+                strip(if (whiteAtBottom) PieceColor.WHITE else PieceColor.BLACK)
             }
         }
         val chips: @Composable () -> Unit = {
@@ -359,7 +388,7 @@ fun ReviewScreen(
             if (isLandscape()) {
                 // Board (with its eval bar) as tall as the window allows and at most half its width; the
                 // chips, transport and card share the other side, the card scrolling.
-                val boardByHeight = maxHeight - 16.dp
+                val boardByHeight = maxHeight - 16.dp - MaterialRowHeight * 2
                 val boardByWidth = maxWidth / 2 - BOARD_SIDE_PADDING - EVAL_BAR_WIDTH - EVAL_BAR_GAP
                 val boardSize: Dp = minOf(boardByHeight, boardByWidth).coerceAtLeast(120.dp)
                 Row(
