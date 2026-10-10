@@ -9,6 +9,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
@@ -45,19 +47,35 @@ class RephraseFlowInstrumentedTest {
     private val fakeId = "fake-flow@p1"
     private val cacheDir get() = File(app.filesDir, "rephrase/cache/fake-flow")
 
-    /** A "model" that rewords the charge sentences of error cards, the way the checker accepts. */
+    /**
+     * A "model" that makes small rewordings the checker accepts (facts and their order unchanged): it joins a card's
+     * first two sentences ("Bd2 is the top engine move here, and it attacks…") and turns "that is what this cost
+     * Black" into "that is the cost for Black". The key moments of the Opera Game are the consulting noblemen's
+     * errors, whose cards carry that last phrase.
+     */
+    private val asked = java.util.Collections.synchronizedList(ArrayList<String>())
     private val fake = FakeRephraser(fakeId) { r ->
+        asked.add(r.surface.name + ": " + r.text)
         if (r.surface == RephraseSurface.NARRATION) {
             narrationCalls++
             // merge the move and its evaluation into one sentence, as the real model does
             r.text.replaceFirst(". The evaluation moves", ", and the evaluation moves")
         } else r.text
-            .replace(Regex("^Now (White|Black|you|your opponent) can play "), "$1 can now play ")
-            .replace(Regex("^This hands (White|Black|you|your opponent) "), "This gives $1 ")
-            .replace(Regex("^This lets (White|Black|you|your opponent) play "), "Now $1 gets to play ")
+            .replaceFirst(". It ", ", and it ")
+            .replaceFirst(". That takes ", ", and that takes ")
+            .replaceFirst(". This ", ", and this ")
+            .replaceFirst(": that is what this cost ", ": that is the cost for ")
     }
 
     private var narrationCalls = 0
+
+    private companion object {
+        /**
+         * The Opera Game (Morphy, 1858): the losing side makes several clear errors even at Quick, so the Summary
+         * always has key moments to show. (Réti vs Tartakower, used before, can come out of a Quick run with none.)
+         */
+        const val LOSER = "Brunswick"
+    }
 
     @After
     fun tearDown() {
@@ -69,7 +87,7 @@ class RephraseFlowInstrumentedTest {
         }
         cacheDir.deleteRecursively()
         // the reviewed game must not stay in Home's recent games for later tests
-        runBlocking { app.gameRepository.listRecent() }.filter { it.black.contains("Tartakower") }
+        runBlocking { app.gameRepository.listRecent() }.filter { it.black.contains(LOSER) }
             .forEach { File(app.filesDir, "games/${it.id}.json").delete() }
     }
 
@@ -77,7 +95,12 @@ class RephraseFlowInstrumentedTest {
         compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    private fun shownSubstring(text: String): Boolean = compose.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
+    /**
+     * The Summary is a LazyColumn: an item below the composed window is not in the semantics tree (A4's "Move quality"
+     * card pushed the key moments and the buttons down), so scroll the list to the node before looking it up.
+     */
+    private fun scrolledTo(matcher: androidx.compose.ui.test.SemanticsMatcher): Boolean =
+        runCatching { compose.onNode(hasScrollAction()).performScrollToNode(matcher) }.isSuccess
 
     @Test
     fun aReviewedGamesKeyMomentsShowTheAcceptedRewordingAndTheSettingOffShowsTheOriginals() {
@@ -90,7 +113,7 @@ class RephraseFlowInstrumentedTest {
         }
         cacheDir.deleteRecursively()
         app.rephraserForTesting = fake
-        val game = FamousGamesStore.load(app).games.first { it.black.contains("Tartakower") }
+        val game = FamousGamesStore.load(app).games.first { it.black.contains(LOSER) }
 
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitForText(app.getString(R.string.home_title))
@@ -98,7 +121,7 @@ class RephraseFlowInstrumentedTest {
         waitForText(entry)
         compose.onNodeWithText(entry).performScrollTo().performClick()
         waitForText(app.getString(R.string.famous_search_label))
-        compose.onNode(hasTestTag(FAMOUS_SEARCH_TAG) and hasSetTextAction()).performTextInput("Tartakower")
+        compose.onNode(hasTestTag(FAMOUS_SEARCH_TAG) and hasSetTextAction()).performTextInput("Opera")
         waitForText(game.title)
         compose.onNode(hasText(game.title)).performClick()
         val review = app.getString(R.string.famous_review_action)
@@ -109,11 +132,18 @@ class RephraseFlowInstrumentedTest {
         // The polishing phase ran over the key moments: their verdicts are cached under the fake's folder.
         compose.waitUntil(30_000) { cacheDir.listFiles()?.isNotEmpty() == true }
         assertTrue("the fake was asked", fake.calls > 0)
-        val reworded = listOf("can now play", "This gives ", "gets to play")
-        compose.waitUntil(30_000) { reworded.any { shownSubstring(it) } }
+        val reworded = hasText(", and it ", substring = true) or hasText(", and that takes ", substring = true) or
+            hasText(", and this ", substring = true) or hasText(": that is the cost for ", substring = true)
+        try {
+            compose.waitUntil(30_000) { scrolledTo(reworded) }
+        } catch (e: Throwable) {
+            // say what the fake was given and what was cached, so a change in the texts is visible at once
+            val files = cacheDir.listFiles().orEmpty().joinToString(" ## ") { it.readText().take(200).replace('\n', '|') }
+            throw AssertionError("asked: ${asked.take(30)}; cached: $files", e)
+        }
 
         // Every key-moment text the Summary shows is either an original or an accepted rewording of one.
-        val stored = runBlocking { app.gameRepository.listRecent() }.first { it.black.contains("Tartakower") }
+        val stored = runBlocking { app.gameRepository.listRecent() }.first { it.black.contains(LOSER) }
         assertEquals(game.white, stored.white)
         val accepted = cacheDir.listFiles()!!.map { it.readText() }.count { it.startsWith("A\n") }
         assertTrue("$accepted accepted", accepted > 0)
@@ -121,7 +151,8 @@ class RephraseFlowInstrumentedTest {
         // The Video route: the narration pre-step rewords the beats (verdicts cached under the fake's folder,
         // NARRATION entries among them), and the script the screen gets carries the accepted wording.
         val narrationCallsBefore = narrationCalls
-        compose.onNodeWithText(app.getString(R.string.summary_watch_video)).performScrollTo().performClick()
+        assertTrue(scrolledTo(hasText(app.getString(R.string.summary_watch_video))))
+        compose.onNodeWithText(app.getString(R.string.summary_watch_video)).performClick()
         compose.waitUntil(120_000) { compose.onAllNodesWithText(app.getString(R.string.video_title)).fetchSemanticsNodes().isNotEmpty() }
         assertTrue("the narration beats were sent to the model", narrationCalls > narrationCallsBefore)
         val activity = run {
