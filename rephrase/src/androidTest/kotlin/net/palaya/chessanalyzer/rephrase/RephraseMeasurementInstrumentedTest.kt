@@ -48,7 +48,7 @@ class RephraseMeasurementInstrumentedTest {
         val args = InstrumentationRegistry.getArguments()
         val ctx = InstrumentationRegistry.getInstrumentation().context
         val target = InstrumentationRegistry.getInstrumentation().targetContext
-        val gguf = File(args.getString("ggufPath") ?: LlamaRephraserInstrumentedTest.DEFAULT_PATH)
+        val gguf = LlamaRephraserInstrumentedTest.locateGguf(args.getString("ggufPath"))
         if (!gguf.isFile) fail("no GGUF at $gguf")
         val arch = args.getString("ggufArch") ?: "qwen2"
         val limit = args.getString("limit")?.toIntOrNull() ?: 0

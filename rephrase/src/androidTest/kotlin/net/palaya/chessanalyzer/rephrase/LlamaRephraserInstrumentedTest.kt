@@ -47,9 +47,22 @@ class LlamaRephraserInstrumentedTest {
         @JvmStatic
         fun locate() {
             val args = InstrumentationRegistry.getArguments()
-            gguf = File(args.getString("ggufPath") ?: DEFAULT_PATH)
+            gguf = locateGguf(args.getString("ggufPath"))
             arch = args.getString("ggufArch") ?: "qwen2"
             if (!gguf.isFile || !gguf.canRead()) fail("the GGUF is not on the device at $gguf (see the class doc: adb push it first)")
+        }
+
+        /**
+         * The pushed file: [explicit], else /data/local/tmp/rephrase/, else the test app's own files or external files
+         * directory (where `run-as <test package> cp` or `adb push` to Android/data puts it when SELinux keeps the app out
+         * of /data/local/tmp).
+         */
+        fun locateGguf(explicit: String?): File {
+            if (explicit != null) return File(explicit)
+            val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+            val name = File(DEFAULT_PATH).name
+            return listOfNotNull(File(DEFAULT_PATH), File(ctx.filesDir, name), ctx.getExternalFilesDir(null)?.let { File(it, name) })
+                .firstOrNull { it.isFile && it.canRead() } ?: File(DEFAULT_PATH)
         }
 
         private val cacheDir: File get() = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
@@ -211,5 +224,6 @@ class LlamaRephraserInstrumentedTest {
         assertTrue("native heap $loaded -> $released", released < loaded)
         assertNotEquals(0L, loaded)
         withTimeout(120_000) { backend.rephrase(RephraseRequest(RephraseSurface.CARD, "Nf6 stays in book.")) }
+        Unit
     }
 }
