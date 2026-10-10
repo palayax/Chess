@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -15,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -82,6 +84,12 @@ class A4AnalyticsInstrumentedTest {
         Log.i("A4Test", "A4_SHOT $name")
         Thread.sleep(hold)
     }
+
+    /**
+     * The Summary is a LazyColumn: an item below the composed window is not in the semantics tree, so
+     * `performScrollTo()` on it finds no node. Scroll the list to the node first.
+     */
+    private fun summaryItem(text: String) = compose.onNode(hasScrollAction()).performScrollToNode(hasText(text)).let { compose.onNodeWithText(text) }
 
     private val heading = androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)
 
@@ -183,13 +191,13 @@ class A4AnalyticsInstrumentedTest {
             whitePoints > blackPoints -> app.getString(R.string.summary_material_ahead, whiteName, whitePoints - blackPoints)
             else -> app.getString(R.string.summary_material_ahead, blackName, blackPoints - whitePoints)
         }
-        compose.onNodeWithText(app.getString(R.string.summary_final_material)).performScrollTo()
-        compose.onNodeWithText(expectedLine).performScrollTo().assertExists()
+        summaryItem(app.getString(R.string.summary_final_material))
+        summaryItem(expectedLine).assertExists()
         stage("summary_stats_material")
 
         // ---- 3. Per-game strength ----
-        compose.onNodeWithText(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_quick))).performScrollTo().assertExists()
-        compose.onNodeWithText(app.getString(R.string.reanalyse_button)).performScrollTo().performClick()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_quick))).assertExists()
+        summaryItem(app.getString(R.string.reanalyse_button)).performClick()
         waitForText(app.getString(R.string.reanalyse_title))
         stage("reanalyse_dialog")
         // Nothing is picked: Re-analyse is disabled; the current strength is marked.
@@ -202,7 +210,7 @@ class A4AnalyticsInstrumentedTest {
         waitForText(app.getString(R.string.progress_title))
         stage("reanalyse_progress")
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 600_000)
-        compose.onNodeWithText(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).performScrollTo().assertExists()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).assertExists()
         stage("summary_after_reanalyse")
         assertEquals("the game's own strength is stored", AnalysisStrength.STANDARD.depth, runBlocking { app.gameRepository.load(gameId) }?.depth)
         assertEquals("the Settings default is untouched", AnalysisStrength.QUICK.depth, runBlocking { app.settingsRepository.current() }.depth)
@@ -219,13 +227,13 @@ class A4AnalyticsInstrumentedTest {
         compose.onNode(hasClickAction() and hasText(blackName, substring = true)).performScrollTo().performClick()
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 120_000)
         val reopenMs = (System.nanoTime() - startedReopen) / 1_000_000
-        compose.onNodeWithText(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).performScrollTo().assertExists()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).assertExists()
         assertTrue("reopening is answered from the cache of the game's own strength, not by the engine ($reopenMs ms)", reopenMs < 40_000)
         assertEquals("reopening does not change the game's strength", AnalysisStrength.STANDARD.depth, runBlocking { app.gameRepository.load(gameId) }?.depth)
         assertEquals("the Settings default is still Quick", AnalysisStrength.QUICK.depth, runBlocking { app.settingsRepository.current() }.depth)
 
         // ---- 4. The Board: names, captured pieces, "+N" ----
-        compose.onNodeWithText(app.getString(R.string.summary_open_board)).performScrollTo().performClick()
+        summaryItem(app.getString(R.string.summary_open_board)).performClick()
         waitForText(app.getString(R.string.review_start_position_hint))
         // At the start both lines say nothing is captured.
         assertTrue(compose.onAllNodesWithContentDescription(app.getString(R.string.cd_material_none, whiteName)).fetchSemanticsNodes().isNotEmpty())

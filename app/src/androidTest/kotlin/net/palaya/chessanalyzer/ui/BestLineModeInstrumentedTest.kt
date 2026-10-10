@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import net.palaya.chessanalyzer.R
@@ -166,7 +168,9 @@ class BestLineModeInstrumentedTest {
         // 13 Bb3 has a walkthrough in the sample ("Show me"); 15 c3 does not, and has a line.
         val report = PlaceholderData.sampleReport.copy(plysWithSimulation = setOf(13), plysWithBestLine = setOf(13, 15))
         compose.setContent { ChessAnalyzerTheme { GameReportScreen(report = report, onShowMeClick = {}, onShowBestLine = { opened = it }) } }
-        compose.onNodeWithText(str(R.string.review_show_best_line)).performScrollTo().performClick()
+        // The Summary is a LazyColumn (A4 put a taller card above it): scroll the list to the node first.
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText(str(R.string.review_show_best_line)))
+        compose.onNodeWithText(str(R.string.review_show_best_line)).performClick()
         assertEquals(15, opened)
     }
 }
