@@ -4465,3 +4465,265 @@ Full `:app:connectedDebugAndroidTest`, one device at a time, counts read from `a
 4. chess34 still holds the stray `net.palaya.chessanalyzer.engine.test` package noted before.
 
 **Device state restored.** Both emulators shut down, adb server stopped, apps uninstalled (chess36 by hand, chess34 by Gradle), font scale 1.0 on both.
+
+---
+
+
+## C2 (2026-10-09/10): on-device rewording of the verified commentary (Qwen2.5-1.5B through llama.cpp)
+
+Worktree `.claude/worktrees/c2`, branch `c2-rephrase` from main 0945f21; commits 617a81e (P1), 33d45a1 + 622be05 + 816772e
+(P2a), b84c7ce (P2b), 2dd4955 (P4); 6a99b35 (device-test fixes), 6da4857 (merge of main 666f0cf), 82bfb20
+(narration wired into V4's Video route), e75666c (BEST_LINE, stale corpus), ad07dd9 (design §13), 4ad9454 (merge of main
+21a77e9), dddd330 (flow test), and the docs commit with this entry. Design: `docs/LLM_REPHRASE_DESIGN.md` with the
+owner's §12 decisions (no Gemini Nano; ship Qwen2.5-1.5B-Instruct Q4_K_M; offered at first run as an optional third download,
+otherwise off; Qwen3-1.7B pre-approved only if clearly better; LiteRT-LM not approved). §13 "As built" lists every departure
+from the design and why. Setup copied (not linked) from the main checkout: `local.properties`, `vendor/Stockfish/`,
+`vendor/models/{app,engine}-assets/`, `tools/bundletool-all-1.18.3.jar`, `pc/bin/stockfish/`, `pc/tts/.venv-kokoro/`, and the
+CPU part of `pc/bin/llama/` (llama.cpp b11190, for the host runs); never a keystore or a `.pem`.
+
+### C2-P1: the checker, the interface, the fake (host)
+
+- `:core` `core.text`: `ClaimChecker` (the fact-closure comparator of §5, normalisation, spoken-square folding, 15 fact classes,
+  shape/register/banned rules, reason codes), `CommentaryVocabulary` (C1's template catalogue and banned list moved out of
+  `CommentaryClaimsTest`, which imports them: same 541 tests before and after), `RephrasePrompt` v1 (system rules, four
+  few-shot pairs that pass the checker by construction, ChatML for Qwen2.5 and Qwen3, the fixed prefix + per-request suffix,
+  the 2x+16 cap, `cleanOutput`), `Rephraser` / `RephraseRequest` / `RephraseResult` / `RephraseVerdicts` (every backend's
+  output goes through the checker), `FakeRephraser`, `RephrasedScript` (the narration post-pass: allowlisted prose kinds,
+  speech re-estimated, lead-ins/holds/boards untouched, the 1.10x and §9.7 cap reverting the largest growth first) and
+  `RephrasedReport`.
+- `:app` `rephrase/`: `RephraseCache` (`filesDir/rephrase/cache/<model>/<24-hex>.txt`, A/U/R entries, atomic, an accepted
+  entry re-checked on read), `RephraseService` (cache reads for the UI path, the job with Skip = cancellation, the foreground
+  gate, 30 s timeout, failures never cached, the log carries hashes and reasons only); `SettingsRepository.rephraseEnabled`
+  (default off).
+- The independent Python twin `scripts/rephrase_check.py` was written by a separate agent (Sonnet) from a prose spec of the
+  rules, without reading the Kotlin; `audit_commentary.py rephrase` / `mutate-rephrase` call it.
+- Tests: `ClaimCheckerTest` (every recorded text unchanged against itself; 24 mutation kinds on every distinct text, each
+  rejected and each rule biting on its own somewhere; the rules one by one), `RephrasedScriptTest`, `RephrasePromptTest`
+  (prompt version = MODELS.lock's), `RephraseCorpusDumpTest`; app `RephraseServiceTest`, `RephraseCacheTest`.
+
+### C2-P2a: host measurement of the candidates
+
+- Models fetched only from the official Qwen repos into a new `vendor/models/rephrase-assets/`, each SHA-256 checked against
+  the Hub's LFS pin before use: Qwen2.5-1.5B-Instruct q4_k_m 1,117,320,736 B `6a1a2eb6…9407e` and q4_0 1,066,227,232 B
+  `dcd819ff…bbfdb` (commit 91cad51), Qwen2.5-0.5B-Instruct q8_0 675,710,816 B `ca59ca7f…6844e` (commit 9217f5d),
+  Qwen3-1.7B Q8_0 1,834,426,016 B `061b54da…0cb1a` (commit 90862c4; the official repo has no Q4_K_M, and a community
+  quantisation was not to be downloaded). `GgufHeaderTest` parses all four: every tensor inside the file, < 64 B of slack.
+- Harness: `RephraseCorpusDumpTest` writes the corpus (190 distinct card texts of the three audited games for three sides,
+  388 eligible narration beats of the five pacing games at Normal) with the exact prompt bytes; `scripts/rephrase_measure.py`
+  runs them through `llama-server` b11190 on the CPU (greedy, prefix in the KV cache, n_ctx 2048, stop at end of turn or a
+  blank line, 2x+16 cap); the raw outputs are committed in `docs/audit/rephrase/raw_*.jsonl` and `RephraseMeasurementDumpTest`
+  judges them on every build (so it is never vacuous) and writes `docs/audit/rephrase_*_p1.md`.
+- **Checker rules the first run exposed** (each also in the Python twin, each with a mutation in both tables): alternative-move
+  markers counted ("Rook takes the pawn on h seven was the move" was reworded into a move that was never played), the order of
+  moves/outcomes/check ("This hands White d4, which hits the loose bishop on c5" -> "This hits the loose bishop on c5, giving
+  White d4"), any form of "allow" and "set up", gerund outcome forms ("hitting", "picking up" were read as dropped verbs), and
+  narration squares written as notation folded back to words before the check.
+- **Results, prompt v1** (the Kotlin and the Python checker agree on every verdict: 578 + 3 x 287):
+
+| Model (host, b11190 CPU) | Texts | Cards: accepted / unchanged / rejected | Card rejection | Narration: accepted / unchanged / rejected | Narration rejection |
+|---|---|---|---|---|---|
+| **Qwen2.5-1.5B Q4_K_M (ship)** | 578 | 74 / 104 / 12 | **6.3 %** (bar 25 %) | 195 / 103 / 90 | **23.2 %** (bar 35 %) |
+
+| On the same 287 texts (190 cards, every 4th beat) | Card accepted | Card rejection | Narration accepted | Narration rejection | Median ms card / beat | Decode tok/s |
+|---|---|---|---|---|---|---|
+| Qwen2.5-1.5B Q4_K_M | 38.9 % | 6.3 % | 53.6 % | 18.6 % | 3,842 / 3,524 | 11.9 |
+| Qwen2.5-1.5B Q4_0 | 41.6 % | 6.3 % | 42.3 % | 26.8 % | 3,602 / 4,355 | 13.0 |
+| Qwen3-1.7B Q8_0 | 20.5 % | 7.4 % | 42.3 % | 8.2 % | 8,731 / 10,226 | 5.0 |
+| Qwen2.5-0.5B Q8_0 | 6.3 % | 2.1 % | 16.5 % | 2.1 % | 3,088 / 2,814 | 13.5 |
+
+  Rejections of the ship model by reason (cards / narration): SHAPE_LENGTH 1/32 (the model shortened a beat and dropped
+  content), FACTS_OUTCOMES 1/11, FACTS_HYPOTHETICAL 0/10, FACTS_NEGATION 0/10, BANNED 7/2, FACTS_TERMS 1/7, FACTS_NUMBERS 0/6,
+  FACTS_PLAYERS 0/4, FACTS_PIECE_SQUARES 0/3, FACTS_BANDS 1/2, FACTS_ORDER 1/0, FACTS_PIECES 0/1, FACTS_NAMES 0/1, FACTS_SQUARES 0/1.
+  Reading the rejections: they are real meaning changes ("nothing better exists" dropped, "decisively lost" dropped, "then
+  the queen moves to b four" for "Instead, queen to b four", a brilliance claim dropped). The unchanged rate is high on cards
+  (55 %): many card texts are four- to eight-word template lines the model leaves alone.
+- **Decision: the pin stays Qwen2.5-1.5B-Instruct Q4_K_M.** Qwen3-1.7B is not clearly better: it leaves twice as many card
+  texts unchanged (72 %), accepts about half as many rewordings, runs 2.3x slower on the same CPU and is a 1.83 GB file (the
+  official repo has only Q8_0). Q4_0 is a little faster but loses narration quality (26.8 % rejected); its speed advantage on
+  arm64 comes from runtime repacking and KleidiAI (off, see §13), so it is a Pixel 8 question.
+- **Latency is a reference only**: the host (i9-10885H, 8 cores) shared the CPU with an emulator and two other agents' builds
+  the whole time; a quiet re-run of 100 cards at 8 threads gave median 5.3 s, prefill 28 tok/s, decode 8.2 tok/s (the
+  emulator was busy). The decision numbers are the Pixel 8's (below).
+- **The narrated story after the post-pass** (ship model's accepted beats, Normal pace, no side): scholar's 52.5 -> 52.5 s
+  (2 of 5 beats reworded), Opera 308.8 -> 302.9 s (14/30), Immortal 420.1 -> 406.6 s (23/47), game01 546.7 -> 540.6 s (28/70),
+  Byrne-Fischer 535.4 -> 524.9 s (32/59): rewording shortens the story a little (sentences merge, fewer pauses); every game
+  stays inside its budget and the cap never had to revert a beat.
+- Quality sample for the owner: 60 pairs (20 per recorded game, key moments first) with an empty "Prefer" column in
+  `docs/audit/rephrase_qwen2.5-1.5b-instruct-q4_k_m_p1.md`; the §5.5 bar is "the rewrite preferred in >= 60 %". **Not filled
+  in: that is the owner's judgement.**
+
+### C2-P2b: `:rephrase` (llama.cpp via NDK), the download and update kind, device runs
+
+- `:rephrase` (new Android library, the `:engine` pattern): llama.cpp **b11190** (commit fcc8915, the host build P2a
+  measured with) fetched by `scripts/fetch_llama_cpp.sh` into the gitignored `vendor/llama.cpp/`; `vendor/LLAMA_CPP_VERSION.txt`
+  = `rephrase.runtime.tag` (`generateRephraseRuntime` fails the build otherwise). One static `librephrase.so` per ABI:
+  arm64-v8a (`GGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16`) **3,867,304 B** stripped, x86_64 (AVX2/FMA/F16C, gated at run time
+  on /proc/cpuinfo) **4,387,992 B**; armeabi-v7a gets none (UNSUPPORTED_ABI). No KleidiAI (its CMake downloads sources at
+  configure time), no OpenMP/llamafile/backend-dl; -O3 in debug too; `--exclude-libs,ALL`: six exported JNI symbols; every LOAD
+  segment 0x4000. The NDK build worked at the first try (API 26, NDK r28c, CMake 3.22.1); no stall, so LiteRT-LM never came up.
+- Kotlin: `NativeRephrase` (R8 rule in `consumer-rules.pro`; text returned as UTF-8 bytes), `LlamaRephraser` (greedy, the
+  ~716-token prefix kept in the KV cache, n_ctx 2048, a watcher turns coroutine cancellation into a native cancel, load
+  journal), `GgufHeader` (the Kotlin structural check: magic, v3, counts, known tensor types, every tensor inside the file,
+  `general.architecture`), `RephraseSupport` (ABI / AVX2 / RAM < 3.4 GB, threads = big+middle cores, 5 on a Pixel 8).
+- `:app`: `RephraseModelStore` (pins from `GeneratedModelPins.REPHRASE_*`, install after the GGUF check, once-per-process
+  SHA-256, `rephrase/wanted`, the load journal: re-hash after one death, feature off after two), `RephraseBackend` (one model
+  per process, released on `onTrimMemory(RUNNING_LOW+)` and a minute after a job, update trial), `ModelSetup`'s optional third
+  file on its own tag `models-2026.11` (never makes setup incomplete), `ModelDownloadService` wording for a model-only run,
+  the update kind `rephrase-qwen` (compat `gguf`/arch, runtime `llama.cpp bNNNN..bMMMM`, offered only to a phone that has the
+  model; journaled swap/trial/commit with rollback at once or at the next start; the old model's cache folder purged), backup
+  excludes `rephrase/` in all three rule sets, `NetworkCallSitesTest` scans `:rephrase`, `scripts/publish_rephrase_model.sh`
+  (dry run OK; nothing published).
+- Host tests: `:rephrase` 17 (`GgufHeaderTest` 6 incl. the four real files, `LlamaRephraserTest` 7 with a fake native side,
+  `RephraseSupportTest` 4); app `RephraseModelStoreTest` 7, `RephraseUpdateTest` 8 (activation, rollback, a death during
+  the trial rolled back at the next start, a death after the commit finished, a broken file refused before the trial;
+  compatibility; the manifest entry), `RephraseSetupTest` 5.
+- **Real llama.cpp on the emulator** (`LlamaRephraserInstrumentedTest`, the real 1.1 GB GGUF pushed to `/data/local/tmp`):
+  chess36 (API 36, 4 vCPU, the AVD runs with 2 GB): **9/9, 0 skipped**: the library loads, the file passes the structural
+  check; the prompt's four examples come back accepted/unchanged with the prefix reused; a real card twice gives the same
+  result (determinism); a narration beat keeps "g one"; cancel mid-generation took **18 ms** and the next call worked; a
+  64 MB truncated copy is refused by `GgufHeader` ("its tensors need 1117320736") **and** by llama.cpp ("tensor
+  'output.weight' data is not within the file bounds", load returns 0, no crash); a version-9 header and a garbled key table
+  are refused the same way; **0 bytes sent / 0 received** by the uid during a load and two generations; release frees it
+  (native heap 1,120,232,256 -> 9,345,600 B; PSS 1,179,356 -> 81,592 KB). Load 4.5 s; a card 3.4-5.5 s (prefill about
+  60-80 tok/s, decode 10-13 tok/s on the emulator: not a measurement). **Finding:** with CPU repacking (`use_extra_bufts`,
+  the default) llama.cpp copies the Q4_K weights into repacked anonymous buffers, so the model counts as about 1.1 GB of
+  native heap instead of file-backed mmap pages; PSS 1.18 GB is inside the §5.5 bar (2.0 GB) and the repack is what makes
+  the CPU kernels fast, so it stays; a phone short of memory gets the trim release.
+- On the merged branch (2026-10-10): `:rephrase:connectedDebugAndroidTest` **9/9, 0 skipped on chess36 and 9/9 on chess34**
+  (API 34, 2 GB, AVX2): cancel 18 ms, 0 bytes either way, native heap 1,122,736,448 -> 11,890,192 B, PSS 1,176,273 ->
+  75,892 KB on chess34. The manual measurement tool (`RephraseMeasurementInstrumentedTest#measure -e limit 12`, the Pixel 8
+  procedure below) ran to the end on chess36: `OK (1 test)`, raw jsonl + summary pulled from the app's external files
+  (load 3,746 ms, PSS 38,256 -> 1,179,634 KB peak, native heap peak 1,122,121,584 B, 12 texts in 44.4 s: 2 accepted,
+  10 unchanged; the first text's 17.6 s is the 716-token prefix being prefilled once).
+- Release (R8) build: `NativeRephrase` keeps its name and natives (mapping), `librephrase.so` 0x4000 on every LOAD in the
+  universal APK, `zipalign -c -P 16` OK; installed on chess36 (bundletool universal APK from the merged AAB, signed with a throwaway key; the release key was
+  never read): Setup downloaded the net and the voice from the live `models-2026.10` and offered no wording-model row
+  (the AVD has 2 GB, under the 3.4 GB gate), Settings > Commentary says "Not available on this phone.", the Opera Game
+  reviewed to its Summary, no FATAL / UnsatisfiedLinkError in logcat; uninstalled. The library's load in a release build
+  is therefore not exercised on an emulator (no AVD here passes the RAM gate): R8 keeps the class and natives (mapping) and
+  the Pixel 8 run after publishing covers it.
+- **Download size per device** (bundletool 1.18.3 `get-size total`, API 36, en-US, 420 dpi; the merged branch against main
+  666f0cf): arm64-v8a **16,193,356 B (+1,606,818)**, x86_64 17,806,541 B (+1,782,820), armeabi-v7a 13,632,432 B (+61,051, no
+  library). AAB 76,025,255 B (+7,037,371: both libraries).
+- **Pixel 8 (the decision device; not connected):** see "What the owner runs on the Pixel 8" below.
+
+### C2-P4: UX and docs
+
+- Setup: an unticked "Also download the wording model (optional, about 1.2 GB)" row under the files on the intro (only on a
+  phone that can run it); ticked, it becomes the third row of the same download; installed at setup, Natural wording is on
+  (owner §12.3). Reference (owner's rule): Google Play's optional add-on with its size before the tap, chess.com's
+  gated-feature card (what you get, one control).
+- Settings > **Commentary** > "Natural wording (on-device AI)" between the name and Video: not available / Download (about
+  1.2 GB) with the space check and the mobile-data question / progress with Pause and Cancel / "Paused at N%" with Resume /
+  the failure line with Try again / installed: one switch (48 dp, role Switch), "Reworded text: N MB · Clear", "Remove the
+  model" with a confirmation. Reference: chess.com's Settings feature rows (switch + one-line explanation), Android's
+  on-device AI rows (size before the tap). Default off.
+- Cards: after an analysis, "Polishing the commentary (on-device AI)… N of M" over the current side's key moments with
+  **Skip**, then a background job (key moments first, then by ply) while a screen of ours is in front; a side change refills
+  it. Only the UI copies get the rewordings; the core artifacts keep the verified originals.
+- Narration (wired after V4 merged): the Video route rewords the beats not yet cached first ("Polishing the narration
+  (on-device AI)… N of M", Skip) and gives the VideoScreen `rephrasedVideoScriptFor` (core `RephrasedScript` over the cache,
+  the 1.10x/budget cap); the player, Save video and the exporter read the same words; the export never calls the model.
+  V4's spoken best line (`BEST_LINE`) stays out (template sentences).
+- About: "Natural wording (optional)": Qwen2.5-1.5B-Instruct (Qwen team, Alibaba Cloud, Apache 2.0) run with llama.cpp
+  (MIT), full text in `REPHRASE_MODEL_LICENSE.txt`.
+- Docs: PRIVACY_POLICY (the optional download, nothing sent; republish the page), PUBLISHING (credits, FGS text, §3b data not
+  code, Data safety unchanged "no data collected"), PLAY_CONSOLE_ANSWERS §3.7b (the AI-content policy reading, dated),
+  COMMENTARY_AUDIT (C2 section), CLAUDE.md (the C2 gotchas), the design's §13 "As built".
+- Tests: app `RephraseSettingsLogicTest` 6 (host), instrumented `RephraseSettingsInstrumentedTest` 6 (every row state, roles,
+  48 dp, taps) and `RephraseFlowInstrumentedTest` 1 (a famous game reviewed with a fake model behind the interface: key-moment
+  cards carry an accepted rewording, the verdicts cached, then the Video route: beats sent, the screen's script reworded,
+  nothing pending).
+
+### C2 merge with main 666f0cf (V4, A4) and the final gates
+
+- Merged main into `c2-rephrase` (6da4857). Conflicts: the NavHost Video route (main's script keys, then the C2 pre-step),
+  COMMENTARY_AUDIT (both sections), PUBLISHING and PRIVACY_POLICY (A4's text plus the wording model), MaterialBalance (main's),
+  the design doc (the branch's). After the merge V4 had added `SegmentKind.BEST_LINE` (kept off the allowlist) and replaced
+  three narration connectives: 3 of the 578 measured texts are no longer generated (the measurement test allows 2 % and each
+  report says how many).
+- **Host gate on the merged branch (counts from the XML, 0 skipped, 0 failed):** `:core:test` **594**, `:app:testDebugUnitTest`
+  **612**, `:desktop:test` **25**, `:rephrase:testDebugUnitTest` **17**; `:app:lintDebug` **0 errors** (72 warnings: new
+  `TypographyDashes` on "Qwen2.5-1.5B-Instruct"), `:rephrase:lintDebug` 0/0. Audit: `after` 144 texts 0 WRONG, `lines` 2646
+  checks 0 WRONG, `mutate` 0 missed, `rephrase` 0 disagreements on 8,518 mutation lines and on every measured run,
+  `mutate-rephrase` no misses.
+- **Device gate on the merged branch (counts from the XML):** `:app:connectedDebugAndroidTest` chess36 **195/195, 0 failed,
+  0 skipped**; chess34 **195/195, 0 failed, 0 skipped**. 195 = main's 188 + `RephraseSettingsInstrumentedTest` 6 + `RephraseFlowInstrumentedTest` 1.
+  The first chess36 run had 3 failures: main's two Summary-scroll test failures (fixed on main in 21a77e9, merged here as
+  4ad9454) and `RephraseFlowInstrumentedTest`: after A4 the key moments lie outside the Summary LazyColumn's composed
+  window, and a Quick run of Reti vs Tartakower can have no key moments at all (the analysis differs run to run). The
+  test now reviews the Opera Game (several clear errors), scrolls the list to the node, and its fake rewords today's card
+  texts ("that is what this cost Black" -> "that is the cost for Black", sentence joins), each checked on the host first;
+  on a timeout it prints what the fake was given and cached (dddd330).
+
+### C2: what the owner must publish (needs the owner's OK; nothing was published)
+
+One new GitHub release on palayax/Chess, tag **`models-2026.11`** (= `rephrase.release.tag`), two files:
+
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `qwen2.5-1.5b-instruct-q4_k_m.gguf` | 1,117,320,736 | `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e` |
+| `LICENSE-Qwen2.5-1.5B-Instruct.txt` (the Qwen repo's Apache-2.0 LICENSE at commit 91cad51) | 11,343 | `832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e` |
+
+`scripts/fetch_models.sh --rephrase` then `scripts/publish_rephrase_model.sh` (it checks size, SHA-256 and the GGUF magic,
+refuses an existing tag, uploads both). The net and the voice stay on `models-2026.10`; the signed `models.json` is not
+touched (no wording-model update exists yet). Publish **before** shipping a build with this branch. Also republish
+`docs/PRIVACY_POLICY.md`.
+
+### C2: what the owner runs on the Pixel 8 (the §5.5 decision numbers)
+
+```bash
+scripts/fetch_models.sh --rephrase                       # the 1.1 GB GGUF into vendor/models/rephrase-assets/
+./gradlew :rephrase:assembleDebugAndroidTest
+adb install -r -t rephrase/build/outputs/apk/androidTest/debug/rephrase-debug-androidTest.apk
+adb shell mkdir -p /data/local/tmp/rephrase
+MSYS_NO_PATHCONV=1 adb push vendor/models/rephrase-assets/qwen2.5-1.5b-instruct-q4_k_m.gguf /data/local/tmp/rephrase/
+adb shell chmod 644 /data/local/tmp/rephrase/qwen2.5-1.5b-instruct-q4_k_m.gguf
+# 1. correctness on the phone (a few minutes)
+adb shell am instrument -w -e class net.palaya.chessanalyzer.rephrase.LlamaRephraserInstrumentedTest net.palaya.chessanalyzer.rephrase.test/androidx.test.runner.AndroidJUnitRunner
+# 2. the measurement: all 579 texts (about 45-60 min); for the battery number run it over Wi-Fi adb
+#    (adb tcpip 5555; adb connect <phone-ip>:5555; unplug); memory: adb shell dumpsys meminfo net.palaya.chessanalyzer.rephrase.test
+adb shell am instrument -w -e class net.palaya.chessanalyzer.rephrase.RephraseMeasurementInstrumentedTest#measure net.palaya.chessanalyzer.rephrase.test/androidx.test.runner.AndroidJUnitRunner
+#    optional: -e threads 4|5|6|8 (thread sweep); -e ggufPath /data/local/tmp/rephrase/qwen2.5-1.5b-instruct-q4_0.gguf
+#    -e ggufArch qwen2 (push that file too) for the Q4_0 question of design §1.3
+MSYS_NO_PATHCONV=1 adb pull /sdcard/Android/data/net.palaya.chessanalyzer.rephrase.test/files/ pixel8/
+cp pixel8/files/raw_*.jsonl docs/audit/rephrase/        # then:
+./gradlew :core:test --tests net.palaya.chessanalyzer.core.text.RephraseMeasurementDumpTest
+#    -> core/build/rephrase/report_<model>_<device>.md (rejection, latency median/p90 per surface, key-moment time);
+#       summary_*.txt next to the raw file (load time, PSS before/after/peak, native heap, battery delta, threads)
+```
+Then, after `models-2026.11` is published: the release build end to end on the phone (Setup with the box ticked, or Settings
+> Download; an analysis with "Polishing the commentary"; a Board card; a narrated export). Bars (§5.5): median <= 4 s per
+card and <= 6 s per beat, a game's key moments <= 25 s, peak PSS delta <= 2.0 GB, rejection <= 25 % / 35 %, and the owner's
+own preference >= 60 % on the 60-pair sample.
+
+### C2 deviations (each also in the design's §13 where it is a design departure)
+
+1. The wording model gets its **own release tag** `models-2026.11` (`rephrase.release.tag`); the net and the voice stay on
+   `models-2026.10`, so an existing install never re-downloads anything.
+2. **KleidiAI off** in the NDK build (its CMake fetches sources at configure time); n_ctx 2048 rather than the design's
+   figure (prefix ~716 tokens + the longest text + output fit with room).
+3. **The checker is stricter than designed**: beyond the §4 fact classes it compares HYPOTHETICAL markers, the ORDER of
+   moves/outcomes/check, the negation count, `allow*`/"set up"/"material up/down", and "Better was". Real model outputs
+   drove each rule (P2a); mutation controls cover them (24 kinds, 0 missed) and the Python twin agrees on every line.
+4. **Crash journal**: one death while loading re-hashes the file; two in a row turn the feature off (Settings says so).
+5. An update of the wording model (`rephrase-qwen`) is **offered only to phones that have the model**; nothing in the
+   signed `models.json` yet.
+6. V4's spoken best line (`SegmentKind.BEST_LINE`) is **not reworded** (template sentences; kept off the allowlist).
+7. **Not built**: the "Report this wording" action (§6.4) and the owner's quality A/B (§5.4 60-pair sample) are left for
+   the owner with the Pixel 8 numbers.
+8. **Host latency is contended** (the emulator shared the CPU): the P2a timings are a reference only; the §5.5 decision
+   numbers come from the Pixel 8 run.
+9. After the V4 merge **3 of the 578 measured texts** are no longer generated (V4 changed three connectives); the
+   measurement test tolerates up to 2 % and each report states the count.
+10. `:app:lintDebug` has **two new warnings** (`TypographyDashes` on "Qwen2.5-1.5B-Instruct", the model's proper name).
+11. The **release APK was built with bundletool** (`build-apks --mode=universal` from the merged AAB, throwaway signing key)
+    because `assembleRelease` could not overwrite `classes.dex` while the shared Gradle daemon of another agent held it;
+    the AAB itself was built by Gradle. The release key was never read.
+12. **No emulator passes the RAM gate** (both AVDs have 2 GB; the gate is 3.4 GB), so the in-app wording path of a release
+    build was not exercised on a device; the instrumented `:rephrase` tests load the real library and model directly.
+13. Main moved to 21a77e9 during the run (test-only scroll fix + privacy date); merged as 4ad9454 so the device gate ran on
+    main's fixed tests.
+
+Device state restored: GGUF removed from `/data/local/tmp`, apps uninstalled, font scale 1.0, both emulators shut down,
+adb server stopped. Nothing pushed, nothing published, `main` untouched.

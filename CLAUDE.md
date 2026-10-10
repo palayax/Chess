@@ -216,7 +216,9 @@ conflict.
 - **R8**: `rephrase/consumer-rules.pro` keeps `NativeRephrase` and its natives (symbols
   `Java_net_palaya_chessanalyzer_rephrase_NativeRephrase_native*`). The bridge returns the generated text as a
   `byte[]` (UTF-8; a token can split a multi-byte character, and `NewStringUTF` would choke on it).
-- **One model per process** (`RephraseBackend`): the 1.1 GB GGUF is mmap'ed (file-backed for the low-memory killer),
+- **One model per process** (`RephraseBackend`): the 1.1 GB GGUF is mmap'ed, but llama.cpp's CPU repacking
+  (`use_extra_bufts`, the default and what makes the kernels fast) copies the Q4_K weights into anonymous buffers, so a
+  loaded model is ~1.12 GB of native heap / ~1.18 GB PSS, not file-backed pages; release brings it back to ~80 MB,
   the fixed prompt prefix (~700 tokens) stays in the KV cache (`llama_memory_seq_rm` from the prefix boundary),
   n_ctx 2048 (about 57 MB of f16 KV on the 1.5B). It is freed on `onTrimMemory(RUNNING_LOW+)` and a minute after a
   job. A load is journaled (`rephrase/loading.json`): found at start, the file is re-hashed before its next use; two
@@ -236,6 +238,14 @@ conflict.
   route hands `rephrasedVideoScriptFor(gameId)` (core `RephrasedScript` over the cache) to the VideoScreen, so the
   player, "Save video" and the exporter all read the finished words and the export never calls the model. A pace or
   voice change rebuilds the script; its beats are the same texts, already cached, so the pre-step does not reappear.
+
+- **The device-test gates of the wording model.** No AVD here passes `RephraseSupport`'s RAM gate (both have 2 GB,
+  the gate is 3.4 GB), so the app shows "Not available on this phone." and Setup offers no wording row; the real
+  library is exercised by `:rephrase`'s `LlamaRephraserInstrumentedTest` with the GGUF pushed to
+  `/data/local/tmp/rephrase/` (never 10.0.2.2). `RephraseFlowInstrumentedTest` uses a fake behind
+  `rephraserForTesting`; its rewordings must pass the real checker on the CURRENT card texts (probe new ones with a
+  throwaway `:core` test first), and it reviews the Opera Game because a Quick run of a miniature can have no key
+  moments. The Summary is a LazyColumn: scroll it with `performScrollToNode` before looking a card up.
 
 ## Emulator gotchas
 
