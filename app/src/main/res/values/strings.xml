@@ -261,7 +261,7 @@
     <string name="reanalyse_hint_quick">Fastest, looks a little less deeply.</string>
     <string name="reanalyse_hint_standard">A good balance of speed and accuracy.</string>
     <string name="reanalyse_hint_deep">Slowest, the most accurate.</string>
-    <string name="reanalyse_hint_auto">Deeper on the critical moves only, so much faster than Deep.</string>
+    <string name="reanalyse_hint_auto">Deep on the critical moves, quick on the rest. Faster than Deep.</string>
     <string name="reanalyse_current">current</string>
     <string name="reanalyse_confirm">Re-analyse</string>
     <string name="reanalyse_cancel">Cancel</string>
@@ -309,7 +309,7 @@
     <string name="settings_depth_standard">Standard</string>
     <string name="settings_depth_deep">Deep</string>
     <string name="settings_depth_auto">Auto</string>
-    <string name="settings_depth_help">Deeper is more accurate and slower. Auto looks at every move like Standard, then deeper at the critical moves. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
+    <string name="settings_depth_help">Deeper is more accurate and slower. Auto looks quickly at every move, then as deeply as Deep at the critical ones. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
     <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
     <string name="settings_custom_value">Custom (%1$s)</string>
     <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->

@@ -117,11 +117,20 @@ class AdaptiveDepthTest {
     }
 
     @Test
-    fun aGreatMoveIsDeepenedBecauseItsOnlyMoveGapMustHoldAtDepth() {
+    fun aClearGreatMoveIsNotDeepenedByDefaultButIsWhenTheGreatRuleIsOn() {
+        // A gap of about 32 win%: far from the 10-point boundary. The GREAT rule was measured and is off (spec §8.5).
         val e = evals(quiet, flat(quiet), secondGapCp = mapOf(4 to 400))
-        val picks = plan(quiet, e)
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e))
+        val picks = plan(quiet, e, config = Config(rules = AdaptiveDepth.DEFAULT_RULES + Reason.GREAT))
         assertEquals(listOf(4, 5), picks.map { it.index })
-        assertTrue(Reason.GREAT in picks.first().reasons)
+        assertEquals(setOf(Reason.GREAT), picks.first().reasons)
+    }
+
+    @Test
+    fun theDefaultRulesAreTheMeasuredOnes() {
+        assertEquals(setOf(Reason.MISTAKE, Reason.MATE, Reason.SWING, Reason.UNSTABLE, Reason.BOUNDARY), AdaptiveDepth.DEFAULT_RULES)
+        assertEquals(0.6, Config().maxFraction, 0.0)
+        assertEquals(Reason.BOUNDARY, Config().priority.first())
     }
 
     @Test
@@ -187,6 +196,21 @@ class AdaptiveDepthTest {
     }
 
     @Test
+    fun underTheCapAMoveNearABoundaryBeatsAClearBlunder() {
+        // 2.Nf3 (ply 3) loses about 4.5 (near the 5.0 boundary); 4.c3 (ply 7) loses about 45, a Blunder far from any
+        // boundary (its label is the least likely to change). Room for one pair: the boundary move gets it.
+        val cp = flat(quiet).toMutableList().also { for (i in 3..8) it[i] = -29; it[7] = -900; it[8] = -900 }
+        val e = evals(quiet, cp, best = mapOf(2 to "f1c4", 6 to "d2d3"))
+        assertTrue(lossOf(e, 7, Color.WHITE) > 30.0)
+        val picks = plan(quiet, e, config = Config(maxFraction = 0.25))
+        assertEquals(listOf(2, 3), picks.map { it.index })
+        assertEquals(setOf(Reason.BOUNDARY), picks.first().reasons)
+        // With the blunder ranked first it wins instead.
+        val blunderFirst = Config(maxFraction = 0.25, priority = listOf(Reason.MISTAKE, Reason.BOUNDARY))
+        assertEquals(listOf(6, 7), plan(quiet, e, config = blunderFirst).map { it.index })
+    }
+
+    @Test
     fun higherPriorityMovesArePickedFirst() {
         // A boundary loss on 2.Nf3 (ply 3) and a mistake on 4.c3 (ply 7).
         val cp = flat(quiet).toMutableList().also { for (i in 3..8) it[i] = -29; it[7] = -250; it[8] = -250 }
@@ -222,12 +246,15 @@ class AdaptiveDepthTest {
     fun theCloseChoiceRuleIsOffByDefaultAndPicksBestMovesWithACloseSecondLineWhenOn() {
         val e = evals(quiet, flat(quiet))
         assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e))
-        val picks = plan(quiet, e, config = Config(closeGapWin = 2.0, maxFraction = 1.0))
+        val on = Config(closeGapWin = 2.0, maxFraction = 1.0, rules = AdaptiveDepth.DEFAULT_RULES + Reason.CLOSE)
+        val picks = plan(quiet, e, config = on)
         assertEquals((0..8).toList(), picks.map { it.index }.sorted())
         assertTrue(picks.all { Reason.CLOSE in it.reasons })
+        // Not in the rule set: off even with a gap.
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(closeGapWin = 2.0)))
         // A decided position does not count.
         val won = evals(quiet, flat(quiet, cp = 900))
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, won, config = Config(closeGapWin = 2.0)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, won, config = on))
     }
 
     @Test

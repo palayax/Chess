@@ -11,7 +11,7 @@ class AnalysisFractionTest {
 
     private fun auto(total: Int = 67) = AnalysisFraction(
         total, autoDepth = true,
-        baseTypicalNodes = SearchBudget.STANDARD.typicalNodes,
+        baseTypicalNodes = SearchBudget.QUICK.typicalNodes,
         deepTypicalNodes = AutoDepthBudget.TYPICAL_DEEPENED_NODES,
         expectedDeepPositions = AnalysisFraction.expectedDeepPositions(total),
     )
@@ -27,7 +27,7 @@ class AnalysisFractionTest {
     fun autosFirstPassEndsWellShortOfTheEndAndTheSecondPassFillsTheRest() {
         val bar = auto()
         val share = bar.firstPassShare
-        assertTrue("share $share", share in 0.2..0.8)
+        assertTrue("share $share", share in 0.02..0.5)
         val afterFirst = bar.firstPass(67)
         assertEquals(AnalysisFraction.START + AnalysisFraction.SPAN * share.toFloat(), afterFirst, 1e-5f)
         assertTrue(afterFirst < end - 0.1f)

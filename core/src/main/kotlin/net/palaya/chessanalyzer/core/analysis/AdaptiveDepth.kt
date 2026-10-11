@@ -28,21 +28,21 @@ object AdaptiveDepth {
     const val POLICY_VERSION = 1
 
     /** Why a position was picked. Several can apply; the diagnostic log lists them. */
-    enum class Reason(val logName: String, val priority: Int) {
+    enum class Reason(val logName: String) {
         /** A move on the position is an inaccuracy or worse (or a Miss) by the evaluations so far. */
-        MISTAKE("mistake", 6),
+        MISTAKE("mistake"),
         /** A side has a forced mate in the best line before or after a move. */
-        MATE("mate", 6),
+        MATE("mate"),
         /** The White win percentage moves by at least [Config.swingWin] across a move. */
-        SWING("swing", 5),
+        SWING("swing"),
         /** A move is Great or Brilliant by the evaluations so far (the labels the deeper search most often takes back). */
-        GREAT("great", 5),
+        GREAT("great"),
         /** A deepened neighbour's evaluation moved by at least [Config.unstableWin] from its base one (round 2 on). */
-        UNSTABLE("unstable", 4),
+        UNSTABLE("unstable"),
         /** A move's loss, or its Great gap, sits within the margin of a classification boundary. */
-        BOUNDARY("boundary", 3),
+        BOUNDARY("boundary"),
         /** The played move was best but the second line is within [Config.closeGapWin] (Best vs Excellent hangs on it). */
-        CLOSE("close", 2),
+        CLOSE("close"),
         ;
     }
 
@@ -66,10 +66,28 @@ object AdaptiveDepth {
         val closeDecidedWin: Double = 10.0,
         /** UNSTABLE: |deep White win% − base White win%| on a deepened position. */
         val unstableWin: Double = 5.0,
-        /** At most this share of the searchable positions is deepened in total. */
-        val maxFraction: Double = 0.5,
+        /** At most this share of the searchable positions is deepened in total (a safety net: Auto stays below Deep). */
+        val maxFraction: Double = 0.6,
         /** Rounds of picking (round 1 reads only the base evaluations). */
         val maxRounds: Int = 3,
+        /**
+         * The rules in force; a rule not in the set never picks. GREAT and CLOSE were measured and are off (spec §8.5:
+         * they cost much and changed no agreement; a Great move near its gap boundary is still caught by BOUNDARY).
+         */
+        val rules: Set<Reason> = DEFAULT_RULES,
+        /**
+         * Which moves win when the cap is reached: a move ranks by the first of its reasons in this list, then by the
+         * size of its swing. Moves near a classification boundary come first (their label is the likeliest to change).
+         */
+        val priority: List<Reason> = DEFAULT_PRIORITY,
+    )
+
+    /** The rules in force by default (spec §8.5). */
+    val DEFAULT_RULES: Set<Reason> = setOf(Reason.MISTAKE, Reason.MATE, Reason.SWING, Reason.UNSTABLE, Reason.BOUNDARY)
+
+    /** The default ranking under the cap (spec §8.5). */
+    val DEFAULT_PRIORITY: List<Reason> = listOf(
+        Reason.BOUNDARY, Reason.MATE, Reason.MISTAKE, Reason.SWING, Reason.UNSTABLE, Reason.GREAT, Reason.CLOSE,
     )
 
     private val LOSS_BOUNDARIES = doubleArrayOf(2.0, 5.0, 10.0, 20.0)
@@ -113,17 +131,17 @@ object AdaptiveDepth {
         for (m in 1..game.moves.size) {
             val reasons = moveReasons(game, m, positions, current, book, classifier, config)
             if (reasons.isNotEmpty()) {
-                candidates += Candidate(m, reasons, reasons.maxOf { it.priority }, swingOf(current, m))
+                candidates += Candidate(m, reasons, rank(reasons, config), swingOf(current, m))
             }
         }
-        if (round > 1) {
+        if (round > 1 && Reason.UNSTABLE in config.rules) {
             // UNSTABLE: a deepened position whose evaluation moved a lot also moves the moves on its other sides.
             for (p in deepened.sorted()) {
                 val moved = abs(whiteWin(current[p]) - whiteWin(base[p]))
                 if (moved < config.unstableWin) continue
                 for (m in listOf(p, p + 1)) {
                     if (m < 1 || m > game.moves.size || !isEngineJudged(game, m, positions, book)) continue
-                    candidates += Candidate(m, setOf(Reason.UNSTABLE), Reason.UNSTABLE.priority, moved)
+                    candidates += Candidate(m, setOf(Reason.UNSTABLE), rank(setOf(Reason.UNSTABLE), config), moved)
                 }
             }
         }
@@ -131,7 +149,7 @@ object AdaptiveDepth {
         // Merge the reasons per position; a position takes the best priority of the moves that want it.
         val wanted = LinkedHashMap<Int, MutableSet<Reason>>()
         val order = candidates.sortedWith(
-            compareByDescending<Candidate> { it.priority }.thenByDescending { it.swing }.thenBy { it.ply },
+            compareBy<Candidate> { it.priority }.thenByDescending { it.swing }.thenBy { it.ply },
         )
         val picked = ArrayList<Int>()
         for (c in order) {
@@ -149,6 +167,22 @@ object AdaptiveDepth {
             }
         }
         return picked.map { Deepening(it, Tier.DEEP, wanted.getValue(it).toSortedSet(compareBy { r -> r.ordinal })) }
+    }
+
+    /**
+     * The reasons each move (1-based ply) is critical by [evals], ignoring the cap and the positions already deepened:
+     * what round 1 of [plan] starts from. For the diagnostic log and the host measurement (spec §8.5).
+     */
+    fun criticalMoves(
+        game: PgnGame,
+        evals: List<PositionEval>,
+        book: OpeningBook?,
+        classifier: MoveClassifier,
+        config: Config = Config(),
+    ): Map<Int, Set<Reason>> {
+        val positions = evals.map { Position.fromFen(it.fen) }
+        return (1..game.moves.size).associateWith { moveReasons(game, it, positions, evals, book, classifier, config) }
+            .filterValues { it.isNotEmpty() }
     }
 
     /** False for a move whose label the engine cannot change: forced (one legal move) or a book move (§2 rules 1-2). */
@@ -200,8 +234,12 @@ object AdaptiveDepth {
                 winBefore > config.closeDecidedWin && winBefore < 100.0 - config.closeDecidedWin
             ) reasons += Reason.CLOSE
         }
-        return reasons
+        return reasons.filterTo(mutableSetOf()) { it in config.rules }
     }
+
+    /** The rank of a move with [reasons]: the position of its best reason in [Config.priority] (lower = first). */
+    private fun rank(reasons: Set<Reason>, config: Config): Int =
+        reasons.minOf { r -> config.priority.indexOf(r).let { if (it < 0) config.priority.size else it } }
 
     /** A mate score in the best line of a searched position (a terminal position's "mate 0" is exact, not searched). */
     private fun hasMate(eval: PositionEval): Boolean {

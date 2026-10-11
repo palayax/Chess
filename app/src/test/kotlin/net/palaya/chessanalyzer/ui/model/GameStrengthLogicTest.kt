@@ -28,11 +28,11 @@ class GameStrengthLogicTest {
     }
 
     @Test
-    fun aReopenedAutoGameStaysAutoEvenWhenSettingsSaysStandardWhichHasTheSameDepth() {
-        val level = gameAnalysisLevel(explicit = null, stored = AnalysisLevel(14, autoDepth = true), settingsDefault = standard)
+    fun aReopenedAutoGameStaysAutoEvenWhenSettingsSaysQuickWhichHasTheSameDepth() {
+        val level = gameAnalysisLevel(explicit = null, stored = AnalysisLevel(12, autoDepth = true), settingsDefault = quick)
         assertEquals(AnalysisStrength.AUTO, level.strength)
-        // And a Standard game stays Standard under an Auto default.
-        assertEquals(AnalysisStrength.STANDARD, gameAnalysisLevel(null, standard, auto).strength)
+        // And a Quick game stays Quick under an Auto default.
+        assertEquals(AnalysisStrength.QUICK, gameAnalysisLevel(null, quick, auto).strength)
     }
 
     @Test
@@ -64,7 +64,8 @@ class GameStrengthLogicTest {
         assertFalse(canReanalyse(standard, picked = AnalysisStrength.STANDARD))
         assertTrue(canReanalyse(standard, picked = AnalysisStrength.DEEP))
         assertTrue(canReanalyse(standard, picked = AnalysisStrength.QUICK))
-        // Auto has Standard's depth, but it is another strength.
+        // Auto has Quick's depth, but it is another strength.
+        assertTrue(canReanalyse(quick, picked = AnalysisStrength.AUTO))
         assertTrue(canReanalyse(standard, picked = AnalysisStrength.AUTO))
         assertTrue(canReanalyse(auto, picked = AnalysisStrength.STANDARD))
         assertFalse(canReanalyse(auto, picked = AnalysisStrength.AUTO))

@@ -40,8 +40,8 @@ data class SearchBudget(
             AnalysisStrength.QUICK -> QUICK
             AnalysisStrength.STANDARD -> STANDARD
             AnalysisStrength.DEEP -> DEEP
-            // Auto's first pass is a Standard analysis (spec §8.5); its second pass is AutoDepthBudget.deep.
-            AnalysisStrength.AUTO -> STANDARD
+            // Auto's first pass is a Quick analysis (spec §8.5); its second pass is AutoDepthBudget.deep.
+            AnalysisStrength.AUTO -> QUICK
         }
 
         /**
@@ -58,12 +58,12 @@ data class SearchBudget(
 }
 
 /**
- * Auto-depth (docs/ANALYSIS_SPEC.md §8.5): pass 1 searches every position at [base] (exactly a Standard analysis,
+ * Auto-depth (docs/ANALYSIS_SPEC.md §8.5): pass 1 searches every position at [base] (exactly a Quick analysis,
  * and stored as one), then `core.analysis.AdaptiveDepth` picks the critical positions and they are searched again
  * at [deep] (exactly the Deep preset's search, so a Deep eval-cache entry of the same game can stand in for one).
  */
 object AutoDepthBudget {
-    val base: AnalysisStrength = AnalysisStrength.STANDARD
+    val base: AnalysisStrength = AnalysisStrength.QUICK
     val deep: AnalysisStrength = AnalysisStrength.DEEP
 
     /**

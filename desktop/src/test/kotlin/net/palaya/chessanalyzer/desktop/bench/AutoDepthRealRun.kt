@@ -7,7 +7,7 @@ import net.palaya.chessanalyzer.desktop.analysis.ReportFactory
 import java.nio.file.Path
 
 /**
- * A real Auto run per game, the way `AnalysisService` does it: `ucinewgame`, pass 1 at Standard over every
+ * A real Auto run per game, the way `AnalysisService` does it: `ucinewgame`, pass 1 at Quick over every
  * position, then the policy's rounds, each picked position searched again at Deep on the same engine (its hash
  * as pass 1 left it). The assembled evaluations go to `<out>/auto/<game>.json`; a deepened position's node count
  * there is its pass-1 nodes plus its pass-2 nodes.
@@ -25,7 +25,7 @@ object AutoDepthRealRun {
                 engine.newGame()
                 val fens = BenchGames.fens(game)
                 val pass1 = fens.mapIndexed { i, fen ->
-                    engine.evaluate(i, fen, BenchTier.STANDARD.withTimeCapFactor()).also {
+                    engine.evaluate(i, fen, BenchTier.QUICK.withTimeCapFactor()).also {
                         println("auto $id pass1 $i/${fens.size - 1} d${it.depth}/${it.requestedDepth} ${it.nodes} nodes")
                     }
                 }

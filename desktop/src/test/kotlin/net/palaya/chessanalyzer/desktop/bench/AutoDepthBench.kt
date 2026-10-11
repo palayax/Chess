@@ -15,7 +15,7 @@ import java.nio.file.Paths
  *    exactly (BenchEngine); one JSON per game, a finished game is not searched again.
  *  - `simulate <outDir>`: the Auto-depth policy replayed on the recorded tiers (no engine), plus the
  *    agreement table.
- *  - `auto <outDir>`: a real two-pass Auto run (pass 1 Standard, then the policy, then the deeper searches).
+ *  - `auto <outDir>`: a real two-pass Auto run (pass 1 Quick, then the policy, then the deeper searches).
  */
 object AutoDepthBench {
     @JvmStatic

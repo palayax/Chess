@@ -327,7 +327,7 @@ sealed interface PracticeEntryState {
 data class EngineSettings(
     /**
      * Search depth. Settings offers the presets 12 / 14 / 18; any stored value 6..30 is still honoured. With
-     * [autoDepth] it is the depth of Auto's first pass (14).
+     * [autoDepth] it is the depth of Auto's first pass (Quick's 12).
      */
     val depth: Int = 14,
     /** Not a user setting any more (kept at 3: the tactic gate needs the second-best line). */
