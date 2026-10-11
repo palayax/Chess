@@ -79,10 +79,16 @@ class GameRepository(
         val pace: String? = null,
         val naturalWording: Boolean? = null,
         val prepareVideo: Boolean? = null,
+        /**
+         * Analysed with Auto-depth (ANALYSIS_SPEC §8.5; [depth] is then its first pass's depth), so reopening the
+         * game keeps Auto. Absent in games saved before Auto: false.
+         */
+        val autoDepth: Boolean = false,
     ) {
         /** The options stored with this game, for [net.palaya.chessanalyzer.ui.model.prefillReviewOptions]. */
         fun reviewOptions(): StoredReviewOptions = StoredReviewOptions(
             depth = depth,
+            autoDepth = autoDepth,
             side = SideChoice.fromStored(userColorName),
             naturalWording = naturalWording,
             prepareVideo = prepareVideo,
@@ -94,6 +100,7 @@ class GameRepository(
         /** This game with [options] stored (the strength goes to [depth], the side to [userColorName]). */
         fun withReviewOptions(options: ReviewOptions): StoredGame = copy(
             depth = options.strength.depth,
+            autoDepth = options.strength.autoDepth,
             userColorName = options.side.storedName ?: userColorName,
             voiceProvider = options.voice.name,
             speakerId = options.speakerId,
@@ -125,6 +132,7 @@ class GameRepository(
             game.pace?.let { put("pace", it) }
             game.naturalWording?.let { put("naturalWording", it) }
             game.prepareVideo?.let { put("prepareVideo", it) }
+            put("autoDepth", game.autoDepth)
         }
         File(gamesDir, "${game.id}.json").writeText(json.toString())
     }
@@ -268,6 +276,7 @@ class GameRepository(
             pace = json.optString("pace", "").takeUnless { it.isEmpty() },
             naturalWording = if (json.has("naturalWording")) json.getBoolean("naturalWording") else null,
             prepareVideo = if (json.has("prepareVideo")) json.getBoolean("prepareVideo") else null,
+            autoDepth = json.optBoolean("autoDepth", false),
         )
     } catch (e: Exception) {
         null

@@ -483,6 +483,7 @@ fun ChessAnalyzerNavHost(
                     // A4: the material at the end, and the strength this game has with a way to change it.
                     finalFen = viewModel.games[gameId]?.moves?.lastOrNull()?.fenAfter,
                     analysisDepth = viewModel.games[gameId]?.analysisDepth?.takeIf { it > 0 },
+                    analysisAutoDepth = viewModel.games[gameId]?.autoDepth == true,
                     // RF: the game's Review options, pre-filled with its own; Start replaces this Summary with the run.
                     onReanalyse = { navController.navigate(Destination.ReviewOptions.createRoute(gameId, ReviewEntry.SUMMARY)) },
                     onBack = { navController.popBackStack() },

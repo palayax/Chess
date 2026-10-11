@@ -5,6 +5,7 @@ package net.palaya.chessanalyzer.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.remember
 import net.palaya.chessanalyzer.ui.components.PlayerMaterialRow
+import net.palaya.chessanalyzer.ui.model.AnalysisLevel
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.customDepthValue
 import net.palaya.chessanalyzer.ui.model.materialViewOrNull
@@ -148,6 +149,8 @@ fun GameReportScreen(
     finalFen: String? = null,
     /** The depth this game was analysed at (A4); null while it is not in memory. Shown with "Re-analyse". */
     analysisDepth: Int? = null,
+    /** The game was analysed with Auto-depth (ANALYSIS_SPEC §8.5); [analysisDepth] is then its first pass's depth. */
+    analysisAutoDepth: Boolean = false,
     /** "Re-analyse with different settings…": opens the game's Review options (RF). Null hides the card (previews). */
     onReanalyse: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
@@ -240,7 +243,7 @@ fun GameReportScreen(
             }
 
             if (onReanalyse != null && analysisDepth != null) {
-                item(key = "analysis-strength") { AnalysisStrengthCard(analysisDepth, onReanalyse) }
+                item(key = "analysis-strength") { AnalysisStrengthCard(AnalysisLevel(analysisDepth, analysisAutoDepth), onReanalyse) }
             }
 
             item(key = "details-header") {
@@ -961,7 +964,7 @@ private fun ClassificationTableRow(row: ClassificationRow) {
  * one screen, owner's phone test 2026-10-11), pre-filled with this game's own options.
  */
 @Composable
-private fun AnalysisStrengthCard(depth: Int, onReanalyse: () -> Unit) {
+private fun AnalysisStrengthCard(level: AnalysisLevel, onReanalyse: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         shape = MaterialTheme.shapes.medium,
@@ -973,7 +976,7 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: () -> Unit) {
                 modifier = Modifier.asHeading(),
             )
             Text(
-                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(depth)),
+                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(level)),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -985,11 +988,12 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: () -> Unit) {
 }
 
 @Composable
-private fun strengthLabel(depth: Int): String = when (AnalysisStrength.fromDepth(depth)) {
+private fun strengthLabel(level: AnalysisLevel): String = when (level.strength) {
     AnalysisStrength.QUICK -> stringResource(R.string.settings_depth_quick)
     AnalysisStrength.STANDARD -> stringResource(R.string.settings_depth_standard)
     AnalysisStrength.DEEP -> stringResource(R.string.settings_depth_deep)
-    null -> stringResource(R.string.settings_custom_value, customDepthValue(depth))
+    AnalysisStrength.AUTO -> stringResource(R.string.settings_depth_auto)
+    null -> stringResource(R.string.settings_custom_value, customDepthValue(level.depth))
 }
 
 /**

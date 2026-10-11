@@ -256,7 +256,11 @@ private fun StageRow(stage: StageState, engine: AnalysisProgress, onSkip: ((Revi
             StageStatus.PENDING -> R.string.stage_status_pending
         },
     )
-    val count = stageCount(stage)?.let { (d, t) -> stringResource(R.string.stage_count, d, t) }
+    val deepPass = stage.stage == ReviewStage.ENGINE && stage.status == StageStatus.CURRENT && engine.deepPassTotal > 0
+    val count = if (deepPass) {
+        // Auto-depth's second pass (ANALYSIS_SPEC §8.5): the position being searched again, of those picked so far.
+        stringResource(R.string.progress_deeper_moves, (engine.deepPassDone + 1).coerceAtMost(engine.deepPassTotal), engine.deepPassTotal)
+    } else stageCount(stage)?.let { (d, t) -> stringResource(R.string.stage_count, d, t) }
         // Before the engine counts positions it is starting up ("Starting…").
         ?: if (stage.stage == ReviewStage.ENGINE && stage.status == StageStatus.CURRENT && engine.phase == AnalysisPhase.PREPARING_ENGINE) {
             stringResource(R.string.progress_downloading_engine)

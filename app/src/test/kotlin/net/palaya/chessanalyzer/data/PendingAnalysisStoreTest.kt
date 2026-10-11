@@ -57,4 +57,18 @@ class PendingAnalysisStoreTest {
         )
         assertEquals(request(null), PendingAnalysisStore(dir).load())
     }
+
+    @Test
+    fun anAutoRequestResumesAsAutoAndAnOlderFileReadsAsAFixedDepth() {
+        val store = PendingAnalysisStore(dir)
+        store.save(request(null).copy(autoDepth = true))
+        assertEquals(true, PendingAnalysisStore(dir).load()?.autoDepth)
+        store.save(request(null))
+        assertEquals(false, PendingAnalysisStore(dir).load()?.autoDepth)
+        // The file of the test above (no "autoDepth" key) reads with Auto off.
+        File(dir, PendingAnalysisStore.FILE_NAME).writeText(
+            """{"gameId":"imported-1-1","pgnText":"1. e4 e5 *","depth":14,"multiPv":3,"username":"","startedAtMs":42}""",
+        )
+        assertEquals(false, PendingAnalysisStore(dir).load()?.autoDepth)
+    }
 }

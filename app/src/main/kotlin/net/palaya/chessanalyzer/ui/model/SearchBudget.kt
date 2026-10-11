@@ -40,6 +40,8 @@ data class SearchBudget(
             AnalysisStrength.QUICK -> QUICK
             AnalysisStrength.STANDARD -> STANDARD
             AnalysisStrength.DEEP -> DEEP
+            // Auto's first pass is a Standard analysis (spec §8.5); its second pass is AutoDepthBudget.deep.
+            AnalysisStrength.AUTO -> STANDARD
         }
 
         /**
@@ -48,9 +50,40 @@ data class SearchBudget(
          * deeper than Deep gets Deep's (it is then usually capped, and flagged as such).
          */
         fun forDepth(depth: Int): SearchBudget {
-            val strength = AnalysisStrength.entries.sortedBy { it.depth }.firstOrNull { depth <= it.depth }
+            val strength = AnalysisStrength.entries.filter { !it.autoDepth }.sortedBy { it.depth }.firstOrNull { depth <= it.depth }
                 ?: AnalysisStrength.DEEP
             return forStrength(strength)
         }
     }
+}
+
+/**
+ * Auto-depth (docs/ANALYSIS_SPEC.md §8.5): pass 1 searches every position at [base] (exactly a Standard analysis,
+ * and stored as one), then `core.analysis.AdaptiveDepth` picks the critical positions and they are searched again
+ * at [deep] (exactly the Deep preset's search, so a Deep eval-cache entry of the same game can stand in for one).
+ */
+object AutoDepthBudget {
+    val base: AnalysisStrength = AnalysisStrength.STANDARD
+    val deep: AnalysisStrength = AnalysisStrength.DEEP
+
+    /**
+     * The share of a game's positions Auto typically deepens: 24% on the calibration games, 22% on the held-out ones
+     * (spec §8.5.3; the cap is 25%). Only for the
+     * progress bar and the time-left estimate before the second pass knows its real count; never a limit.
+     */
+    const val EXPECTED_DEEP_FRACTION: Double = 0.24
+
+    /**
+     * Nodes a deepened position typically takes at Deep: the second pass's mean on the host, 5.9 M on the calibration
+     * games and 6.1 M on the held-out ones (spec §8.5.3). For the time-left estimate only.
+     */
+    const val TYPICAL_DEEPENED_NODES: Long = 6_000_000L
+
+    /**
+     * Part of the Auto eval-cache key: both tiers' limits and the policy's version, so a changed budget or a changed
+     * policy re-analyses instead of mixing (spec §8, §8.5).
+     */
+    val cacheKeyPart: String
+        get() = "auto${net.palaya.chessanalyzer.core.analysis.AdaptiveDepth.POLICY_VERSION}:" +
+            "${base.budget.cacheKeyPart}>d${deep.depth}:${deep.budget.cacheKeyPart}"
 }

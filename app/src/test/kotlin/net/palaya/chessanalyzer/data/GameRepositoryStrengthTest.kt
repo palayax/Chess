@@ -2,6 +2,7 @@ package net.palaya.chessanalyzer.data
 
 import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -60,10 +61,26 @@ class GameRepositoryStrengthTest {
     @Test
     fun theEvalCacheKeyDiffersPerStrengthSoEachResultIsKept() {
         val r = repo()
+        // AnalysisService's keys: Auto's assembled result has its own key part (spec §8.5).
         val keys = AnalysisStrength.entries.map {
-            r.cacheKey("1. e4 e5 *", it.depth, 3, it.budget.cacheKeyPart)
+            r.cacheKey("1. e4 e5 *", it.depth, 3, if (it.autoDepth) AutoDepthBudget.cacheKeyPart else it.budget.cacheKeyPart)
         }
-        assertEquals(3, keys.toSet().size)
+        assertEquals(4, keys.toSet().size)
         assertNotEquals(keys[0], keys[1])
+    }
+
+    @Test
+    fun anAutoGameComesBackAsAutoAndAGameSavedBeforeAutoReadsAsItsDepthAlone() = runBlocking {
+        val r = repo()
+        r.save(stored("auto", AnalysisStrength.AUTO.depth).copy(autoDepth = true))
+        val loaded = repo().load("auto")!!
+        assertEquals(AnalysisStrength.AUTO, AnalysisStrength.of(loaded.depth, loaded.autoDepth))
+        // A game file written before Auto has no "autoDepth": it reads as before.
+        java.io.File(folder.root, "games/old.json").writeText(
+            """{"id":"old","pgnText":"1. e4 e5 *","white":"A","black":"B","result":"*","date":"","plyCount":2,"depth":14,"multiPv":3,"userColorName":null,"savedAtMs":1}""",
+        )
+        val old = repo().load("old")!!
+        assertEquals(false, old.autoDepth)
+        assertEquals(AnalysisStrength.STANDARD, AnalysisStrength.of(old.depth, old.autoDepth))
     }
 }

@@ -35,6 +35,11 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
          * detection decides, as before.
          */
         val initialSide: String? = null,
+        /**
+         * Auto-depth (ANALYSIS_SPEC §8.5): [depth] is then the first pass's depth. A resume keeps it, so it reads the
+         * same eval caches and checkpoints. Absent in files written before Auto: false, as then.
+         */
+        val autoDepth: Boolean = false,
     )
 
     private val file = File(filesDir, fileName)
@@ -50,6 +55,7 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
             put("username", request.username)
             put("startedAtMs", request.startedAtMs)
             request.initialSide?.let { put("initialSide", it) }
+            put("autoDepth", request.autoDepth)
         }
         // Temp file then rename: a kill mid-write must not leave a half-written request.
         tmp.writeText(json.toString())
@@ -72,6 +78,7 @@ class PendingAnalysisStore(filesDir: File, fileName: String = FILE_NAME) {
                 startedAtMs = json.optLong("startedAtMs", 0L),
                 // Absent in files written before G1-device: no initial side, as then.
                 initialSide = if (json.isNull("initialSide")) null else json.getString("initialSide"),
+                autoDepth = json.optBoolean("autoDepth", false),
             )
         } catch (e: Exception) {
             file.delete()

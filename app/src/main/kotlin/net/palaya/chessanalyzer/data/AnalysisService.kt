@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import net.palaya.chessanalyzer.core.analysis.AdaptiveDepth
 import net.palaya.chessanalyzer.core.analysis.EngineLineInput
 import net.palaya.chessanalyzer.core.analysis.GameAnalyzer
 import net.palaya.chessanalyzer.core.analysis.GameReport as CoreGameReport
@@ -32,8 +33,11 @@ import net.palaya.chessanalyzer.engine.AnalysisResult
 import net.palaya.chessanalyzer.engine.NetNotInstalledException
 import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
+import net.palaya.chessanalyzer.ui.model.AnalysisFraction
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
+import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
 import net.palaya.chessanalyzer.ui.model.EngineSettings
+import net.palaya.chessanalyzer.ui.model.SearchBudget
 
 /**
  * The seam between raw PGN text and a finished [CoreGameReport]: parse -> pick game/user color
@@ -103,6 +107,11 @@ class AnalysisService(
      * @param gameIndex which game to analyze when [pgnText] contains multiple PGN games
      *   (defaults to the first). The picker UI for "which game" is a follow-up; the count of
      *   the other games found is still surfaced on [Outcome.Success] so a caller can offer it.
+     * @param onPositionEvaluated called once per position (index 0 = the start position) with its FINAL
+     *   evaluation, including positions served from the eval cache or a checkpoint. For Auto-depth
+     *   ([EngineSettings.autoDepth], ANALYSIS_SPEC §8.5) it is called again for a position the second pass searched
+     *   again, with the deeper evaluation that replaces the first one. Plain Kotlin, on the analysis coroutine:
+     *   keep it quick.
      */
     suspend fun analyze(
         pgnText: String,
@@ -110,6 +119,7 @@ class AnalysisService(
         username: String,
         settings: EngineSettings,
         onProgress: (AnalysisProgress) -> Unit = {},
+        onPositionEvaluated: (index: Int, eval: PositionEval) -> Unit = { _, _ -> },
     ): Outcome {
         val games = try {
             PgnParser.parse(pgnText)
@@ -127,19 +137,33 @@ class AnalysisService(
         val game = games.getOrElse(gameIndex) { games[0] }
         val userColor = detectUserColor(game, username)
         val budget = settings.searchBudget
+        val auto = settings.autoDepth
+        val deepStrength = AutoDepthBudget.deep
+        val autoLog = if (auto) {
+            ", auto-depth: critical positions again at depth ${deepStrength.depth}, node budget " +
+                "${deepStrength.budget.nodes}, time cap ${deepStrength.budget.movetimeMs} ms, policy ${AdaptiveDepth.POLICY_VERSION}"
+        } else ""
         diagnostics?.log(
             TAG,
             "analysis start: depth ${settings.depth}, multipv ${settings.multiPv}, node budget ${budget.nodes}, " +
                 "time cap ${budget.movetimeMs} ms, threads ${EngineController.defaultThreads()}, " +
-                "hash ${EngineController.defaultHashMb()} MB, user side ${userColor ?: "unknown"}\n" +
+                "hash ${EngineController.defaultHashMb()} MB, user side ${userColor ?: "unknown"}$autoLog\n" +
                 formatGameForLog(game),
         )
 
-        // The budget is part of the key: a cached result is reused only under identical limits.
-        val cacheKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, budget.cacheKeyPart)
+        // The budget is part of the key: a cached result is reused only under identical limits. The first pass
+        // (every strength) is stored under [baseKey]; Auto's assembled result under its own key, which also
+        // carries the deep tier and the policy version (spec §8.5).
+        val baseKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, budget.cacheKeyPart)
+        val finalKey = if (auto) {
+            gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, AutoDepthBudget.cacheKeyPart)
+        } else baseKey
         // D2e: the eval cache has one folder per net; a result is reused only from the active net's.
-        var evals = gameRepository.loadEvalCache(cacheKey, gameRepository.currentNetPrefix())
-        if (evals != null) diagnostics?.log(TAG, "found in the eval cache (${evals.size} positions)")
+        var evals = gameRepository.loadEvalCache(finalKey, gameRepository.currentNetPrefix())
+        if (evals != null) {
+            diagnostics?.log(TAG, "found in the eval cache (${evals.size} positions)")
+            evals.forEachIndexed { i, e -> onPositionEvaluated(i, e) }
+        }
 
         if (evals == null) {
           // D2e: registered with the engine, so a net update cannot switch the net under this run (and a
@@ -173,142 +197,272 @@ class AnalysisService(
 
             val positions = plyFens(game)
             val total = positions.size
-
-            // Resume from a previous cancelled/killed run. The cache key already encodes the PGN,
-            // depth and MultiPV, so any prefix stored under it was computed with identical
-            // settings — but verify FEN alignment per index anyway rather than trusting the key,
-            // because feeding mismatched evals into the analyzer would silently produce a wrong
-            // report rather than an error.
-            val resumable = gameRepository.loadPartialEvalCache(cacheKey, runPrefix).orEmpty()
-            val computed = ArrayList<PositionEval>(total)
-                .apply { addAll(usableResumePrefix(positions, resumable)) }
-            val startIndex = computed.size
+            val expectedDeep = if (auto) AnalysisFraction.expectedDeepPositions(total) else 0
+            val bar = AnalysisFraction(
+                total = total,
+                autoDepth = auto,
+                baseTypicalNodes = budget.typicalNodes,
+                deepTypicalNodes = AutoDepthBudget.TYPICAL_DEEPENED_NODES,
+                expectedDeepPositions = expectedDeep,
+            )
             // This run's own search totals, for the time-left estimate (spec §8.4).
             var runNodes = 0L
             var runSearchMs = 0L
             var runPositions = 0
-            if (startIndex > 0) {
-                diagnostics?.log(TAG, "resuming from the checkpoint: $startIndex of $total positions already done")
-                onProgress(
-                    AnalysisProgress(
-                        phase = AnalysisPhase.ANALYZING_MOVES,
-                        currentMoveIndex = startIndex,
-                        totalMoves = total,
-                        fractionComplete = 0.3f + 0.68f * startIndex / total,
-                    )
+
+            // One engine search of [fen] at [depth] / [limits], with the "depth d of D" progress updates on top of
+            // [searching], counted into this run's totals and logged (the spec §8.1 diagnostic line).
+            suspend fun searchPosition(index: Int, fen: String, depth: Int, limits: SearchBudget, searching: AnalysisProgress): PositionEval {
+                val startedAt = nowMs()
+                var shownDepth = 0
+                val started = searching.copy(
+                    targetDepth = depth,
+                    positionStartedAtMs = startedAt,
+                    runNodes = runNodes,
+                    runSearchMs = runSearchMs,
+                    runPositionsSearched = runPositions,
                 )
+                onProgress(started)
+                engine.setPosition(fen = fen)
+                val result = engine.analyze(
+                    multiPv = settings.multiPv,
+                    depth = depth,
+                    movetimeMs = limits.movetimeMs,
+                    nodes = limits.nodes,
+                    onProgress = { p ->
+                        // One update per new depth: the screen shows "depth 15 of 18", nothing finer.
+                        if (p.depth != shownDepth) {
+                            shownDepth = p.depth
+                            onProgress(started.copy(searchDepth = p.depth))
+                        }
+                    },
+                )
+                val eval = toPositionEval(fen, result, depth)
+                val wallMs = nowMs() - startedAt
+                runNodes += result.nodes
+                runSearchMs += wallMs
+                runPositions++
+                val best = eval.best
+                diagnostics?.log(
+                    TAG,
+                    formatPositionLine(
+                        PositionLogLine(
+                            index = index,
+                            san = sanBefore(game, index),
+                            requestedDepth = depth,
+                            reachedDepth = result.depth,
+                            nodes = result.nodes,
+                            timeMs = wallMs,
+                            capped = eval.isCapped,
+                            score = scoreText(best?.scoreCp, best?.mateIn),
+                        ),
+                    ),
+                )
+                return eval
             }
 
+            // What a kill or a cancel must leave behind: the pass in progress decides (the first pass: its prefix
+            // under the base key; Auto's second pass: the assembled evaluations under the Auto key).
+            var saveCheckpoint: suspend () -> Unit = {}
+            var positionsDone: () -> Int = { 0 }
             try {
-                for ((index, fen) in positions.withIndex()) {
-                    if (index < startIndex) continue
-                    coroutineContext.ensureActive()
-                    // A checkmated or stalemated position has nothing to search. Asking the engine
-                    // anyway is pure latency at best, and the last ply of most annotated games IS
-                    // such a position, so short-circuit it here rather than paying for a search
-                    // whose answer we already know from the rules.
-                    val terminal = terminalEvalOrNull(fen, settings.depth)
-                    val san = if (index == 0) null else game.moves.getOrNull(index - 1)?.san
-                    if (terminal != null) {
-                        computed.add(terminal)
-                        val best = terminal.best
-                        diagnostics?.log(
-                            TAG,
-                            formatPositionLine(
-                                PositionLogLine(index, san, settings.depth, settings.depth, 0, 0, false, scoreText(best?.scoreCp, best?.mateIn)),
-                            ),
-                        )
-                    } else {
-                        val startedAt = nowMs()
-                        var shownDepth = 0
-                        val searching = AnalysisProgress(
-                            phase = AnalysisPhase.ANALYZING_MOVES,
-                            currentMoveIndex = index,
-                            totalMoves = total,
-                            fractionComplete = 0.3f + 0.68f * index / total,
-                            targetDepth = settings.depth,
-                            positionStartedAtMs = startedAt,
-                            runNodes = runNodes,
-                            runSearchMs = runSearchMs,
-                            runPositionsSearched = runPositions,
-                        )
-                        onProgress(searching)
-                        engine.setPosition(fen = fen)
-                        val result = engine.analyze(
-                            multiPv = settings.multiPv,
-                            depth = settings.depth,
-                            movetimeMs = budget.movetimeMs,
-                            nodes = budget.nodes,
-                            onProgress = { p ->
-                                // One update per new depth: the screen shows "depth 15 of 18", nothing finer.
-                                if (p.depth != shownDepth) {
-                                    shownDepth = p.depth
-                                    onProgress(searching.copy(searchDepth = p.depth))
-                                }
-                            },
-                        )
-                        val eval = toPositionEval(fen, result, settings.depth)
-                        computed.add(eval)
-                        val wallMs = nowMs() - startedAt
-                        runNodes += result.nodes
-                        runSearchMs += wallMs
-                        runPositions++
-                        val best = eval.best
-                        diagnostics?.log(
-                            TAG,
-                            formatPositionLine(
-                                PositionLogLine(
-                                    index = index,
-                                    san = san,
-                                    requestedDepth = settings.depth,
-                                    reachedDepth = result.depth,
-                                    nodes = result.nodes,
-                                    timeMs = wallMs,
-                                    capped = eval.isCapped,
-                                    score = scoreText(best?.scoreCp, best?.mateIn),
-                                ),
-                            ),
+                // ---- Pass 1 (every strength): every position at settings.depth with the strength's budget.
+                val cachedBase = if (auto) {
+                    gameRepository.loadEvalCache(baseKey, runPrefix)?.takeIf { usableResumePrefix(positions, it).size == total }
+                } else null
+                val base: List<PositionEval>
+                if (cachedBase != null) {
+                    // Auto's first pass IS a Standard analysis: a Standard result of this game is reused as it is.
+                    diagnostics?.log(TAG, "first pass found in the eval cache ($total positions)")
+                    cachedBase.forEachIndexed { i, e -> onPositionEvaluated(i, e) }
+                    base = cachedBase
+                } else {
+                    // Resume from a previous cancelled/killed run. The cache key already encodes the PGN,
+                    // depth and MultiPV, so any prefix stored under it was computed with identical
+                    // settings — but verify FEN alignment per index anyway rather than trusting the key,
+                    // because feeding mismatched evals into the analyzer would silently produce a wrong
+                    // report rather than an error.
+                    val resumable = gameRepository.loadPartialEvalCache(baseKey, runPrefix).orEmpty()
+                    val computed = ArrayList<PositionEval>(total)
+                        .apply { addAll(usableResumePrefix(positions, resumable)) }
+                    saveCheckpoint = { gameRepository.savePartialEvalCache(baseKey, computed, runPrefix) }
+                    positionsDone = { computed.size }
+                    computed.forEachIndexed { i, e -> onPositionEvaluated(i, e) }
+                    val startIndex = computed.size
+                    if (startIndex > 0) {
+                        diagnostics?.log(TAG, "resuming from the checkpoint: $startIndex of $total positions already done")
+                        onProgress(
+                            AnalysisProgress(
+                                phase = AnalysisPhase.ANALYZING_MOVES,
+                                currentMoveIndex = startIndex,
+                                totalMoves = total,
+                                fractionComplete = bar.firstPass(startIndex),
+                                deepPassExpected = expectedDeep,
+                            )
                         )
                     }
-                    onProgress(
-                        AnalysisProgress(
-                            phase = AnalysisPhase.ANALYZING_MOVES,
-                            currentMoveIndex = index + 1,
-                            totalMoves = total,
-                            fractionComplete = 0.3f + 0.68f * (index + 1) / total,
-                            runNodes = runNodes,
-                            runSearchMs = runSearchMs,
-                            runPositionsSearched = runPositions,
+                    for ((index, fen) in positions.withIndex()) {
+                        if (index < startIndex) continue
+                        coroutineContext.ensureActive()
+                        // A checkmated or stalemated position has nothing to search. Asking the engine
+                        // anyway is pure latency at best, and the last ply of most annotated games IS
+                        // such a position, so short-circuit it here rather than paying for a search
+                        // whose answer we already know from the rules.
+                        val terminal = terminalEvalOrNull(fen, settings.depth)
+                        val eval = if (terminal != null) {
+                            val best = terminal.best
+                            diagnostics?.log(
+                                TAG,
+                                formatPositionLine(
+                                    PositionLogLine(index, sanBefore(game, index), settings.depth, settings.depth, 0, 0, false, scoreText(best?.scoreCp, best?.mateIn)),
+                                ),
+                            )
+                            terminal
+                        } else {
+                            searchPosition(
+                                index, fen, settings.depth, budget,
+                                AnalysisProgress(
+                                    phase = AnalysisPhase.ANALYZING_MOVES,
+                                    currentMoveIndex = index,
+                                    totalMoves = total,
+                                    fractionComplete = bar.firstPass(index),
+                                    deepPassExpected = expectedDeep,
+                                ),
+                            )
+                        }
+                        computed.add(eval)
+                        onPositionEvaluated(index, eval)
+                        onProgress(
+                            AnalysisProgress(
+                                phase = AnalysisPhase.ANALYZING_MOVES,
+                                currentMoveIndex = index + 1,
+                                totalMoves = total,
+                                fractionComplete = bar.firstPass(index + 1),
+                                runNodes = runNodes,
+                                runSearchMs = runSearchMs,
+                                runPositionsSearched = runPositions,
+                                deepPassExpected = expectedDeep,
+                            )
                         )
-                    )
-                    // Checkpoint so a process kill (rather than a clean cancel) leaves the work
-                    // recoverable: Android may kill a backgrounded app during a long Deep analysis.
-                    if ((index + 1) % CHECKPOINT_EVERY_PLIES == 0) {
-                        withContext(NonCancellable) {
-                            gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
+                        // Checkpoint so a process kill (rather than a clean cancel) leaves the work
+                        // recoverable: Android may kill a backgrounded app during a long Deep analysis.
+                        if ((index + 1) % CHECKPOINT_EVERY_PLIES == 0) {
+                            withContext(NonCancellable) {
+                                gameRepository.savePartialEvalCache(baseKey, computed, runPrefix)
+                            }
                         }
                     }
+                    // The full cache supersedes the prefix; drop it so it cannot go stale. For Auto this is a
+                    // Standard result too, so a later Standard analysis of this game is instant.
+                    gameRepository.saveEvalCache(baseKey, computed, runPrefix)
+                    gameRepository.clearPartialEvalCache(baseKey, runPrefix)
+                    base = computed
+                }
+
+                // ---- Pass 2 (Auto only, spec §8.5): the critical positions again with the Deep preset's search.
+                evals = if (!auto) base else {
+                    val deepKey = gameRepository.cacheKey(pgnText, deepStrength.depth, settings.multiPv, deepStrength.budget.cacheKeyPart)
+                    val known = AutoDepthPass.knownDeepEvals(
+                        positions,
+                        deepStrength.depth,
+                        gameRepository.loadPartialEvalCache(finalKey, runPrefix),
+                        gameRepository.loadEvalCache(deepKey, runPrefix),
+                        gameRepository.loadPartialEvalCache(deepKey, runPrefix),
+                    )
+                    if (known.isNotEmpty()) {
+                        diagnostics?.log(TAG, "auto-depth: ${known.size} deep results available from the checkpoint or a Deep analysis")
+                    }
+                    val assembled = base.toMutableList()
+                    var deepDone = 0
+                    saveCheckpoint = { gameRepository.savePartialEvalCache(finalKey, assembled, runPrefix) }
+                    positionsDone = { total + deepDone }
+                    val pass = AutoDepthPass(game, openingBook(), MoveClassifier(StaticExchangeEvaluator()))
+                    val result = pass.run(
+                        base = base,
+                        known = known,
+                        search = { index, done, picked ->
+                            searchPosition(
+                                index, positions[index], deepStrength.depth, deepStrength.budget,
+                                AnalysisProgress(
+                                    phase = AnalysisPhase.ANALYZING_MOVES,
+                                    currentMoveIndex = total,
+                                    totalMoves = total,
+                                    fractionComplete = bar.secondPass(done, picked),
+                                    deepPassDone = done,
+                                    deepPassTotal = picked,
+                                ),
+                            )
+                        },
+                        onRound = { round, picks ->
+                            diagnostics?.log(
+                                TAG,
+                                "auto-depth round $round: ${picks.size} positions to search again: " +
+                                    picks.joinToString { p -> "${p.index} (${p.reasons.joinToString(", ") { it.logName }})" },
+                            )
+                        },
+                        onDeepened = { d ->
+                            assembled[d.index] = d.eval
+                            deepDone = d.done
+                            onPositionEvaluated(d.index, d.eval)
+                            val why = d.reasons.joinToString(", ") { it.logName }
+                            if (d.reused) {
+                                val best = d.eval.best
+                                diagnostics?.log(
+                                    TAG,
+                                    formatPositionLine(
+                                        PositionLogLine(
+                                            d.index, sanBefore(game, d.index), d.eval.requestedDepth ?: deepStrength.depth, d.eval.depth,
+                                            0, 0, d.eval.isCapped, scoreText(best?.scoreCp, best?.mateIn),
+                                            note = "deeper ($why), from the cache",
+                                        ),
+                                    ),
+                                )
+                            } else {
+                                diagnostics?.log(TAG, "pos ${d.index} was searched deeper ($why)")
+                            }
+                            onProgress(
+                                AnalysisProgress(
+                                    phase = AnalysisPhase.ANALYZING_MOVES,
+                                    currentMoveIndex = total,
+                                    totalMoves = total,
+                                    fractionComplete = bar.secondPass(d.done, d.picked),
+                                    runNodes = runNodes,
+                                    runSearchMs = runSearchMs,
+                                    runPositionsSearched = runPositions,
+                                    deepPassDone = d.done,
+                                    deepPassTotal = d.picked,
+                                )
+                            )
+                        },
+                        // Every position, like the first pass (spec §8.3): a kill costs at most the search in progress.
+                        checkpoint = { _ ->
+                            withContext(NonCancellable) { gameRepository.savePartialEvalCache(finalKey, assembled, runPrefix) }
+                        },
+                    )
+                    diagnostics?.log(
+                        TAG,
+                        "auto-depth: ${result.deepened.size} of $total positions searched again in ${result.rounds} rounds " +
+                            "(${result.deepened.count { it.reused }} from the cache)",
+                    )
+                    result.evals
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // Persist what was computed before giving up. NonCancellable is required: this
                 // coroutine is already cancelled, so an ordinary suspend call here would throw
                 // immediately and we would lose the very work we are trying to save.
-                withContext(NonCancellable) {
-                    gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
-                }
-                diagnostics?.log(TAG, "cancelled after ${computed.size} of $total positions (checkpoint saved)")
+                withContext(NonCancellable) { saveCheckpoint() }
+                diagnostics?.log(TAG, "cancelled after ${positionsDone()} positions of $total (checkpoint saved)")
                 return Outcome.Cancelled
             } catch (e: Exception) {
-                withContext(NonCancellable) {
-                    gameRepository.savePartialEvalCache(cacheKey, computed, runPrefix)
-                }
-                diagnostics?.error(TAG, "engine failed at position ${computed.size} of $total", e)
+                withContext(NonCancellable) { saveCheckpoint() }
+                diagnostics?.error(TAG, "engine failed after ${positionsDone()} positions of $total", e)
                 return Outcome.EngineError(Failure.ANALYSIS, e.message)
             }
-            evals = computed
-            gameRepository.saveEvalCache(cacheKey, computed, runPrefix)
-            // The full cache supersedes the prefix; drop it so it cannot go stale.
-            gameRepository.clearPartialEvalCache(cacheKey, runPrefix)
+            if (auto) {
+                gameRepository.saveEvalCache(finalKey, checkNotNull(evals), runPrefix)
+                // The full cache supersedes the Auto checkpoint; drop it so it cannot go stale.
+                gameRepository.clearPartialEvalCache(finalKey, runPrefix)
+            }
           } finally {
             engineController.endAnalysis()
           }
@@ -334,9 +488,13 @@ class AnalysisService(
 
         onProgress(AnalysisProgress(phase = AnalysisPhase.DONE, fractionComplete = 1f))
         val capped = allEvals.count { it.isCapped }
-        diagnostics?.log(TAG, "analysis done: ${allEvals.size} positions, $capped capped")
+        val deeper = if (auto) allEvals.count { it.requestedDepth == deepStrength.depth } else 0
+        diagnostics?.log(TAG, "analysis done: ${allEvals.size} positions, $capped capped" + (if (auto) ", $deeper searched deeper" else ""))
         return Outcome.Success(game, report, userColor, otherGamesInFile = games.size - 1, cappedPositions = capped)
     }
+
+    /** The SAN of the move that led to position [index], null for the start position. */
+    private fun sanBefore(game: PgnGame, index: Int): String? = if (index == 0) null else game.moves.getOrNull(index - 1)?.san
 
     /** FEN before ply 1, FEN after each subsequent ply — i.e. `moves.size + 1` positions. */
     private fun plyFens(game: PgnGame): List<String> {

@@ -251,7 +251,7 @@ private fun strengthLabelRes(strength: AnalysisStrength): Int = when (strength.n
     "QUICK" -> R.string.settings_depth_quick
     "STANDARD" -> R.string.settings_depth_standard
     "DEEP" -> R.string.settings_depth_deep
-    else -> R.string.review_options_strength_auto
+    else -> R.string.settings_depth_auto
 }
 
 @StringRes
@@ -259,7 +259,7 @@ private fun strengthHintRes(strength: AnalysisStrength): Int = when (strength.na
     "QUICK" -> R.string.reanalyse_hint_quick
     "STANDARD" -> R.string.reanalyse_hint_standard
     "DEEP" -> R.string.reanalyse_hint_deep
-    else -> R.string.review_options_hint_auto
+    else -> R.string.reanalyse_hint_auto
 }
 
 /**

@@ -41,7 +41,9 @@ import net.palaya.chessanalyzer.data.mapper.toUiReport
 import net.palaya.chessanalyzer.rephrase.RephraseService
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
-import net.palaya.chessanalyzer.ui.model.gameAnalysisDepth
+import net.palaya.chessanalyzer.ui.model.AnalysisLevel
+import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
+import net.palaya.chessanalyzer.ui.model.gameAnalysisLevel
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameReport
@@ -241,11 +243,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     val evalsSoFar: StateFlow<List<PositionEval?>> = _evalsSoFar
 
     /**
-     * One position's evaluation from the engine stage. TODO(RF merge): pass `onPositionEvaluated = ::recordPositionEval`
-     * to `analysisService.analyze` once the auto-depth branch adds that parameter; until then [evalsSoFar] is filled only
-     * when the run ends (from the finished report is not possible either: the evaluations stay inside the service).
+     * One position's final evaluation from the engine stage (`AnalysisService.analyze`'s `onPositionEvaluated`: also for
+     * cache and checkpoint hits, and again when Auto-depth's deeper result replaces the first one).
      */
-    @Suppress("unused")
     private fun recordPositionEval(index: Int, eval: PositionEval) {
         val current = _evalsSoFar.value
         val size = maxOf(current.size, index + 1)
@@ -419,10 +419,10 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     private val pendingSideByGameId = mutableMapOf<String, SideChoice>()
 
     /**
-     * The depth a registered game is analysed at when it is not the Settings default (A4): the strength picked on the
-     * Review options screen. Absent = the strength the game was analysed with, else the Settings default.
+     * The level (depth, Auto or not) a registered game is analysed at when it is not the Settings default (A4): the
+     * strength picked on the Review options screen. Absent = the stored game's level, else the Settings default.
      */
-    private val pendingDepthByGameId = mutableMapOf<String, Int>()
+    private val pendingLevelByGameId = mutableMapOf<String, AnalysisLevel>()
 
     private var analysisJob: Job? = null
     private val idCounter = AtomicInteger(1)
@@ -452,6 +452,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     username = current.username,
                     startedAtMs = System.currentTimeMillis(),
                     initialSide = initialSide.storedName,
+                    autoDepth = current.autoDepth,
                 ),
             )
             diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "game $gameId kept until setup has installed the engine data")
@@ -507,6 +508,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val s = app.settingsRepository.current()
         return ReviewDefaults(
             depth = s.depth,
+            autoDepth = s.autoDepth,
             naturalWording = app.settingsRepository.rephraseEnabled.first(),
             prepareVideo = app.reviewPreferences.current().prepareVideoByDefault,
             voice = app.narrationSettingsRepository.current(),
@@ -578,7 +580,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     fun startReview(gameId: String, options: ReviewOptions) {
         pendingOptionsByGameId[gameId] = options
-        pendingDepthByGameId[gameId] = options.strength.depth
+        pendingLevelByGameId[gameId] = AnalysisLevel.of(options.strength)
         // The options' side is the user's answer; the side the game opened with must not come back.
         if (options.side != SideChoice.UNKNOWN) pendingSideByGameId.remove(gameId)
         games[gameId]?.pgnText?.takeIf { it.isNotBlank() }?.let { pendingPgnByGameId[gameId] = it }
@@ -613,7 +615,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         pendingPgnByGameId.remove(gameId)
         pendingSideByGameId.remove(gameId)
         pendingOptionsByGameId.remove(gameId)
-        pendingDepthByGameId.remove(gameId)
+        pendingLevelByGameId.remove(gameId)
     }
 
     fun setShowReviewOptionsBeforeEachReview(show: Boolean) {
@@ -644,15 +646,18 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             // The persisted settings, not the eagerly-seeded StateFlow: a fresh process serves the
             // defaults until DataStore's first emission, and the depth decides the whole analysis.
             val current = app.settingsRepository.current()
+            // A4: a re-analyse's pick, else the strength a reopened game was analysed with (an Auto game stays
+            // Auto), else the Settings default.
+            val level = gameAnalysisLevel(
+                explicit = pendingLevelByGameId[gameId],
+                stored = app.gameRepository.load(gameId)?.let { AnalysisLevel(it.depth, it.autoDepth) },
+                settingsDefault = AnalysisLevel(current.depth, current.autoDepth),
+            )
             return PendingAnalysisStore.Request(
                 gameId = gameId,
                 pgnText = text,
-                // A4/RF: the Review options' pick, else the strength a reopened game was analysed with, else the default.
-                depth = gameAnalysisDepth(
-                    explicit = pendingDepthByGameId[gameId],
-                    stored = app.gameRepository.load(gameId)?.depth,
-                    settingsDefault = current.depth,
-                ),
+                depth = level.depth,
+                autoDepth = level.autoDepth,
                 multiPv = current.multiPv,
                 username = current.username,
                 startedAtMs = System.currentTimeMillis(),
@@ -815,6 +820,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 depth = request.depth,
                 multiPv = request.multiPv,
                 username = request.username,
+                autoDepth = request.autoDepth,
             )
             val (options, fullReview) = optionsForRun(gameId, request)
             gameOptions[gameId] = options
@@ -848,12 +854,17 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             // The tactic significance gate (ANALYSIS_SPEC §9.6) has to be *correct*, so read the
             // persisted threshold rather than the eagerly-seeded StateFlow (see CLAUDE.md).
             val tacticThresholdCp = currentSettings.narrationThresholdCp
-            val timeLeft = AnalysisTimeLeftTracker(currentSettings.searchBudget.typicalNodes)
+            val timeLeft = AnalysisTimeLeftTracker(
+                typicalNodes = currentSettings.searchBudget.typicalNodes,
+                // Auto-depth's second pass (ANALYSIS_SPEC §8.5) is counted in its own, dearer positions.
+                deepTypicalNodes = if (currentSettings.autoDepth) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+            )
             var lastEngine = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
             val outcome = analysisService.analyze(
                 pgnText = pgnText,
                 username = currentSettings.username,
                 settings = currentSettings,
+                onPositionEvaluated = ::recordPositionEval,
                 onProgress = { p ->
                     val shown = timeLeft.onProgress(p)
                     val withTime = p.copy(runStartedAtMs = runStartedAt, timeLeft = shown)
@@ -901,6 +912,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                         moves = moveRecords,
                         pgnText = pgnText,
                         analysisDepth = currentSettings.depth,
+                        autoDepth = currentSettings.autoDepth,
                         multiPv = currentSettings.multiPv,
                         sequences = outcome.report.annotations.toSequenceViews(tacticThresholdCp),
                     )
@@ -925,10 +937,11 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                         depth = currentSettings.depth,
                         multiPv = currentSettings.multiPv,
                         userColorName = side.storedName,
+                        autoDepth = currentSettings.autoDepth,
                     )
                     // A full review stores its options with the game; a plain reopen keeps what the game had.
                     val toStore = if (fullReview) {
-                        fresh.withReviewOptions(options.copy(side = side)).copy(depth = currentSettings.depth)
+                        fresh.withReviewOptions(options.copy(side = side)).copy(depth = currentSettings.depth, autoDepth = currentSettings.autoDepth)
                     } else {
                         fresh.copy(
                             voiceProvider = previous?.voiceProvider,
@@ -943,7 +956,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     withContext(Dispatchers.IO) { pendingStore.clear(gameId) }
                     app.gameRepository.clearPendingOptions(gameId)
                     pendingOptionsByGameId.remove(gameId)
-                    pendingDepthByGameId.remove(gameId)
+                    pendingLevelByGameId.remove(gameId)
                     activeRequest = null
                     refreshRecentGames()
                     _pasteDraft.value = ""
@@ -1052,7 +1065,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         val gameId = request?.gameId
         if (gameId != null) {
             pendingOptionsByGameId.remove(gameId)
-            pendingDepthByGameId.remove(gameId)
+            pendingLevelByGameId.remove(gameId)
         }
         viewModelScope.launch(Dispatchers.IO) {
             pendingStore.clear(gameId)
@@ -1240,7 +1253,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             solvedPuzzlePlies.remove(gameId)
             pendingPgnByGameId.remove(gameId)
             pendingSideByGameId.remove(gameId)
-            pendingDepthByGameId.remove(gameId)
+            pendingLevelByGameId.remove(gameId)
             pendingOptionsByGameId.remove(gameId)
             preparedNarration.removeAll { it.startsWith("$gameId|") }
             diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "game $gameId deleted by the user")

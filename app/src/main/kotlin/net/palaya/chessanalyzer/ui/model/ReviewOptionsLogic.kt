@@ -34,6 +34,8 @@ data class ReviewOptions(
 /** What a game has stored; null = never stored (a game from before this screen, or a new import). */
 data class StoredReviewOptions(
     val depth: Int? = null,
+    /** Analysed with Auto-depth (ANALYSIS_SPEC §8.5); [depth] is then its first pass's depth. */
+    val autoDepth: Boolean = false,
     val side: SideChoice = SideChoice.UNKNOWN,
     val naturalWording: Boolean? = null,
     val prepareVideo: Boolean? = null,
@@ -45,6 +47,8 @@ data class StoredReviewOptions(
 /** The Settings values, which are the defaults for a game with nothing stored. */
 data class ReviewDefaults(
     val depth: Int,
+    /** Settings › Analysis strength is Auto. */
+    val autoDepth: Boolean = false,
     val naturalWording: Boolean,
     val prepareVideo: Boolean,
     val voice: NarrationVoiceSettings,
@@ -53,11 +57,11 @@ data class ReviewDefaults(
 
 /**
  * The preset for a stored depth: the exact preset, else the smallest preset at or above it (an old custom depth), else
- * the deepest. Presets with no real depth (0 or less) are never picked for a depth.
+ * the deepest. Auto is never picked for a depth (it is a flag next to its first pass's depth, see [prefillReviewOptions]).
  */
 fun strengthForDepth(depth: Int): AnalysisStrength {
     AnalysisStrength.fromDepth(depth)?.let { return it }
-    val real = AnalysisStrength.entries.filter { it.depth > 0 }.sortedBy { it.depth }
+    val real = AnalysisStrength.entries.filter { it.depth > 0 && !it.autoDepth }.sortedBy { it.depth }
     return real.firstOrNull { depth <= it.depth } ?: real.lastOrNull() ?: AnalysisStrength.entries.first()
 }
 
@@ -75,7 +79,11 @@ fun prefillReviewOptions(
     val s = stored ?: StoredReviewOptions()
     val voice = s.voice ?: defaults.voice.provider
     return ReviewOptions(
-        strength = strengthForDepth(s.depth ?: defaults.depth),
+        strength = when {
+            s.depth != null -> if (s.autoDepth) AnalysisStrength.AUTO else strengthForDepth(s.depth)
+            defaults.autoDepth -> AnalysisStrength.AUTO
+            else -> strengthForDepth(defaults.depth)
+        },
         side = resolveSide(stored = s.side, detected = detectedSide, initial = initialSide),
         naturalWording = s.naturalWording ?: defaults.naturalWording,
         prepareVideo = s.prepareVideo ?: defaults.prepareVideo,

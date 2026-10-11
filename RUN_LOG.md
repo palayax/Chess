@@ -4820,3 +4820,90 @@ a delete.
   merge must carry the strength instead (`ReviewOptions.strength` is already the enum).
 - Device: the recording stage on a Pixel 8 (Kokoro + the freed LLM), the inline preparation after a voice change, the
   Review options screen at font 2.0 and in landscape, TalkBack on the checklist and the library menu.
+---
+
+## Auto-depth (2026-10-11): deeper on the critical moves
+
+Worktree `.claude/worktrees/autodepth`, branch `autodepth` from main `8ef79e1`. Owner's request: "Need Auto-depth -
+different moves analyzed with different depth based on complexity and Engine scoring". Spec: `docs/ANALYSIS_SPEC.md`
+§8.5 (new), §1.2, §8, §8.3, §8.4 amended. Host side done and measured; **no emulator or connected test was run** (by
+instruction; `AutoDepthInstrumentedTest` is written and compiles).
+
+### What was built
+- **Policy** `core/.../analysis/AdaptiveDepth.kt` (pure, deterministic): from the first-pass evaluations it picks the
+  positions to search again, both sides of every critical move. Rules BOUNDARY (loss within 25% of a §2 boundary, or a
+  best move's line-1/line-2 gap within 3 points of the Great gap), MATE, MISTAKE (Inaccuracy or worse), SWING (8 win%
+  points), UNSTABLE (round 2 on: a deep result moved 5 points). Forced/book moves and terminal positions never. Cap 25%
+  of the searchable positions, ranked BOUNDARY > MATE > MISTAKE > SWING > UNSTABLE; up to 3 rounds; picks returned in
+  game order. GREAT and CLOSE exist but are off (measured: cost, no agreement). `AdaptiveDepthTest` 18 tests.
+- **Strength** `AnalysisStrength.AUTO` = depth 14 + `autoDepth`: persisted in `EngineSettings`/DataStore
+  (`auto_depth`), `PendingAnalysisStore.Request.autoDepth` (the resume keeps it) and `GameRepository.StoredGame.autoDepth`,
+  all reading old files/stores as before. `AnalysisLevel` + `gameAnalysisLevel` replace `gameAnalysisDepth`, so a reopened
+  Auto game stays Auto. Own eval-cache key (`AutoDepthBudget.cacheKeyPart`: both tiers + `POLICY_VERSION`).
+- **AnalysisService**: pass 1 is a plain Standard analysis stored under the Standard key (reused if present); pass 2
+  (`data/AutoDepthPass.kt`, host-tested in `AutoDepthPassTest`) runs the rounds, searches each pick at Deep, checkpoints
+  the assembled evals under the Auto key after every position, resumes by replaying the deterministic rounds and taking
+  known deep results (Auto checkpoint, Deep cache, Deep checkpoint; same FEN and requestedDepth 18 only), logs each round
+  with reasons and the totals. New `onPositionEvaluated(index, eval)` callback (cache, checkpoint and replacement calls).
+  `AnalysisFraction` (bar shared by the passes' expected nodes, only rises, never full early) and
+  `AnalysisTimeLeftTracker` (counts the deep positions left) cover the second pass; the status line says
+  "Taking a deeper look at the critical moves: N of M". Engine guards untouched.
+- **UI** (minimal, the review-flow agent owns these files): Settings › Analysis strength gains "Auto"; the Summary's
+  re-analyse chooser lists it (scrollable now, four rows) with the hint "Standard, plus Deep on the critical moves.
+  Faster than Deep."; NavHost passes `analysisAutoDepth`; `AnalysisProgressScreen.statusText` shows the second-pass line.
+- **Chess.com reference** (owner's rule): Game Review offers named strength levels with a one-line description, the
+  current one marked, rather than depth numbers (as recorded in A4). Taken: Auto as one more named level in the same
+  segmented control and chooser, with a one-line hint in our own words; the progress pattern (one bar, one short status
+  line) is F1's. Not taken: any wording or depth figures.
+
+### Measurement (host; harness `desktop/src/test/.../bench/`, run with `java` outside Gradle)
+Stockfish 19, Threads 4, Hash 96, MultiPV 3, the app's `go depth/nodes/movetime` and ConsistentLines, `ucinewgame` per game.
+Calibration games (F1 set, 230 positions / 186 judged moves) and four held-out Famous games (287 / 244). Recorded: Quick,
+Standard, Deep, a second Deep run (calibration), and real Auto runs (second pass on a fresh engine, first pass from the
+Standard recording). The host was shared with another agent's 12-14-engine job (0.15-0.3 M nodes/s per engine), so the
+time caps were widened 4x (node budgets unchanged); that job also killed every `stockfish*` process once mid-run, after
+which the bench used a renamed copy of the binary and a per-position checkpoint.
+
+| Calibration | vs Deep run 1 | vs Deep run 2 | Nodes | vs Deep run 1 | Deepened |
+|---|---|---|---|---|---|
+| Quick | 72.0% | 68.8% | 115 M | 9% | - |
+| Standard | 74.7% | 75.3% | 527 M | 40% | - |
+| **Auto** | 75.3% | **80.6%** | 852 M | **64%** | 24% |
+| Deep run 2 vs run 1 (noise floor) | 80.1% | - | 1,688 M | 127% | all |
+| Auto, Quick first pass + 60% cap (rejected) | 76.3% | 76.3% | 1,412 M | 106% | 55% |
+
+| Held-out (one Deep run) | vs Deep | Nodes | vs Deep | Deepened |
+|---|---|---|---|---|
+| Quick | 77.0% | 154 M | 7% | - |
+| Standard | 75.4% | 368 M | 16% | - |
+| **Auto** | 74.6% | 752 M | 34% | 22% |
+| Auto, Quick first pass (rejected) | 70.5% | 1,522 M | 68% | 46% |
+
+**Finding:** two Deep runs agree on only 80% of the judged moves (4-thread Stockfish is not repeatable), so the room above
+Standard is about 5 points. Auto costs clearly less than Deep (56-64% of a Deep run on the calibration games, 34% held
+out; about 1.6x Standard) but its agreement with Deep is within the noise of Standard's (+5.3 and +0.6 points against the
+two Deep runs, -0.8 held out). The tuning path is in the spec §8.5.2/§8.5.3: a Standard first pass with uncapped rules
+cost 80-90% of Deep; a Quick first pass deepened 55% of positions, cost about as much as Deep and agreed less on the
+held-out games; GREAT and CLOSE cost about 10% of Deep for nothing. Early "far better" numbers (91%) came from a
+simulation that copied a Deep run's evaluations into Auto and scored against the same run; they are not used.
+
+### Gate (counts from the XML)
+`:core:test` **612 / 0 failed / 0 skipped** (`AdaptiveDepthTest` 18); `:app:testDebugUnitTest` **635 / 0 / 0** (new
+`AutoDepthPassTest` 5, `AnalysisFractionTest` 5, plus Auto cases in `GameStrengthLogicTest`, `SearchBudgetTest`,
+`SettingsLogicTest`, `AnalysisTimeLeftTest`, `PendingAnalysisStoreTest`, `GameRepositoryStrengthTest`,
+`DiagnosticFormatTest`); `:app:compileDebugKotlin`, `:app:compileDebugAndroidTestKotlin`, `:desktop:testClasses` OK;
+`:app:lintDebug` (run on its own) **0 errors, 72 warnings**, none in a file or string this change touched. No `assumeTrue`.
+
+### Recommendation on the default
+Do **not** make Auto the default on these numbers: it is not shown to agree with Deep better than Standard (the
+difference is inside the Deep-vs-Deep noise), and it costs about 1.6x Standard. It is a reasonable middle option for a
+user who wants Deep's look at the critical moves at 34-64% of Deep's cost. A sharper verdict needs a less noisy reference
+(single-threaded, deterministic Deep runs) and more games; the bench supports both (`BenchEngine(threads = 1)`).
+
+### Deviations / open
+1. No device run (instruction). `AutoDepthInstrumentedTest` (Scholar's mate at Auto: both caches, the callback, the bar)
+   is written and compiles; run it on chess36/chess34 after the merge.
+2. The bench lives in `desktop/src/test` (compiled by `:desktop:testClasses`, not run by `:desktop:test`); its records are
+   in the session scratchpad, not committed.
+3. `TYPICAL_DEEPENED_NODES` (6 M) and `EXPECTED_DEEP_FRACTION` (0.24) are host means; the time-left rule that lets the
+   number rise covers a heavier game.

@@ -72,7 +72,22 @@ class ReviewOptionsLogicTest {
         assertEquals(AnalysisStrength.STANDARD, strengthForDepth(13))
         assertEquals(AnalysisStrength.DEEP, strengthForDepth(16))
         assertEquals(AnalysisStrength.DEEP, strengthForDepth(30))
-        AnalysisStrength.entries.filter { it.depth > 0 }.forEach { assertEquals(it, strengthForDepth(it.depth)) }
+        AnalysisStrength.entries.filter { !it.autoDepth }.forEach { assertEquals(it, strengthForDepth(it.depth)) }
+    }
+
+    @Test
+    fun autoIsCarriedByItsFlagFromTheGameOrTheDefault() {
+        val defaults = ReviewDefaults(
+            depth = 14, autoDepth = true, naturalWording = false, prepareVideo = false,
+            voice = NarrationVoiceSettings(), pace = VideoPace.DEFAULT,
+        )
+        // A new game takes the Settings default, Auto.
+        assertEquals(AnalysisStrength.AUTO, prefillReviewOptions(null, defaults).strength)
+        // A game analysed at Standard (depth 14, no flag) stays Standard although the default is Auto.
+        assertEquals(AnalysisStrength.STANDARD, prefillReviewOptions(StoredReviewOptions(depth = 14), defaults).strength)
+        // A game analysed at Auto stays Auto under any default.
+        val standardDefaults = defaults.copy(autoDepth = false)
+        assertEquals(AnalysisStrength.AUTO, prefillReviewOptions(StoredReviewOptions(depth = 14, autoDepth = true), standardDefaults).strength)
     }
 
     @Test

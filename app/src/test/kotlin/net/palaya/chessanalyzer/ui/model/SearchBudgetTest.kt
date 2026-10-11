@@ -26,7 +26,8 @@ class SearchBudgetTest {
 
     @Test
     fun aStrongerStrengthNeverGetsLessRoom() {
-        val budgets = AnalysisStrength.entries.sortedBy { it.depth }.map { it.budget }
+        // Auto has no budget of its own: its passes are Standard's and Deep's (spec §8.5, the test below).
+        val budgets = AnalysisStrength.entries.filter { !it.autoDepth }.sortedBy { it.depth }.map { it.budget }
         for ((weaker, stronger) in budgets.zipWithNext()) {
             assertTrue("$weaker vs $stronger", stronger.nodes > weaker.nodes)
             assertTrue("$weaker vs $stronger", stronger.movetimeMs >= weaker.movetimeMs)
@@ -62,6 +63,31 @@ class SearchBudgetTest {
         assertEquals(AnalysisStrength.STANDARD.budget, SearchBudget.forDepth(13))
         assertEquals(AnalysisStrength.DEEP.budget, SearchBudget.forDepth(16))
         assertEquals(AnalysisStrength.DEEP.budget, SearchBudget.forDepth(24))
+    }
+
+    @Test
+    fun autoSearchesWithStandardsBudgetFirstAndDeepsBudgetOnTheCriticalPositions() {
+        assertEquals(AnalysisStrength.STANDARD.budget, AnalysisStrength.AUTO.budget)
+        assertEquals(AnalysisStrength.STANDARD.budget, EngineSettings(depth = 14, autoDepth = true).searchBudget)
+        assertEquals(AnalysisStrength.STANDARD, AutoDepthBudget.base)
+        assertEquals(AnalysisStrength.DEEP, AutoDepthBudget.deep)
+        // An old custom depth never maps to Auto.
+        assertEquals(AnalysisStrength.STANDARD.budget, SearchBudget.forDepth(14))
+    }
+
+    @Test
+    fun autosCacheKeyDiffersFromEveryFixedStrengthAndCarriesBothTiersAndThePolicyVersion() {
+        val auto = AutoDepthBudget.cacheKeyPart
+        for (s in AnalysisStrength.entries.filter { !it.autoDepth }) assertNotEquals(s.budget.cacheKeyPart, auto)
+        assertTrue(auto, auto.contains(AnalysisStrength.STANDARD.budget.cacheKeyPart))
+        assertTrue(auto, auto.contains(AnalysisStrength.DEEP.budget.cacheKeyPart))
+        assertTrue(auto, auto.startsWith("auto${net.palaya.chessanalyzer.core.analysis.AdaptiveDepth.POLICY_VERSION}:"))
+    }
+
+    @Test
+    fun autosTypicalDeepenedNodesFitTheDeepBudget() {
+        assertTrue(AutoDepthBudget.TYPICAL_DEEPENED_NODES in 1 until AnalysisStrength.DEEP.budget.nodes)
+        assertTrue(AutoDepthBudget.EXPECTED_DEEP_FRACTION > 0.0 && AutoDepthBudget.EXPECTED_DEEP_FRACTION < 1.0)
     }
 
     @Test
