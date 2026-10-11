@@ -61,7 +61,8 @@ class AdaptiveDepthTest {
         current: List<PositionEval> = base,
         deepened: Set<Int> = emptySet(),
         round: Int = 1,
-        config: Config = Config(),
+        // The 25% cap would hide most rules in a 9-position game; the cap has its own tests.
+        config: Config = Config(maxFraction = 1.0),
         book: OpeningBook? = null,
     ) = AdaptiveDepth.plan(game, base, current, deepened, round, book, classifier, config)
 
@@ -91,10 +92,10 @@ class AdaptiveDepthTest {
         val e = evals(quiet, cp)
         val swing = WinProbability.winPercentForColor(e[3], Color.WHITE) - WinProbability.winPercentForColor(e[2], Color.WHITE)
         assertTrue("swing $swing", swing in 15.0..17.0)
-        val at = plan(quiet, e, config = Config(swingWin = swing - 0.01))
+        val at = plan(quiet, e, config = Config(swingWin = swing - 0.01, maxFraction = 1.0))
         assertEquals(listOf(2, 3), at.map { it.index })
         assertEquals(setOf(Reason.SWING), at.first().reasons)
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(swingWin = swing + 0.01)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(swingWin = swing + 0.01, maxFraction = 1.0)))
     }
 
     @Test
@@ -113,7 +114,7 @@ class AdaptiveDepthTest {
         assertTrue(lossOf(e2, 3, Color.WHITE) in 2.6..3.7)
         assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e2))
         // Margin 0 switches the rule off.
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(boundaryMargin = 0.0)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(boundaryMargin = 0.0, maxFraction = 1.0)))
     }
 
     @Test
@@ -121,7 +122,7 @@ class AdaptiveDepthTest {
         // A gap of about 32 win%: far from the 10-point boundary. The GREAT rule was measured and is off (spec §8.5).
         val e = evals(quiet, flat(quiet), secondGapCp = mapOf(4 to 400))
         assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e))
-        val picks = plan(quiet, e, config = Config(rules = AdaptiveDepth.DEFAULT_RULES + Reason.GREAT))
+        val picks = plan(quiet, e, config = Config(rules = AdaptiveDepth.DEFAULT_RULES + Reason.GREAT, maxFraction = 1.0))
         assertEquals(listOf(4, 5), picks.map { it.index })
         assertEquals(setOf(Reason.GREAT), picks.first().reasons)
     }
@@ -129,7 +130,7 @@ class AdaptiveDepthTest {
     @Test
     fun theDefaultRulesAreTheMeasuredOnes() {
         assertEquals(setOf(Reason.MISTAKE, Reason.MATE, Reason.SWING, Reason.UNSTABLE, Reason.BOUNDARY), AdaptiveDepth.DEFAULT_RULES)
-        assertEquals(0.6, Config().maxFraction, 0.0)
+        assertEquals(0.25, Config().maxFraction, 0.0)
         assertEquals(Reason.BOUNDARY, Config().priority.first())
     }
 
@@ -142,7 +143,7 @@ class AdaptiveDepthTest {
         val picks = plan(quiet, e)
         assertEquals(listOf(4, 5), picks.map { it.index })
         assertEquals(setOf(Reason.BOUNDARY), picks.first().reasons)
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(greatGapMarginWin = (10.0 - gap) - 0.01)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(greatGapMarginWin = (10.0 - gap) - 0.01, maxFraction = 1.0)))
     }
 
     @Test
@@ -215,10 +216,12 @@ class AdaptiveDepthTest {
         // A boundary loss on 2.Nf3 (ply 3) and a mistake on 4.c3 (ply 7).
         val cp = flat(quiet).toMutableList().also { for (i in 3..8) it[i] = -29; it[7] = -250; it[8] = -250 }
         val e = evals(quiet, cp, best = mapOf(2 to "f1c4", 6 to "d2d3"))
-        val picks = plan(quiet, e)
-        assertEquals(listOf(6, 7), picks.take(2).map { it.index })
+        // Room for one pair: the mistake (also near the 20 boundary, with the larger swing) gets it.
+        val picks = plan(quiet, e, config = Config(maxFraction = 0.25))
+        assertEquals(listOf(6, 7), picks.map { it.index })
         assertTrue(Reason.MISTAKE in picks[0].reasons)
-        assertTrue(picks.drop(2).map { it.index }.containsAll(listOf(2, 3)))
+        // With room for both, they come back in game order.
+        assertEquals(listOf(2, 3, 6, 7), plan(quiet, e).map { it.index })
     }
 
     @Test
@@ -232,14 +235,14 @@ class AdaptiveDepthTest {
         assertEquals(listOf(2, 4), picks.map { it.index }.sorted())
         assertTrue(picks.all { it.reasons == setOf(Reason.UNSTABLE) })
         // Below the threshold nothing moves.
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, base, current, setOf(3), 2, Config(unstableWin = moved + 0.01)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, base, current, setOf(3), 2, Config(unstableWin = moved + 0.01, maxFraction = 1.0)))
     }
 
     @Test
     fun aDeepenedPositionIsNeverPickedAgain() {
         val cp = flat(quiet).toMutableList().also { for (i in 3..8) it[i] = -150 }
         val e = evals(quiet, cp, best = mapOf(2 to "f1c4"))
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, deepened = setOf(2, 3), round = 2, config = Config(unstableWin = 101.0)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, deepened = setOf(2, 3), round = 2, config = Config(unstableWin = 101.0, maxFraction = 1.0)))
     }
 
     @Test
@@ -251,7 +254,7 @@ class AdaptiveDepthTest {
         assertEquals((0..8).toList(), picks.map { it.index }.sorted())
         assertTrue(picks.all { Reason.CLOSE in it.reasons })
         // Not in the rule set: off even with a gap.
-        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(closeGapWin = 2.0)))
+        assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, e, config = Config(closeGapWin = 2.0, maxFraction = 1.0)))
         // A decided position does not count.
         val won = evals(quiet, flat(quiet, cp = 900))
         assertEquals(emptyList<AdaptiveDepth.Deepening>(), plan(quiet, won, config = on))

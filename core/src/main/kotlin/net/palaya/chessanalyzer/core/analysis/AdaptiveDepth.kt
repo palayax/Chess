@@ -67,7 +67,7 @@ object AdaptiveDepth {
         /** UNSTABLE: |deep White win% − base White win%| on a deepened position. */
         val unstableWin: Double = 5.0,
         /** At most this share of the searchable positions is deepened in total (a safety net: Auto stays below Deep). */
-        val maxFraction: Double = 0.6,
+        val maxFraction: Double = 0.25,
         /** Rounds of picking (round 1 reads only the base evaluations). */
         val maxRounds: Int = 3,
         /**
@@ -95,7 +95,8 @@ object AdaptiveDepth {
     private const val GREAT_MAX_LOSS = 2.0
 
     /**
-     * The positions to deepen in [round] (1-based), best first by priority, then in game order.
+     * The positions to deepen in [round] (1-based), in game order. Which ones, when the cap is reached, is decided by
+     * [Config.priority].
      *
      * @param base the first-pass evaluations, one per position (`game.moves.size + 1`).
      * @param current the evaluations so far: [base] with every deepened position replaced (equal to [base] in round 1).
@@ -166,7 +167,9 @@ object AdaptiveDepth {
                 set += c.reasons
             }
         }
-        return picked.map { Deepening(it, Tier.DEEP, wanted.getValue(it).toSortedSet(compareBy { r -> r.ordinal })) }
+        // In game order: the deep searches then run like a Deep analysis, each next to its neighbour (the hash holds
+        // what the previous search found about the position after it).
+        return picked.sorted().map { Deepening(it, Tier.DEEP, wanted.getValue(it).toSortedSet(compareBy { r -> r.ordinal })) }
     }
 
     /**

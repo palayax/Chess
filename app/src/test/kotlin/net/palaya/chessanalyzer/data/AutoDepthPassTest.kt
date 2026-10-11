@@ -49,7 +49,8 @@ class AutoDepthPassTest {
         lines = base[i].lines.map { it.copy(depth = 18) }, depth = 18, requestedDepth = 18,
     )
 
-    private fun pass() = AutoDepthPass(game, null, MoveClassifier(StaticExchangeEvaluator()))
+    // No cap: a 9-position game would leave room for one pair under the default 25% (the cap is tested in :core).
+    private fun pass() = AutoDepthPass(game, null, MoveClassifier(StaticExchangeEvaluator()), AdaptiveDepth.Config(maxFraction = 1.0))
 
     @Test
     fun thePickedPositionsAreReplacedByTheirDeepResultAndNothingElse() = runBlocking {

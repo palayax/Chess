@@ -36,12 +36,12 @@ class SettingsLogicTest {
 
     @Test
     fun autoIsItsBaseDepthPlusTheFlagAndNeverReadFromADepthAlone() {
-        assertEquals(AnalysisStrength.QUICK.depth, AnalysisStrength.AUTO.depth)
+        assertEquals(AnalysisStrength.STANDARD.depth, AnalysisStrength.AUTO.depth)
         assertEquals(AnalysisStrength.AUTO, AnalysisStrength.of(AnalysisStrength.AUTO.depth, autoDepth = true))
-        assertEquals(AnalysisStrength.AUTO, EngineSettings(depth = 12, autoDepth = true).strength)
+        assertEquals(AnalysisStrength.AUTO, EngineSettings(depth = 14, autoDepth = true).strength)
         // A stored depth without the flag (every store written before Auto) reads exactly as before.
-        assertEquals(AnalysisStrength.QUICK, AnalysisStrength.fromDepth(12))
-        assertEquals(AnalysisStrength.QUICK, EngineSettings(depth = 12).strength)
+        assertEquals(AnalysisStrength.STANDARD, AnalysisStrength.fromDepth(14))
+        assertEquals(AnalysisStrength.STANDARD, EngineSettings(depth = 14).strength)
         assertNull(EngineSettings(depth = 16).strength)
         assertEquals(false, EngineSettings().autoDepth)
     }

@@ -15,7 +15,7 @@ import java.nio.file.Path
 import java.util.Locale
 
 /**
- * Replays the Auto-depth policy on the recorded tiers, without the engine: pass 1 = the Quick recording, a
+ * Replays the Auto-depth policy on the recorded tiers, without the engine: pass 1 = the Standard recording, a
  * deepened position takes the Deep recording's evaluation and node count. Scored against a SECOND, independent
  * Deep run (`deep2`): a deepened move compared with the very run it was copied from would agree by construction.
  */
@@ -128,6 +128,16 @@ object AutoDepthSimulation {
         val sweep = "sweep" in args
         for ((setName, sources) in sets) {
             val benches = load(root, out, sources, listOf("quick", "standard", "deep", reference))
+            if (reference == "deep" && setName == "calibration") {
+                val d2 = load(root, out, sources, listOf("deep2", "deep"))
+                if (d2.size == benches.size && benches.isNotEmpty()) {
+                    val deepNodes0 = benches.sumOf { b -> b.tiers.getValue("deep").evals.sumOf { it.nodes } }
+                    val s = sum(d2.map { b -> val r = b.tiers.getValue("deep2").evals; score(b, Run(r.map { it.toEval() }, r.sumOf { it.nodes }, r.size), b.tiers.getValue("deep").evals.map { it.toEval() }) })
+                    println("\n(second Deep run against the first: the noise floor)")
+                    println(HEADER)
+                    println(row("deep2", s, deepNodes0))
+                }
+            }
             if (benches.isEmpty()) { println("$setName: not recorded yet"); continue }
             println("\n### $setName (${benches.joinToString { it.id }}), reference = $reference\n")
             val deepNodes = benches.sumOf { b -> b.tiers.getValue("deep").evals.sumOf { it.nodes } }
@@ -137,26 +147,34 @@ object AutoDepthSimulation {
             })
             println(HEADER)
             for (t in listOf("quick", "standard", "deep")) println(row(t, plain(t), deepNodes))
-            val configs = if ("sweep3" in args) sweep3() else if ("sweep2" in args) sweep2() else if (sweep) sweepConfigs() else listOf(Triple("default", "quick", AdaptiveDepth.Config()))
+            val configs = if ("sweep3" in args) sweep3() else if ("sweep2" in args) sweep2() else if (sweep) sweepConfigs() else listOf(Triple("default", "standard", AdaptiveDepth.Config()))
             for ((name, baseTier, cfg) in configs) {
                 val s = sum(benches.map { b -> score(b, simulate(b, baseTier, "deep", cfg), b.tiers.getValue(reference).evals.map { it.toEval() }) })
                 println(row("auto $name", s, deepNodes))
             }
             if ("reasons" in args) reasons(benches, "standard", reference)
-            val real = load(root, out, sources, listOf("auto", reference))
+            for (realLabel in listOf("auto_quick", "auto_standard")) {
+            val real = load(root, out, sources, listOf(realLabel, reference))
             if (real.size == benches.size) {
                 val s = sum(real.map { b ->
-                    val r = b.tiers.getValue("auto").evals
+                    val r = b.tiers.getValue(realLabel).evals
                     score(b, Run(r.map { it.toEval() }, r.sumOf { it.nodes }, r.count { it.requestedDepth == BenchTier.DEEP.depth }), b.tiers.getValue(reference).evals.map { it.toEval() })
                 })
-                println(row("auto (real run)", s, deepNodes))
+                println(row("$realLabel (real run)", s, deepNodes))
+            }
             }
             if ("perGame" in args) {
                 for (b in benches) {
                     val ref = b.tiers.getValue(reference).evals.map { it.toEval() }
                     val dn = b.tiers.getValue("deep").evals.sumOf { it.nodes }
                     println(row("${b.id} standard", score(b, Run(b.tiers.getValue("standard").evals.map { it.toEval() }, b.tiers.getValue("standard").evals.sumOf { it.nodes }, 0), ref), dn))
-                    println(row("${b.id} auto", score(b, simulate(b, "quick", "deep", AdaptiveDepth.Config()), ref), dn))
+                    println(row("${b.id} auto (simulated)", score(b, simulate(b, "standard", "deep", AdaptiveDepth.Config()), ref), dn))
+                    for (realLabel in listOf("auto_quick", "auto_standard")) BenchGames.read(out, realLabel, b.id)?.evals?.let { r ->
+                        println(row("${b.id} $realLabel (real run)", score(b, Run(r.map { it.toEval() }, r.sumOf { it.nodes }, r.count { it.requestedDepth == BenchTier.DEEP.depth }), ref), dn))
+                    }
+                    BenchGames.read(out, "deep2", b.id)?.evals?.takeIf { reference != "deep2" }?.let { r ->
+                        println(row("${b.id} deep2", score(b, Run(r.map { it.toEval() }, r.sumOf { it.nodes }, r.size), ref), dn))
+                    }
                 }
             }
         }
@@ -215,7 +233,7 @@ object AutoDepthSimulation {
         for ((o, order) in orders) for (cap in listOf(0.4, 0.5, 0.6, 0.7)) {
             out += Triple("order $o cap=$cap", "quick", AdaptiveDepth.Config(maxFraction = cap, priority = order))
         }
-        for (cap in listOf(0.4, 0.5, 0.6)) out += Triple("standard base, order B cap=$cap", "standard", AdaptiveDepth.Config(maxFraction = cap, priority = orders.getValue("B")))
+        for (cap in listOf(0.2, 0.25, 0.3, 0.35, 0.4)) out += Triple("standard base, order C cap=$cap", "standard", AdaptiveDepth.Config(maxFraction = cap))
         return out
     }
 

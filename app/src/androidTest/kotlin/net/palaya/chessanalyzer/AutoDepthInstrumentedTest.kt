@@ -18,8 +18,8 @@ import org.junit.runner.RunWith
 /**
  * Auto-depth end to end with the real engine (ANALYSIS_SPEC §8.5): the Scholar's mate at Auto. Its blunder
  * (3...Nf6??) and the mate are critical, so the second pass searches positions again at Deep; everything else keeps
- * its Quick result. Checks what the host cannot: the two passes through `AnalysisService` and the engine, the
- * eval caches they leave (a Quick result and an Auto one), the progress bar, and `onPositionEvaluated`.
+ * its Standard result. Checks what the host cannot: the two passes through `AnalysisService` and the engine, the
+ * eval caches they leave (a Standard result and an Auto one), the progress bar, and `onPositionEvaluated`.
  */
 @RunWith(AndroidJUnit4::class)
 class AutoDepthInstrumentedTest {
@@ -68,11 +68,11 @@ class AutoDepthInstrumentedTest {
         val autoOrNull = repo.loadEvalCache(autoKey, prefix)
         val baseOrNull = repo.loadEvalCache(baseKey, prefix)
         assertNotNull("the Auto result is cached", autoOrNull)
-        assertNotNull("the first pass is cached as a Quick result", baseOrNull)
+        assertNotNull("the first pass is cached as a Standard result", baseOrNull)
         val auto = autoOrNull!!
         val base = baseOrNull!!
         assertEquals(8, auto.size)
-        assertTrue("the first pass is a Quick result", base.all { it.requestedDepth == AnalysisStrength.QUICK.depth })
+        assertTrue("the first pass is a Standard result", base.all { it.requestedDepth == AnalysisStrength.STANDARD.depth })
         val deepened = auto.indices.filter { auto[it].requestedDepth == AnalysisStrength.DEEP.depth }
         assertTrue("the blunder 3...Nf6 (positions 5 and 6) is searched again: $deepened", deepened.containsAll(listOf(5, 6)))
         assertTrue("the checkmate on the board (7) is never searched", 7 !in deepened)
@@ -83,7 +83,7 @@ class AutoDepthInstrumentedTest {
         for (i in deepened) {
             val calls = reported.filter { it.first == i }.map { it.second }
             assertEquals("position $i", 2, calls.size)
-            assertEquals(AnalysisStrength.QUICK.depth, calls[0].requestedDepth)
+            assertEquals(AnalysisStrength.STANDARD.depth, calls[0].requestedDepth)
             assertEquals(auto[i], calls[1])
         }
 

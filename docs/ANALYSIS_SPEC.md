@@ -51,8 +51,10 @@ For a move played by side S at ply p:
 
 **Important:** `evalBefore` must be the eval of the *best* move, and `evalAfter` the eval of
 the *played* move. Never compare evals taken at different depths — analyse every position
-at the same configured depth or the deltas become noise. The one exception is a position the
-per-position search budget stopped early (§8.1): it is flagged as capped, never silently mixed in.
+at the same configured depth or the deltas become noise. Two exceptions: a position the
+per-position search budget stopped early (§8.1), flagged as capped, never silently mixed in; and the
+**Auto** strength (§8.5), which searches the critical positions deeper on purpose, both sides of every
+critical move, and labels every position with the depth it asked for (`requestedDepth`).
 
 ---
 
@@ -574,7 +576,8 @@ advantage" from 95 (a MISS needs 90 win-percent or a mate before the move, §2).
 
 ## 8. Analysis engine settings
 
-- Strength presets in Settings: **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**
+- Strength presets in Settings: **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**,
+  and **Auto** = every position at Standard, then the critical positions again at Deep (§8.5)
   (`SettingsLogic.AnalysisStrength`). MultiPV 3, Threads `min(cores, 4)`, Hash 96 MB, one position at
   a time, the hash kept from position to position. A stored custom depth (6..30, from older versions)
   is still honoured.
@@ -582,6 +585,8 @@ advantage" from 95 (a MISS needs 90 win-percent or a mate before the move, §2).
 - Progress reported per ply; analysis must be cancellable and resumable (§8.3).
 - Results cached per game so re-opening a game is instant. The cache key is
   SHA-256(PGN text, depth, MultiPV, search budget); a result is reused only under identical settings.
+  Auto's assembled result has its own key (its budget part names both tiers and the policy version, §8.5);
+  its first pass is stored as a Standard result.
 
 ### 8.1 Per-position search budget (F1)
 
@@ -710,6 +715,14 @@ types fits an analysis, and the owner rejected adding one). So:
   it once, unless the request is more than 24 hours old (then it is dropped). The resume starts at the
   checkpoint (`usableResumePrefix`, FEN-aligned) with the request's own settings, so the cache key
   matches.
+- **Auto (§8.5)** keeps Auto in the request (`autoDepth`; a file written before Auto reads as a fixed
+  depth). A kill in its first pass resumes that pass from the Standard checkpoint. Its second pass
+  checkpoints the assembled evaluations under the Auto key after every position it searches again; a
+  new process replays the policy's rounds over the same first pass (the policy is deterministic, so it
+  picks the same positions in the same order) and takes a picked position's deep result from that
+  checkpoint, or from a Deep eval cache of the same game, instead of searching it again
+  (`AutoDepthPass.knownDeepEvals`). Such a result is accepted only for the same FEN and the Deep
+  requested depth, so a first-pass result can never pass for a deep one.
 
 ### 8.4 The Analysing screen's time bar
 
@@ -730,7 +743,152 @@ end, and the shown number rises only when it was off by 2 minutes or 25%. The ga
 not blended in (its cheap opening would pull the estimate down when it matters most); a game much heavier
 than the calibration games is underestimated until that rule lets the number rise.
 
+**Auto (§8.5).** The work left also counts the second pass: deep positions left x
+`AutoDepthBudget.TYPICAL_DEEPENED_NODES`, where "left" is the expected share of the game
+(`EXPECTED_DEEP_FRACTION`) until the second pass knows its picks, then the picked positions not yet
+searched. So the estimate does not say "Less than a minute" at the end of the first pass. The bar
+(`AnalysisFraction`) shares the engine's 30-98% between the passes by the same expected nodes (about
+70% for the first pass on a typical game); during the second pass it fills by positions
+searched of positions picked so far. A later round that picks more never moves it back, and it never
+reaches the end before the report. The status line says "Taking a deeper look at the critical moves:
+N of M" during the second pass ("Move x of y" before it); "Thinking deeper … depth d of 18" works as for
+any search.
+
 The estimate and the "thinking deeper" line are a polite live region; the ticking clock is not.
+
+### 8.5 Auto-depth: deeper on the critical moves (owner, 2026-10-11)
+
+The owner asked for "different moves analyzed with different depth based on complexity and engine scoring".
+**Auto** (`AnalysisStrength.AUTO`, stored as depth 14 + `autoDepth`) does that in two passes:
+
+1. **First pass:** every position at **Standard** (depth 14, Standard's budget, §8.1). It is exactly a
+   Standard analysis and is stored under the Standard key: a Standard result of the same game is reused as
+   it is, and a later Standard analysis of it is instant. No position of an Auto analysis is shallower than
+   Standard.
+2. **The policy** (`core.analysis.AdaptiveDepth.plan`, pure and deterministic, host-tested in
+   `AdaptiveDepthTest`) reads the first-pass evaluations and picks the positions to search again.
+3. **Second pass:** each picked position again at **Deep** (depth 18, Deep's budget), in game order (each
+   search next to its neighbour, as in a Deep analysis). It is exactly the Deep preset's search, so a Deep
+   eval-cache entry of the same game stands in for it without a search.
+4. **Rounds:** the policy is asked again with the evaluations assembled so far (round 2, 3), because a deep
+   result can make another move critical; it stops when it picks nothing new, after 3 rounds, or at the cap.
+
+The assembled result is stored under the Auto key, whose budget part is
+`auto<POLICY_VERSION>:<Standard budget>>d18:<Deep budget>` (`AutoDepthBudget.cacheKeyPart`). Every position
+keeps its `requestedDepth` (14 or 18), so the capped flag (§8.1) and the diagnostic log stay exact.
+
+**Why both sides of a move.** A move's label compares the evaluation before it with the one after it (§1.2,
+§2). Deepening one side only would compare two depths across the very move that matters, so a critical move
+is deepened on both of its positions or not at all, also under the cap. (A neighbouring, non-critical move
+then compares 14 with 18: the UNSTABLE rule catches the cases where that matters.)
+
+#### 8.5.1 The rules (a move is critical when one holds)
+
+All on the evaluations so far (the first pass in round 1), with the §2 classifier exactly as the report
+uses it, for the mover:
+
+| Rule | A move is critical when | Threshold |
+|---|---|---|
+| BOUNDARY | its loss is within this share of a §2 boundary b (2, 5, 10, 20): \|loss - b\| <= 0.25 b; or it was the best move with loss <= 2.5 and the gap between line 1 and line 2 is within 3 points of the Great gap (10) | 0.25 b; 3 points |
+| MATE | the best line before or after it is a mate score (a checkmate on the board, "mate 0", is exact and never searched) | - |
+| MISTAKE | its label is Inaccuracy, Mistake, Miss or Blunder | - |
+| SWING | White's win% moves by at least this across it, either way (a gain means the position before was misjudged) | 8 points |
+| UNSTABLE (round 2 on) | a deepened position's White win% moved at least this from its first-pass value: the moves into and out of it | 5 points |
+
+Never critical, whatever the numbers: a **forced** move (one legal move) and a **book** move (§2 rules 1-2;
+the engine cannot change those labels). A checkmated or stalemated position is never searched again.
+
+**Measured and switched off** (`Config.rules` keeps them for the measurement): GREAT (the move is labelled
+Great or Brilliant) and CLOSE (the best move was played and line 2 is within 2 win%). They added about 10% of a
+Deep analysis's nodes and no agreement (8.5.3); a Great move near its gap boundary is still caught by
+BOUNDARY.
+
+**Cap and ranking.** At most **25%** of a game's searchable positions are deepened (`maxFraction`). The
+moves rank by their best reason in the order **BOUNDARY, MATE, MISTAKE, SWING, UNSTABLE** (ties: the larger
+swing, then the earlier move) and are taken in that order while both of their positions fit (a move that
+shares a position already picked needs only one). BOUNDARY first because it had the best precision
+measured (about 40% of the moves it flags change label at Deep, against 20-26% for the others), and a
+Blunder far from any boundary keeps its label at any depth. The cap was reached in round 1 in 7 of the 8
+measured games, so the ranking decides which moves are deepened.
+
+#### 8.5.2 Why these numbers
+
+- **25%, Standard first.** Agreement with Deep stopped rising at a cap of 25% (simulated: 20% 76.9%, 25-40%
+  77.4%), while the cost kept rising (58% -> 73% of Deep). A Quick first pass (tried, 8.5.3) left 45% of the
+  positions shallower than Standard; on the held-out games it agreed with Deep less than Standard did, and
+  it cost about as much as Deep because it deepened 55% of the positions.
+- **BOUNDARY 25% of the boundary:** a relative margin is wide where a label is serious (Mistake at 10 +-2.5,
+  Blunder at 20 +-5) and narrow where it is not (Excellent at 2 +-0.5). An absolute margin flagged almost
+  every non-best move.
+- **SWING 8 points** is below the Inaccuracy band so that it also catches a large gain (never a loss to the
+  classifier). Swing 4 to 20 measured the same: the moves it adds are mostly MISTAKE or BOUNDARY moves too.
+- **Great gap 3 points:** half way between "clearly an only move" and "a second line exists".
+- **UNSTABLE 5 points:** half an Inaccuracy band; 3 and 8 measured the same.
+- **3 rounds:** under the 25% cap round 2 picked something in 1 of the 8 games (Ding-Gukesh) and round 3 never; with the rejected 60% cap round 2 picked in 6 of 8 and round 3 once.
+
+#### 8.5.3 Measurement (host, 2026-10-11; RUN_LOG "Auto-depth")
+
+Host: Stockfish 19 (official Windows build, `pc/bin/stockfish`), Threads 4, Hash 96, MultiPV 3,
+`ucinewgame` per game, the hash kept from position to position, each position searched as the app does
+(`go depth D nodes N movetime T`, the ConsistentLines rule of §8.2; harness `desktop/src/test/.../bench/`,
+run outside Gradle). The time caps were widened 4x because another job loaded the host (about 0.15-0.3 M
+nodes/s per engine instead of 1.5 M); the node budgets, which are what decides a search (§8.1), are the
+app's. Games: the F1 calibration set (game01, the chess.com game, the Immortal Game, Byrne-Fischer: 230
+positions, 186 moves judged by the engine, book and forced moves left out) for tuning, and four held-out
+Famous games (Evergreen, Opera, Kasparov's Immortal, Ding-Gukesh 2024 game 14: 287 positions, 244 judged
+moves) checked once afterwards. Agreement = the same §2 label as the reference Deep run.
+
+**The noise floor comes first.** Multi-threaded Stockfish does not repeat itself: a second, independent
+Deep run of the calibration games agreed with the first on only **80.1%** of the judged moves (and needed
+27% more nodes). No analysis can agree with "Deep" better than Deep agrees with itself, so the room above
+Standard (75%) is about 5 points, not 25. Simulations that copied a Deep run's results into Auto and then
+compared with that same run looked far better (91%) and are not used below.
+
+Calibration games, real Auto runs (the second pass searched on a fresh engine after `ucinewgame`, the
+first pass taken from the Standard recording, as when the first pass comes from the eval cache). Nodes
+relative to Deep run 1 (1,330 M nodes; run 2 needed 1,688 M):
+
+| Strength | Agrees with Deep run 1 | Agrees with Deep run 2 | Mistakes kept (run 2) | Nodes | vs Deep run 1 | Deepened |
+|---|---|---|---|---|---|---|
+| Quick | 72.0% | 68.8% | 22/32 | 115 M | 9% | - |
+| Standard | 74.7% | 75.3% | 26/32 | 527 M | 40% | - |
+| **Auto** | 75.3% | **80.6%** | 27/32 | 852 M | **64%** | 55/230 (24%) |
+| Deep run 2 / run 1 | 80.1% | (80.1%) | 28/32 | 1,688 M | 127% | all |
+| Auto with a Quick first pass, 60% cap (rejected) | 76.3% | 76.3% | 26/32 | 1,412 M | 106% | 126/230 (55%) |
+
+Held-out games (one Deep run as the reference):
+
+| Strength | Agrees with Deep | Mistakes kept | Nodes | vs Deep | Deepened |
+|---|---|---|---|---|---|
+| Quick | 77.0% | 13/15 | 154 M | 7% | - |
+| Standard | 75.4% | 9/15 | 368 M | 16% | - |
+| **Auto** | 74.6% | 10/15 | 752 M | **34%** | 63/287 (22%) |
+| Auto with a Quick first pass (rejected) | 70.5% | 12/15 | 1,522 M | 68% | 132/287 (46%) |
+
+Per game, Auto against Standard (agreement with Deep run 1 / run 2): game01 73.2% / 75.0% against 76.8% /
+71.4%; the chess.com game 76.0% / 84.0% against 72.0% / 76.0%; the Immortal Game 86.1% / 88.9% against
+80.6% / 83.3%; Byrne-Fischer 71.0% / 79.7% against 71.0% / 73.9%. Held out: Evergreen 72.7% (= Standard),
+Opera 88.0% (Standard 72.0%), Kasparov's Immortal 63.3% (Standard 73.4%), Ding-Gukesh 80.4% (78.5%).
+
+**Reading.** Auto costs clearly less than Deep (64% of the cheaper Deep run, 56% of the two runs' mean;
+34% on the held-out games, whose Deep run was expensive) and about 1.6 times Standard. Its agreement with
+Deep is **within the noise of Standard's**: +5 points against one Deep run, +0.6 against the other, -0.8 on
+the held-out games; 1 move is 0.5 points on 186 moves and Deep against Deep differs on 37 of them. The
+measurement does **not** show that Auto agrees with Deep far better than Standard; with a 4-thread engine
+it cannot show such a difference for any strength below Deep, because Deep's own labels change on one move
+in five. A second-pass search cost about as many nodes as the same position in a Deep analysis (1.08x on
+the calibration games, 0.54x held out; 1.3x in the rejected Quick-first variant).
+
+#### 8.5.4 Progress, resume, log
+
+The bar, the time-left estimate and the status line count the second pass (§8.4); a killed run resumes
+(§8.3). The diagnostic log has the usual line per searched position (the second pass's at depth 18), one
+line per round listing the picked positions with their reasons, one line per position whose deep result
+came from the cache, and the totals ("N of M positions searched again in R rounds"). `AutoDepthBudget` holds
+the two estimate constants: **EXPECTED_DEEP_FRACTION 0.24** (24% calibration, 22% held out) and
+**TYPICAL_DEEPENED_NODES 6 M** (the second pass's mean per position: 5.9 M and 6.1 M). The
+`onPositionEvaluated` callback of `AnalysisService.analyze` reports each position's final evaluation once,
+and a deepened one again when its deep result replaces the first one.
 
 ---
 

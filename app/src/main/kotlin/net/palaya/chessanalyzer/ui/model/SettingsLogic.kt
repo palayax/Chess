@@ -14,7 +14,7 @@ import java.util.Locale
 
 /**
  * "Analysis strength": Quick / Standard / Deep = search depth 12 / 14 / 18 (design §3.1), and Auto (ANALYSIS_SPEC
- * §8.5): every position at Quick, then the critical moves searched again at Deep. A depth Int alone cannot say
+ * §8.5): every position at Standard, then the critical moves searched again at Deep. A depth Int alone cannot say
  * Auto, so it is stored as its base depth plus [autoDepth] (`EngineSettings.autoDepth`, the pending request, the
  * stored game).
  */
@@ -22,11 +22,11 @@ enum class AnalysisStrength(val depth: Int, val autoDepth: Boolean = false) {
     QUICK(12),
     STANDARD(14),
     DEEP(18),
-    AUTO(12, autoDepth = true);
+    AUTO(14, autoDepth = true);
 
     /**
      * The per-position search limits of this strength (ANALYSIS_SPEC §8.1). For [AUTO] that is its first pass
-     * (Quick's); the deeper pass uses [AutoDepthBudget.deep].
+     * (Standard's); the deeper pass uses [AutoDepthBudget.deep].
      */
     val budget: SearchBudget get() = SearchBudget.forStrength(this)
 

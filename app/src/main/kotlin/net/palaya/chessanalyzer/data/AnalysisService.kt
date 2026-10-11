@@ -272,7 +272,7 @@ class AnalysisService(
                 } else null
                 val base: List<PositionEval>
                 if (cachedBase != null) {
-                    // Auto's first pass IS a Quick analysis: a Quick result of this game is reused as it is.
+                    // Auto's first pass IS a Standard analysis: a Standard result of this game is reused as it is.
                     diagnostics?.log(TAG, "first pass found in the eval cache ($total positions)")
                     cachedBase.forEachIndexed { i, e -> onPositionEvaluated(i, e) }
                     base = cachedBase
@@ -353,7 +353,7 @@ class AnalysisService(
                         }
                     }
                     // The full cache supersedes the prefix; drop it so it cannot go stale. For Auto this is a
-                    // Quick result too, so a later Quick analysis of this game is instant.
+                    // Standard result too, so a later Standard analysis of this game is instant.
                     gameRepository.saveEvalCache(baseKey, computed, runPrefix)
                     gameRepository.clearPartialEvalCache(baseKey, runPrefix)
                     base = computed

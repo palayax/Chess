@@ -67,6 +67,13 @@ conflict.
    earlier builds is moved into the active net's folder at start; a committed net update deletes the other
    folders. `AnalysisService` saves into the folder of the net the engine actually loaded
    (`EngineController.loadedNetName`). The F1 budget stays in the key.
+9. **Auto-depth resumes by replaying its policy** (ANALYSIS_SPEC §8.5). `core.analysis.AdaptiveDepth.plan` must stay
+   a pure, deterministic function of its inputs (no clock, no randomness, no hash order): a killed second pass is
+   resumed by running the rounds again over the same first pass and taking each picked position's deep result
+   from the checkpoint. A threshold or rule change changes the picks, so it goes into the spec with a measurement
+   and raises `AdaptiveDepth.POLICY_VERSION` (part of the Auto eval-cache key). Auto's first pass is a plain Standard
+   analysis stored under the Standard key; a deep result is accepted only for the same FEN and requestedDepth 18.
+   The host measurement harness is `desktop/src/test/.../bench/` (run with `java` outside Gradle; see its KDoc).
 
 ## Build gotchas
 

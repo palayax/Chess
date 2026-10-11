@@ -66,20 +66,20 @@ class SearchBudgetTest {
     }
 
     @Test
-    fun autoSearchesWithQuicksBudgetFirstAndDeepsBudgetOnTheCriticalPositions() {
-        assertEquals(AnalysisStrength.QUICK.budget, AnalysisStrength.AUTO.budget)
-        assertEquals(AnalysisStrength.QUICK.budget, EngineSettings(depth = 12, autoDepth = true).searchBudget)
-        assertEquals(AnalysisStrength.QUICK, AutoDepthBudget.base)
+    fun autoSearchesWithStandardsBudgetFirstAndDeepsBudgetOnTheCriticalPositions() {
+        assertEquals(AnalysisStrength.STANDARD.budget, AnalysisStrength.AUTO.budget)
+        assertEquals(AnalysisStrength.STANDARD.budget, EngineSettings(depth = 14, autoDepth = true).searchBudget)
+        assertEquals(AnalysisStrength.STANDARD, AutoDepthBudget.base)
         assertEquals(AnalysisStrength.DEEP, AutoDepthBudget.deep)
-        // A stored depth never maps to Auto.
-        assertEquals(AnalysisStrength.QUICK.budget, SearchBudget.forDepth(12))
+        // An old custom depth never maps to Auto.
+        assertEquals(AnalysisStrength.STANDARD.budget, SearchBudget.forDepth(14))
     }
 
     @Test
     fun autosCacheKeyDiffersFromEveryFixedStrengthAndCarriesBothTiersAndThePolicyVersion() {
         val auto = AutoDepthBudget.cacheKeyPart
         for (s in AnalysisStrength.entries.filter { !it.autoDepth }) assertNotEquals(s.budget.cacheKeyPart, auto)
-        assertTrue(auto, auto.contains(AnalysisStrength.QUICK.budget.cacheKeyPart))
+        assertTrue(auto, auto.contains(AnalysisStrength.STANDARD.budget.cacheKeyPart))
         assertTrue(auto, auto.contains(AnalysisStrength.DEEP.budget.cacheKeyPart))
         assertTrue(auto, auto.startsWith("auto${net.palaya.chessanalyzer.core.analysis.AdaptiveDepth.POLICY_VERSION}:"))
     }
