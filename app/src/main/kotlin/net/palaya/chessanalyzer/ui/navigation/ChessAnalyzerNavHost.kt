@@ -145,12 +145,13 @@ fun ChessAnalyzerNavHost(
      */
     fun openReview(gameId: String, entry: ReviewEntry) {
         scope.launch {
-            if (viewModel.shouldShowReviewOptions(entry)) {
-                navController.navigate(Destination.ReviewOptions.createRoute(gameId, entry))
-            } else {
-                viewModel.startReviewWithDefaults(gameId)
-                navController.navigate(Destination.AnalysisProgress.createRoute(gameId))
-            }
+            val showOptions = viewModel.shouldShowReviewOptions(entry)
+            if (!showOptions) viewModel.startReviewWithDefaults(gameId)
+            // The settings read resumes on DataStore's thread when the scope is not main-confined (the Compose test
+            // environment's is not); NavController.navigate must run on the main thread.
+            val route = if (showOptions) Destination.ReviewOptions.createRoute(gameId, entry)
+            else Destination.AnalysisProgress.createRoute(gameId)
+            withContext(Dispatchers.Main.immediate) { navController.navigate(route) }
         }
     }
 
@@ -185,17 +186,19 @@ fun ChessAnalyzerNavHost(
         if (pendingImportPgn.isNullOrBlank()) {
             val gameId = viewModel.resumableAnalysisOnLaunch()
             if (gameId != null) {
-                if (currentRoute() == Destination.Import.route) {
-                    navController.navigate(Destination.AnalysisProgress.createRoute(gameId))
+                withContext(Dispatchers.Main.immediate) {
+                    if (currentRoute() == Destination.Import.route) {
+                        navController.navigate(Destination.AnalysisProgress.createRoute(gameId))
+                    }
                 }
                 return@LaunchedEffect
             }
         }
         if (!netReady || !setupViewModel.netReady()) return@LaunchedEffect
-        val route = currentRoute()
+        val route = withContext(Dispatchers.Main.immediate) { currentRoute() }
         if (route != Destination.Setup.route && route != Destination.Import.route) return@LaunchedEffect
         val waitingId = viewModel.takeGameWaitingForSetup() ?: return@LaunchedEffect
-        if (route == Destination.Setup.route) goHome()
+        if (route == Destination.Setup.route) withContext(Dispatchers.Main.immediate) { goHome() }
         // RF: like a fresh import, through its Review options (or the defaults with that screen off).
         openReview(waitingId, ReviewEntry.IMPORT)
     }
