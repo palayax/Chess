@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -175,7 +176,7 @@ class VoiceChangeNarrationInstrumentedTest {
             }
             override fun release() = Unit
         }
-        val job = kotlinx.coroutines.launch(Dispatchers.Default) { preparer.prepare(s, slow) }
+        val job = launch(Dispatchers.Default) { preparer.prepare(s, slow) }
         withTimeout(10_000) { while (preparer.missingSegments(s, slow) == 3) delay(50) }
         job.cancel()
         job.join()

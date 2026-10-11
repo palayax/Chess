@@ -4727,3 +4727,72 @@ own preference >= 60 % on the 60-pair sample.
 
 Device state restored: GGUF removed from `/data/local/tmp`, apps uninstalled, font scale 1.0, both emulators shut down,
 adb server stopped. Nothing pushed, nothing published, `main` untouched.
+
+## RF (2026-10-11): the review flow after the owner's Pixel 8 test (delete, per-game options, one screen, one run, voice change)
+
+Worktree `.claude/worktrees/reviewflow`, branch `reviewflow` from main `8ef79e1`. Host side DONE; device runs are after the
+merge with `autodepth` (item 4) and the "while you wait" panel branch (item 7's content), per the brief. The owner's items:
+
+1. **"Can't delete existing games or re-analyze with different settings."** Each library row has an overflow menu
+   (`MoreVert`, labelled "More options for <game>", 48 dp): "Re-analyse with different settings…" opens the Review options
+   screen; "Delete" asks in a dialog naming the game. `AnalysisViewModel.deleteGame` removes the stored JSON, the pending
+   options, every in-memory map entry of the game, the pending (F1) or waiting (D2c) request when it is this game's, and the
+   eval cache of every strength when no other stored game has the same text (`deletePlan`, host-tested). The narration WAVs
+   stay (shared, keyed by sentence; Settings clears them). The library now lists every game, newest first (was 20).
+2. **"No per-game analytic settings."** `ReviewOptions` (strength, side, natural wording, prepare the video now, voice,
+   speaker, pace) is chosen on the Review options screen and stored on `StoredGame` (new optional keys `voiceProvider`,
+   `speakerId`, `pace`, `naturalWording`, `prepareVideo`; old files read as "not chosen" = the Settings default; the
+   strength through the existing `depth` path). Until the engine stage succeeds the options sit in
+   `filesDir/review/pending/<id>.json` (excluded from backup) so the F1 resume runs what was chosen. Pre-fill precedence
+   (`prefillReviewOptions`): the game's stored value, else the Settings default; the side: stored answer, then the side the
+   game opened with (famous game: Not me), then the username detection. Settings says "Defaults for new games…" on the
+   Reviews card and the Video section, and gains "Show the review options before each review" (default on) and "Prepare the
+   video with each review" (default on) in their own DataStore (`chess_analyzer_review_prefs`).
+3. **"Change voice for analysed games not works."** Cause confirmed in code: `VideoPlayerController` never synthesizes. It
+   builds a `DeviceTtsProvider` or the chosen provider only as a cache IDENTITY (`identityProvider`), looks up a WAV in
+   `NarrationStore` per segment under (text, provider name, fingerprint incl. the sid), and for every segment without one
+   calls the live Android `TextToSpeech`. Nothing but an export ever recorded Kokoro audio (the "Prepare narration" button the
+   docs mention no longer exists in the UI). A newly picked sid therefore had no WAVs at all and the owner heard the phone's
+   voice, the same whichever voice he picked. Fix: `NarrationPreparer` (over `NarrationCoordinator`, the export's path)
+   records the narration on purpose: as the run's "Recording the narration voice" stage, and inline on the Video screen
+   whenever the game's Kokoro voice is installed and a segment has no WAV in it (`narrationNeedsPreparation`): "Preparing the
+   narration in <voice>… 12 of 40 · about 1 min" in the player area with Cancel; the player is rebuilt when it is done
+   (`NarrationPrepState.Ready.version`). The sheet's voice and pace now change THIS game's options (stored), and a voice
+   change triggers that recording. A Cancel or a failed segment leaves a visible notice ("Part of the narration isn't
+   recorded in <voice> yet…" + "Prepare the narration"), never a silent fallback. The device voice is an explicit choice in
+   the game's picker. Proof: `VoiceChangeNarrationInstrumentedTest` (two fake voices with different WAV lengths: before the
+   recording the player for B cannot play from a file; after it, it plays B's FILES and its timeline is B's).
+5. **No ETA / separate polishing screen.** "Polishing the commentary" is a stage of the one run, with the overall bar and
+   ETA; the Review options screen decides whether it runs (Natural wording, shown only when the model is installed and
+   supported, else one line + "Open Settings").
+6. **"Watch the video" opened the polishing screen again.** `NarrationPolishingScreen` and the Video route's pre-step are
+   gone. "Writing the video narration" (the paced script and, with wording on, its rewording) runs in the processing run when
+   "Prepare the video now" is on. The Video route reads `finishedVideoScriptFor` (cache only) and never calls the model.
+7. **Progress with time left while processing.** `AnalysisProgressScreen` is the one processing screen: one overall bar
+   (stages weighted by measured estimates when every stage has one, else priors that only shape the bar), a checklist (done /
+   current / waiting / skipped, each "N of M"; the engine counts whole moves), "About N min left" for the whole run when every
+   remaining stage has a measured estimate (else the current stage's own line; else nothing), the elapsed clock and "Thinking
+   deeper…", Skip on stages 2-4, Cancel in an edge-to-edge bottom bar, and the `whileYouWait` slot taking the rest of the
+   screen. **ETA method:** the engine keeps F1's estimate (positions left x typical nodes x this run's ms per node, from 6
+   positions); a running non-engine stage uses its own measured time per item (ExportTimeLeft's rule); a stage not started
+   uses this phone's measured ms per game ply for that stage from earlier reviews (`ReviewSpeedStore`,
+   `filesDir/review/speeds.json`, blended mean, recorded only for stages that ran to the end and took >= 1 s). The Review
+   options screen shows a rough time per strength only from a measured ms per node (positions x typical nodes), "ready at
+   once" when that strength's evals are cached, else nothing.
+
+**The stage plan** (`reviewStagePlan`): engine; polish (wording in effect); write narration (prepare video); record voice
+(prepare video and the Kokoro voice installed). A library row tap (no Start) is a plain reopen: engine only, from the cache.
+The LLM is released before the recording stage. A process killed after the engine stage reopens the stored game.
+
+**Coordination.** No edits to `AnalysisService`, `SearchBudget`, `SettingsLogic`, `GameStrengthLogic`, `PendingAnalysisStore`
+or `SettingsRepository`. Strength is read through `AnalysisStrength.entries` (so AUTO appears in the list by itself; its
+label falls back to "Automatic" via `strengthLabelRes`'s `else`) and written through `pendingDepthByGameId` /
+`StoredGame.depth`. `AnalysisViewModel.recordPositionEval(index, eval)` is ready for `onPositionEvaluated` (TODO at the call
+site); until then `evalsSoFar` is a list of nulls sized to the game.
+
+**Design reference (owner's rule).** chess.com's Game Review (pattern only, our own words and layout): one primary,
+always-reachable start button; engine strength as a short list of named levels with a line each; "which side were you"
+pre-selected from the account name; a single determinate progress bar with short status text and something to read while it
+works (the slot); the game archive's per-game overflow menu with the game's actions and a confirm that names the game before
+a delete.
+

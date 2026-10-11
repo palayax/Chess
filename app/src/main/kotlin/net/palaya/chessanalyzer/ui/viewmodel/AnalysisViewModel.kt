@@ -557,8 +557,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 app.gameRepository.hasEvalCache(app.gameRepository.cacheKey(text, strength.depth, settingsNow.multiPv, budget.cacheKeyPart))
             strengthEstimateMs(positions, budget?.typicalNodes, speeds.engineMsPerNode, cached)
         }
-        val supported = app.rephraserForTesting != null ||
-            app.rephraseAvailability() == net.palaya.chessanalyzer.rephrase.RephraseSupport.Availability.AVAILABLE
+        val supported = app.wordingModelSupported()
         ReviewOptionsLoad.Ready(
             ReviewOptionsDraft(
                 gameId = gameId,
@@ -660,12 +659,21 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 initialSide = pendingSideByGameId[gameId]?.storedName,
             )
         }
-        return withContext(Dispatchers.IO) { pendingStore.load() }
+        withContext(Dispatchers.IO) { pendingStore.load() }
             ?.takeIf { it.gameId == gameId }
-            ?.also {
+            ?.let {
                 pendingPgnByGameId[gameId] = it.pgnText
                 diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "resuming $gameId from the saved request (process was restarted)")
+                return it
             }
+        // RF: the process was killed after the engine stage (during a wording or recording stage): the game is stored,
+        // so the restored screen reopens it (the engine stage reads the eval cache; missing narration is recorded by the
+        // Video screen when it is needed).
+        return app.gameRepository.load(gameId)?.let { stored ->
+            pendingPgnByGameId[gameId] = stored.pgnText
+            diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "reopening the stored $gameId (process was restarted after its engine stage)")
+            requestFor(gameId)
+        }
     }
 
     /**
@@ -862,7 +870,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                             typicalNodes = currentSettings.searchBudget.typicalNodes,
                         ) ?: state.engineRemainingMs
                     }
-                    state.stageProgress(ReviewStage.ENGINE, p.currentMoveIndex, p.totalMoves)
+                    // "Starting…" and the final DONE update carry no counts: they must not reset the stage's own.
+                    if (p.totalMoves > 0) state.stageProgress(ReviewStage.ENGINE, p.currentMoveIndex, p.totalMoves) else state.emit()
                 },
             )
             when (outcome) {
@@ -1024,7 +1033,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
 
     /** Frees the wording model before the voice is loaded (design §2.2: one big model at a time). */
     private suspend fun releaseWordingModel() {
-        if (app.rephraserForTesting == null) app.rephraseBackend.release()
+        app.releaseWordingModel()
     }
 
     /**

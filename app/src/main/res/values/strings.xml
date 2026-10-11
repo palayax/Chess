@@ -55,7 +55,6 @@
     <!-- Analysis progress -->
     <string name="progress_title">Reviewing the game</string>
     <string name="progress_downloading_engine">Starting…</string>
-    <string name="progress_analyzing_moves">Move %1$d of %2$d</string>
     <string name="progress_cancel">Cancel</string>
     <!-- F1 time bar. %1$s = elapsed time as a clock ("2:05"), LRM-led so the digits keep their order in RTL. -->
     <string name="progress_elapsed">&#8206;%1$s elapsed</string>

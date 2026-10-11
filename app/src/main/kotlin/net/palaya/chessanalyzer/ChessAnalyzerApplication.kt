@@ -212,6 +212,15 @@ class ChessAnalyzerApplication : Application() {
         rephraserForTesting != null ||
             (rephraseAvailability() == RephraseSupport.Availability.AVAILABLE && rephraseModelStore.isInstalled())
 
+    /** RF: true when this phone can run the wording model at all (installed or not). */
+    fun wordingModelSupported(): Boolean =
+        rephraserForTesting != null || rephraseAvailability() == RephraseSupport.Availability.AVAILABLE
+
+    /** RF: frees the wording model's ~1.2 GB before the narration voice is loaded (one big model at a time). */
+    suspend fun releaseWordingModel() {
+        if (rephraserForTesting == null) rephraseBackend.release()
+    }
+
     /** RF: "Show this screen before each review" and "Prepare the video with each review". */
     val reviewPreferences: net.palaya.chessanalyzer.data.ReviewPreferencesRepository by lazy {
         net.palaya.chessanalyzer.data.ReviewPreferencesRepository(this)
