@@ -107,7 +107,13 @@ class ModelDownloader(
 
     companion object {
         const val MAX_REDIRECTS = 5
-        const val MAX_FILE_BYTES = 1L shl 30
+        /**
+         * Sanity cap on a pinned size, checked before any request. It must hold every pinned file: it was 1 GiB until
+         * the 1,117,320,736-byte wording model (C2) arrived and was refused on the owner's Pixel 8 before a byte was
+         * fetched (the emulators never reach that download: they fail the RAM gate). Same bound as
+         * [SizeLimits.rephraseMax]; `PinnedSizesFitTheDownloaderCapTest` pins it against every compiled pin.
+         */
+        const val MAX_FILE_BYTES = 3_000_000_000L
         const val CHUNK_BYTES = 256 * 1024
         val LOOPBACK_HOSTS = setOf("10.0.2.2", "127.0.0.1", "localhost")
 

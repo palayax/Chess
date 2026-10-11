@@ -249,8 +249,8 @@ abstract class ModelDownloaderFaultMatrix {
     }
 
     @Test
-    fun aPinnedSizeOverOneGigabyteIsRefusedBeforeAnyRequest() {
-        val result = download(s = spec(size = (1L shl 30) + 1))
+    fun aPinnedSizeOverTheCapIsRefusedBeforeAnyRequest() {
+        val result = download(s = spec(size = ModelDownloader.MAX_FILE_BYTES + 1))
         assertEquals(FailureReason.SIZE_MISMATCH, (result as DownloadResult.Failed).reason)
         assertTrue(server.requests.isEmpty())
     }
