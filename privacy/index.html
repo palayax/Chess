@@ -28,7 +28,7 @@
   <header><div class="wrap"><span aria-hidden="true">&#9822;</span><a href="https://palayax.github.io/Chess/">Palaya Chess</a></div></header>
   <main class="wrap">
 <h1>Palaya Chess — Privacy Policy</h1>
-<p><strong>Effective date:</strong> 10 October 2026 (version 1.1 of the app)</p>
+<p><strong>Effective date:</strong> 11 October 2026 (version 1.1 of the app)</p>
 <p>Palaya Chess is an Android app for reviewing your chess games. It is made by Dor Amit, Palaya Cyber Security LTD ("we"). You can reach us at <strong><a href="mailto:Chess@palaya.net">Chess@palaya.net</a></strong>.</p>
 <h2>The short version</h2>
 <ul>
@@ -44,12 +44,14 @@
 <li>If you have turned on Android's own backup to your Google account, Android includes your imported games and general settings in that backup, so they come back on a new phone. That backup belongs to your account and is handled by Google; we cannot see it. The engine data, the voice, the analysis caches, the narration audio and the diagnostic log are left out of it.</li>
 <li>A video is saved to your phone's Movies folder (Movies/ChessAnalyzer) only when you tap <strong>Save video</strong>. It is shared only if you tap <strong>Share</strong> and choose where it goes.</li>
 <li>The narration voice runs on your phone. If you switch to the phone's built-in voice in Settings, the text is spoken by the text-to-speech engine installed on your phone, which is provided under its own terms by its maker.</li>
+<li>If you turn on <strong>Natural wording</strong> (offered once at setup, and in Settings), the app can download a language model (about 1.2 GB, from GitHub, after you tap Download) and uses it on your phone to reword its commentary; every fact is checked against the app's own text. Nothing you do is sent anywhere: the model runs entirely on your phone, and the reworded text stays in the app's private storage.</li>
 </ul>
 <p>Nothing you import, analyse or create is sent to us or to anyone else by the app (apart from Android's own backup described above, if you use it).</p>
 <h2>When the app uses the internet</h2>
 <p>Palaya Chess makes a network request only after you tap a button that says it will. It never checks for anything in the background and never uploads anything.</p>
 <ol>
 <li><strong>First-run download (once).</strong> The app needs two files before its first review: the chess engine's data (about 100 MB) and the narration voice (about 110 MB). The Setup screen says this and downloads them only when you tap <strong>Download</strong>. If you are on mobile data it asks you first. If the download is interrupted, it continues only when you tap <strong>Resume</strong>.</li>
+<li><strong>The optional wording model (only if you ask for it).</strong> If you tick <strong>Also download the wording model</strong> on the Setup screen, or tap <strong>Download</strong> under Natural wording in Settings, the app downloads one more file (about 1.2 GB) from our GitHub page, with the same mobile-data question and the same Resume rule. It is never downloaded otherwise.</li>
 <li><strong>Check for updates (only when you tap it).</strong> In Settings, <strong>Check for updates</strong> does two things at once:
 <ul>
 <li>It downloads a small list of the latest engine data and voice files and its digital signature from our GitHub page (<a href="https://github.com/palayax/Chess">github.com/palayax/Chess</a>). If a newer file is available, it is downloaded only if you tap <strong>Download and install</strong>.</li>
@@ -57,7 +59,7 @@
 </ul>
 </li>
 </ol>
-<p>The files in the first part are published on GitHub (<a href="https://github.com/palayax/Chess">github.com/palayax/Chess</a>), a code-hosting service run by GitHub, Inc. The app checks every file against fingerprints built into the app (or, for updates, against the signed list) before it uses it. The files are data for the engine and the voice; no program code is ever downloaded.</p>
+<p>The files in the first part are published on GitHub (<a href="https://github.com/palayax/Chess">github.com/palayax/Chess</a>), a code-hosting service run by GitHub, Inc. The app checks every file against fingerprints built into the app (or, for updates, against the signed list) before it uses it. The files are data for the engine, the voice and the wording model; no program code is ever downloaded.</p>
 <p>The app also has links in its About screen (for example to <a href="https://stockfishchess.org">stockfishchess.org</a> and <a href="https://palaya.net">palaya.net</a>). Tapping one opens your web browser; the app itself sends nothing.</p>
 <h2>What GitHub sees</h2>
 <p>To answer the app, GitHub (both the download pages and its information service, <a href="https://api.github.com">api.github.com</a>) receives what any web server receives with a request: your device's IP address, the time, the page or file asked for, and a short "user agent" text that says the app's name and version and your Android version (for example "PalayaChess/1.1 (Android 16)"). The app sends no account, no key, no cookie, no identifier, no game data and nothing else. GitHub handles this information under its own privacy statement: <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement</a></p>
