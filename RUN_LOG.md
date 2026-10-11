@@ -4796,3 +4796,27 @@ pre-selected from the account name; a single determinate progress bar with short
 works (the slot); the game archive's per-game overflow menu with the game's actions and a confirm that names the game before
 a delete.
 
+### Gate (counts from the result XML / reports, this worktree, after the last commit)
+
+- `:core:test` 594 tests, 0 skipped, 0 failures. `:app:testDebugUnitTest` 647 tests, 0 skipped, 0 failures (33 new:
+  `ReviewOptionsLogicTest` 12, `ReviewPipelineLogicTest` 9, `LibraryLogicTest` 4, `GameRepositoryReviewOptionsTest` 8;
+  `BackupRulesTest` now pins `review/`).
+- `:app:compileDebugKotlin` OK. `:app:lintDebug` 0 errors, 72 warnings, none new in the changed files (the two
+  `VisibleForTests` warnings the first lint run found were removed by moving the test-seam checks into
+  `ChessAnalyzerApplication.wordingModelSupported()` / `releaseWordingModel()`).
+- `:app:assembleDebugAndroidTest` OK (run separately from lint). Instrumented tests NOT run (device runs after the merge).
+  New: `ReviewOptionsInstrumentedTest` (3), `LibraryDeleteInstrumentedTest` (1), `VoiceChangeNarrationInstrumentedTest` (2).
+  Updated to the new flow: `FamousGamesInstrumentedTest` (the options screen then Start; a full review with the screen off),
+  `A4AnalyticsInstrumentedTest` (re-analyse through the options screen instead of the dialog),
+  `RephraseFlowInstrumentedTest` (wording decided on the options screen, both passes in the run, Watch never calls the
+  model, the global switch no longer changes a reviewed game), `TestApp` (`reviewImportsWithDefaults`,
+  `restoreReviewDefaults`).
+
+### Left for the merge and the device pass
+
+- Wire `onPositionEvaluated = ::recordPositionEval` once `autodepth` adds it (TODO in `runAnalysis`); plug the panel into
+  `AnalysisProgressScreen(whileYouWait = …)` in `ChessAnalyzerNavHost`.
+- AUTO: its depth goes through `startReview` -> `pendingDepthByGameId` and `StoredGame.depth`; if AUTO has no real depth the
+  merge must carry the strength instead (`ReviewOptions.strength` is already the enum).
+- Device: the recording stage on a Pixel 8 (Kokoro + the freed LLM), the inline preparation after a voice change, the
+  Review options screen at font 2.0 and in landscape, TalkBack on the checklist and the library menu.
