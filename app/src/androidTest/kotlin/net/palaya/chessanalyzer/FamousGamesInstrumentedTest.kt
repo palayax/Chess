@@ -71,6 +71,7 @@ class FamousGamesInstrumentedTest {
         dir?.deleteRecursively()
         // The no-net case leaves the game waiting for setup; later tests must not inherit it.
         File(app.filesDir, PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME).delete()
+        runBlocking { TestApp.restoreReviewDefaults() }
     }
 
     private fun waitForText(text: String, timeoutMs: Long = 30_000) {
@@ -119,12 +120,20 @@ class FamousGamesInstrumentedTest {
 
     @Test
     fun withTheNetInstalledReviewThisGameStartsTheAnalysis() {
-        runBlocking { TestApp.ensureSetUp() }
+        runBlocking {
+            TestApp.ensureSetUp()
+            // RF: as shipped, the Review options screen comes first.
+            TestApp.restoreReviewDefaults()
+        }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitForText(app.getString(R.string.home_title))
 
         reviewTheImmortalGameFromHome()
 
+        // RF: the Review options screen, pre-filled for a famous game ("Not me"), then Start review.
+        waitForText(app.getString(R.string.review_options_title))
+        compose.onNodeWithText(app.getString(R.string.summary_side_neither)).assertIsSelected()
+        compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
         waitForText(app.getString(R.string.progress_title))
         assertTrue("Setup must not be shown once the net is in", !shown(app.getString(R.string.setup_title)))
         // G1-device: the request in flight carries the famous game's initial side, "Not me".
@@ -182,6 +191,8 @@ class FamousGamesInstrumentedTest {
             val before = app.settingsRepository.current()
             settingsBefore = before
             app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth, username = game.white))
+            // RF: straight to processing with the defaults (the side then comes from the famous game: "Not me").
+            TestApp.reviewImportsWithDefaults()
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitForText(app.getString(R.string.home_title))

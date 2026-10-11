@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.VideoScript
@@ -95,7 +96,9 @@ class NarrationCoordinator(
         val failureReasons = LinkedHashSet<String>()
 
         for (segment in script.segments) {
-            if (cancelled.get()) break
+            // RF: a cancelled caller (Cancel on the processing screen or the Video screen's inline preparation) stops
+            // at the next segment too, like [cancel]: the segments done stay in the store.
+            if (cancelled.get() || !coroutineContext.isActive) break
 
             if (segment.narration.isBlank()) {
                 results.add(NarrationSynthesizer.Result.Silent(segment.index, segment.estimatedSpeechMs.coerceAtLeast(400L), "empty narration"))

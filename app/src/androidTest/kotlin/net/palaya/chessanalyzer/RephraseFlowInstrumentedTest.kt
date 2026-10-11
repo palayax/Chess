@@ -1,6 +1,9 @@
 package net.palaya.chessanalyzer
 
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -84,6 +87,8 @@ class RephraseFlowInstrumentedTest {
         runBlocking {
             app.settingsRepository.setRephraseEnabled(false)
             settingsBefore?.let { app.settingsRepository.save(it) }
+            app.narrationSettingsRepository.clearProviderChoiceForTesting()
+            TestApp.restoreReviewDefaults()
         }
         cacheDir.deleteRecursively()
         // the reviewed game must not stay in Home's recent games for later tests
@@ -102,6 +107,13 @@ class RephraseFlowInstrumentedTest {
     private fun scrolledTo(matcher: androidx.compose.ui.test.SemanticsMatcher): Boolean =
         runCatching { compose.onNode(hasScrollAction()).performScrollToNode(matcher) }.isSuccess
 
+    /**
+     * RF: the whole review is decided on the Review options screen and runs once. Natural wording on (the Settings
+     * default here) and "Prepare the video now" on with the phone's voice (so the run has no recording stage, which
+     * would take minutes on an emulator): the processing run polishes the key moments AND writes and rewords the
+     * narration; Watch then plays at once and never calls the model; the global switch going off later does not change
+     * this game (its own option decides).
+     */
     @Test
     fun aReviewedGamesKeyMomentsShowTheAcceptedRewordingAndTheSettingOffShowsTheOriginals() {
         runBlocking {
@@ -110,6 +122,8 @@ class RephraseFlowInstrumentedTest {
             settingsBefore = before
             app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth))
             app.settingsRepository.setRephraseEnabled(true)
+            app.narrationSettingsRepository.setProvider(net.palaya.chessanalyzer.ui.model.NarrationProviderChoice.DEVICE)
+            TestApp.restoreReviewDefaults()
         }
         cacheDir.deleteRecursively()
         app.rephraserForTesting = fake
@@ -127,6 +141,19 @@ class RephraseFlowInstrumentedTest {
         val review = app.getString(R.string.famous_review_action)
         waitForText(review)
         compose.onNodeWithText(review).performScrollTo().performClick()
+
+        // The Review options screen: Natural wording is offered (a model is behind the interface) and on by default.
+        waitForText(app.getString(R.string.review_options_title))
+        compose.onNode(hasText(app.getString(R.string.settings_rephrase_title)) and isToggleable()).assertIsOn()
+        compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOn()
+        compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
+        // One processing screen with the stages of this game's options, the narration among them.
+        waitForText(app.getString(R.string.progress_title))
+        compose.waitUntil(300_000) {
+            compose.onAllNodesWithContentDescription(app.getString(R.string.stage_write_narration), substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(compose.onAllNodesWithContentDescription(app.getString(R.string.stage_polish), substring = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(compose.onAllNodesWithContentDescription(app.getString(R.string.stage_record_voice), substring = true).fetchSemanticsNodes().isEmpty())
 
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 300_000)
         // The polishing phase ran over the key moments: their verdicts are cached under the fake's folder.
@@ -148,13 +175,14 @@ class RephraseFlowInstrumentedTest {
         val accepted = cacheDir.listFiles()!!.map { it.readText() }.count { it.startsWith("A\n") }
         assertTrue("$accepted accepted", accepted > 0)
 
-        // The Video route: the narration pre-step rewords the beats (verdicts cached under the fake's folder,
-        // NARRATION entries among them), and the script the screen gets carries the accepted wording.
+        // The processing run already reworded the narration beats; the Video route only plays the finished script and
+        // never calls the model (no separate polishing screen any more).
+        assertTrue("the narration beats were sent to the model during the run", narrationCalls > 0)
         val narrationCallsBefore = narrationCalls
         assertTrue(scrolledTo(hasText(app.getString(R.string.summary_watch_video))))
         compose.onNodeWithText(app.getString(R.string.summary_watch_video)).performClick()
-        compose.waitUntil(120_000) { compose.onAllNodesWithText(app.getString(R.string.video_title)).fetchSemanticsNodes().isNotEmpty() }
-        assertTrue("the narration beats were sent to the model", narrationCalls > narrationCallsBefore)
+        compose.waitUntil(30_000) { compose.onAllNodesWithText(app.getString(R.string.video_title)).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("Watch never calls the model", narrationCallsBefore, narrationCalls)
         val activity = run {
             var a: MainActivity? = null
             scenario!!.onActivity { a = it }
@@ -171,9 +199,10 @@ class RephraseFlowInstrumentedTest {
         )
         assertEquals(0, runBlocking { vm.narrationPolishPending(stored.id) })
 
-        // Setting off: the service hands back the originals at once (the cache is only read when it is on).
+        // The global switch off: Settings-level wording is off at once, but this game keeps its own option (RF: every
+        // consumer reads the game's options; the Settings value is only the default for new games).
         runBlocking { app.settingsRepository.setRephraseEnabled(false) }
         assertEquals(null, runBlocking { app.rephraseService.activeId() })
-        assertEquals(base, runBlocking { vm.rephrasedVideoScriptFor(stored.id) })
+        assertEquals(worded, runBlocking { vm.rephrasedVideoScriptFor(stored.id) })
     }
 }

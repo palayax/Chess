@@ -1,8 +1,5 @@
 package net.palaya.chessanalyzer.ui.navigation
 
-import net.palaya.chessanalyzer.ui.screens.NarrationPolishingScreen
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.Job
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -76,6 +73,13 @@ import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.util.readTextFromUri
+import net.palaya.chessanalyzer.ui.model.NarrationPrepState
+import net.palaya.chessanalyzer.ui.model.ReviewEntry
+import net.palaya.chessanalyzer.ui.model.ReviewOptions
+import net.palaya.chessanalyzer.ui.model.ReviewOptionsLoad
+import net.palaya.chessanalyzer.ui.screens.ReviewOptionsLoading
+import net.palaya.chessanalyzer.ui.screens.ReviewOptionsScreen
+import net.palaya.chessanalyzer.ui.screens.voiceLabel
 
 /**
  * App-wide nav graph wiring the six screens together against [AnalysisViewModel], which owns
@@ -107,6 +111,7 @@ fun ChessAnalyzerNavHost(
     val settings by viewModel.settings.collectAsState()
     val narrationVoiceSettings by viewModel.narrationVoiceSettings.collectAsState()
     val recentGames by viewModel.recentGames.collectAsState()
+    val reviewPreferences by viewModel.reviewPreferences.collectAsState()
     val pasteDraft by viewModel.pasteDraft.collectAsState()
     // Home's transient messages (an unreadable file) are a Snackbar, not a Toast: it belongs to the
     // screen, is themed, and does not outlive navigation.
@@ -134,6 +139,21 @@ fun ChessAnalyzerNavHost(
         if (navController.previousBackStackEntry != null) navController.popBackStack() else goHome()
     }
 
+    /**
+     * RF: a registered game's review starts on its Review options screen (always for a re-analyse; for an import only
+     * while Settings says "Show the review options before each review"), else at once with the defaults.
+     */
+    fun openReview(gameId: String, entry: ReviewEntry) {
+        scope.launch {
+            if (viewModel.shouldShowReviewOptions(entry)) {
+                navController.navigate(Destination.ReviewOptions.createRoute(gameId, entry))
+            } else {
+                viewModel.startReviewWithDefaults(gameId)
+                navController.navigate(Destination.AnalysisProgress.createRoute(gameId))
+            }
+        }
+    }
+
     /** [initialSide]: the side the game opens with (a famous game: "Not me"); UNKNOWN lets the username decide. */
     fun startAnalysis(pgnText: String, initialSide: SideChoice = SideChoice.UNKNOWN) {
         val id = viewModel.newGameId()
@@ -144,7 +164,7 @@ fun ChessAnalyzerNavHost(
             return
         }
         viewModel.registerPendingImport(id, pgnText, initialSide)
-        navController.navigate(Destination.AnalysisProgress.createRoute(id))
+        openReview(id, ReviewEntry.IMPORT)
     }
 
     LaunchedEffect(pendingImportPgn) {
@@ -176,7 +196,8 @@ fun ChessAnalyzerNavHost(
         if (route != Destination.Setup.route && route != Destination.Import.route) return@LaunchedEffect
         val waitingId = viewModel.takeGameWaitingForSetup() ?: return@LaunchedEffect
         if (route == Destination.Setup.route) goHome()
-        navController.navigate(Destination.AnalysisProgress.createRoute(waitingId))
+        // RF: like a fresh import, through its Review options (or the defaults with that screen off).
+        openReview(waitingId, ReviewEntry.IMPORT)
     }
 
     LaunchedEffect(openSetupRequested) {
@@ -235,7 +256,69 @@ fun ChessAnalyzerNavHost(
                 setupCard = homeSetupCard(setupDisk, setupViewModel.sizes, setupRunning, setupProgress, gameWaitingForSetup),
                 onSetupCardClick = { goToSetup() },
                 onFamousGamesClick = { navController.navigate(Destination.FamousGames.route) { launchSingleTop = true } },
+                // RF: the library row's menu.
+                onReanalyseGame = { gameId ->
+                    viewModel.registerReopen(gameId) {
+                        navController.navigate(Destination.ReviewOptions.createRoute(gameId, ReviewEntry.LIBRARY))
+                    }
+                },
+                onDeleteGame = { gameId -> viewModel.deleteGame(gameId) },
             )
+        }
+
+        composable(
+            route = Destination.ReviewOptions.route,
+            arguments = listOf(
+                navArgument(Destination.ARG_GAME_ID) { type = NavType.StringType },
+                navArgument(Destination.ARG_ENTRY) { type = NavType.StringType; defaultValue = ReviewEntry.IMPORT.name },
+            ),
+        ) { backStackEntry ->
+            val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
+            val entry = runCatching { ReviewEntry.valueOf(backStackEntry.arguments?.getString(Destination.ARG_ENTRY).orEmpty()) }
+                .getOrDefault(ReviewEntry.IMPORT)
+            val load by produceState<ReviewOptionsLoad>(ReviewOptionsLoad.Loading, gameId) { value = viewModel.reviewOptionsLoad(gameId) }
+            val leave: () -> Unit = {
+                // An import that is not started is forgotten (nothing was stored); a stored game keeps what it had.
+                if (entry == ReviewEntry.IMPORT) viewModel.forgetPendingImport(gameId)
+                navController.popBackStack()
+            }
+            BackHandler(onBack = leave)
+            DisposableEffect(Unit) { onDispose { viewModel.releaseVoiceSamples() } }
+            when (val l = load) {
+                ReviewOptionsLoad.Loading -> ReviewOptionsLoading(onBack = leave)
+                // The text cannot be read: the processing screen shows the parse error with Back (the paste is kept).
+                ReviewOptionsLoad.Unreadable -> LaunchedEffect(gameId) {
+                    navController.navigate(Destination.AnalysisProgress.createRoute(gameId)) {
+                        popUpTo(Destination.ReviewOptions.route) { inclusive = true }
+                    }
+                }
+                ReviewOptionsLoad.Missing -> LaunchedEffect(gameId) { navController.popBackStack() }
+                is ReviewOptionsLoad.Ready -> {
+                    var working by remember(l.draft) { mutableStateOf<ReviewOptions>(l.draft.options) }
+                    val voiceSampleState by viewModel.voiceSamples.state.collectAsState()
+                    ReviewOptionsScreen(
+                        draft = l.draft,
+                        options = working,
+                        onOptionsChange = { working = it },
+                        onStart = {
+                            viewModel.releaseVoiceSamples()
+                            viewModel.startReview(gameId, working)
+                            // The processing screen replaces this one (and, from the Summary, the old Summary too):
+                            // it ends on a new Summary, and Back from there lands where the review was started.
+                            val replaced = if (entry == ReviewEntry.SUMMARY) Destination.GameReport.route else Destination.ReviewOptions.route
+                            navController.navigate(Destination.AnalysisProgress.createRoute(gameId)) {
+                                popUpTo(replaced) { inclusive = true }
+                            }
+                        },
+                        onBack = leave,
+                        onOpenSettings = { navController.navigate(Destination.Settings.route) },
+                        voiceSampleState = voiceSampleState,
+                        onPlayVoiceSample = { viewModel.playVoiceSample(it) },
+                        onStopVoiceSample = { viewModel.stopVoiceSample() },
+                        onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
+                    )
+                }
+            }
         }
 
         composable(Destination.FamousGames.route) {
@@ -270,7 +353,7 @@ fun ChessAnalyzerNavHost(
             arguments = listOf(navArgument(Destination.ARG_GAME_ID) { type = NavType.StringType }),
         ) { backStackEntry ->
             val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
-            val progress by viewModel.progress.collectAsState()
+            val run by viewModel.run.collectAsState()
             val error by viewModel.error.collectAsState()
 
             // The analysis ends on the summary (the answer to "what went wrong"), not on the board.
@@ -293,13 +376,16 @@ fun ChessAnalyzerNavHost(
             BackHandler(onBack = leave)
 
             AnalysisProgressScreen(
-                progress = progress,
+                run = run,
                 onCancel = leave,
                 error = error,
                 onRetry = { viewModel.runAnalysis(gameId, openSummary) },
                 onBack = leave,
                 onShareDetails = { shareDiagnosticLog() },
-                onSkipPolishing = { viewModel.skipPolishing() }, // C2
+                onSkipStage = { viewModel.skipStage(it) }, // RF: Skip on stages 2 to 4
+                // RF: the "while you wait" panel (game insights, fun facts, a puzzle) plugs in here. Its data:
+                // viewModel.processingGame (id, SAN moves, the user's side) and viewModel.evalsSoFar.
+                whileYouWait = {},
                 // D2c: the game already waits on disk (AnalysisViewModel moved it there); Setup replaces this screen.
                 onSetUp = {
                     viewModel.clearError()
@@ -397,14 +483,8 @@ fun ChessAnalyzerNavHost(
                     // A4: the material at the end, and the strength this game has with a way to change it.
                     finalFen = viewModel.games[gameId]?.moves?.lastOrNull()?.fenAfter,
                     analysisDepth = viewModel.games[gameId]?.analysisDepth?.takeIf { it > 0 },
-                    onReanalyse = { strength ->
-                        // The Summary is replaced by the Analysing screen, which ends on a new Summary.
-                        if (viewModel.reanalyseGame(gameId, strength)) {
-                            navController.navigate(Destination.AnalysisProgress.createRoute(gameId)) {
-                                popUpTo(Destination.GameReport.route) { inclusive = true }
-                            }
-                        }
-                    },
+                    // RF: the game's Review options, pre-filled with its own; Start replaces this Summary with the run.
+                    onReanalyse = { navController.navigate(Destination.ReviewOptions.createRoute(gameId, ReviewEntry.SUMMARY)) },
                     onBack = { navController.popBackStack() },
                 )
             } else {
@@ -477,31 +557,25 @@ fun ChessAnalyzerNavHost(
             // suspends. Three states, not two: "still loading" must not be mistaken for "no
             // analysis in memory", which pops the back stack.
             var scriptState by remember(gameId) { mutableStateOf<VideoScriptState>(VideoScriptState.Loading) }
-            // V4: the pace and the voice can now be changed from this screen (its "Voice and pace" sheet). The pace
-            // changes the script's timing and the voice its speech-rate estimate, so the script is built again; the
-            // old one stays on screen until the new one is ready (no spinner, the sheet stays open).
-            // C2: with Natural wording on and beats not yet reworded, the on-device model rewords them first
-            // ("Polishing the narration… N of M", Skip); the screen, the player and the export then get the
-            // reworded script (`rephrasedVideoScriptFor`: the core post-pass over the cache, the original when off).
-            var narrationPolish by remember(gameId) { mutableStateOf<Job?>(null) }
-            LaunchedEffect(gameId, settings.videoPace, narrationVoiceSettings) {
-                val base = viewModel.videoScriptFor(gameId)
-                val pending = if (base != null) viewModel.narrationPolishPending(gameId) else 0
-                if (pending > 0) {
-                    scriptState = VideoScriptState.Polishing(0, pending)
-                    coroutineScope {
-                        val job = launch { viewModel.polishNarration(gameId) { done, total -> scriptState = VideoScriptState.Polishing(done, total) } }
-                        narrationPolish = job
-                        job.join()
-                    }
-                    narrationPolish = null
-                }
-                scriptState = VideoScriptState.Ready(if (base == null) null else viewModel.rephrasedVideoScriptFor(gameId))
+            // RF: this game's own options (voice, pace), not the global settings. The sheet below changes them; the
+            // script is built again (the pace changes its timing, the voice its speech-rate estimate) and the old one
+            // stays on screen until the new one is ready. The script is the finished one: reworded when the game's
+            // wording is on and the texts are cached (the processing run did that), else the originals; the model is
+            // never called here. Missing narration audio in the game's voice is recorded inline (ensureNarrationPrepared).
+            val options = viewModel.gameOptions[gameId]
+            LaunchedEffect(gameId, options?.voice, options?.speakerId, options?.pace) {
+                scriptState = VideoScriptState.Ready(viewModel.finishedVideoScriptFor(gameId))
+                viewModel.ensureNarrationPrepared(gameId)
             }
-            (scriptState as? VideoScriptState.Polishing)?.let { p ->
-                NarrationPolishingScreen(done = p.done, total = p.total, onSkip = { narrationPolish?.cancel() })
-                return@composable
-            }
+            // Leaving the screen stops a recording still running (what is done stays in the store).
+            DisposableEffect(gameId) { onDispose { viewModel.cancelNarrationPreparation() } }
+            val prepAll by viewModel.narrationPrep.collectAsState()
+            val prep = when (val p = prepAll) {
+                is NarrationPrepState.Preparing -> p.takeIf { it.gameId == gameId }
+                is NarrationPrepState.Incomplete -> p.takeIf { it.gameId == gameId }
+                is NarrationPrepState.Ready -> p.takeIf { it.gameId == gameId }
+                NarrationPrepState.Idle -> null
+            } ?: NarrationPrepState.Idle
             val script = (scriptState as? VideoScriptState.Ready)?.script
             if (scriptState is VideoScriptState.Loading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -510,33 +584,39 @@ fun ChessAnalyzerNavHost(
             } else if (script != null) {
                 // Rebuilt when the voice arrives (D2c: setup may finish while this screen is open).
                 val voiceInstalled = setupDisk.voiceInstalled
-                val narrationProvider = remember(narrationVoiceSettings, voiceInstalled) { viewModel.buildNarrationProvider() }
+                val gameVoice = options?.voiceSettings ?: narrationVoiceSettings
+                val narrationProvider = remember(gameVoice, voiceInstalled) { viewModel.buildNarrationProvider(gameId) }
                 VideoScreen(
                     script = script,
                     onBack = { navController.popBackStack() },
                     narrationProvider = narrationProvider,
-                    onFinishSetup = if (narrationVoiceSettings.provider == NarrationProviderChoice.NEURAL && !voiceInstalled) {
+                    onFinishSetup = if (gameVoice.provider == NarrationProviderChoice.NEURAL && !voiceInstalled) {
                         { goToSetup() }
                     } else {
                         null
                     },
-                    // V4: the Settings screen's own Video section (voice picker + pace), in the player's sheet. A new
-                    // voice gives the provider a new cache fingerprint (sid), so cached narration is never mixed.
+                    narrationPrep = prep,
+                    narrationVoiceName = voiceLabel(gameVoice.speakerId),
+                    onCancelPreparation = { viewModel.cancelNarrationPreparation() },
+                    onPrepareNarration = { viewModel.ensureNarrationPrepared(gameId, force = true) },
+                    // V4 + RF: the voice picker and the pace in the player's sheet, for THIS game (stored with it). A new
+                    // voice gives the provider a new cache fingerprint (sid), so the narration is recorded in it inline.
                     voiceAndPaceSettings = {
                         val voiceSampleState by viewModel.voiceSamples.state.collectAsState()
                         // Closing the sheet (with or without the picker open) stops a sample and frees the voice engine.
                         DisposableEffect(Unit) { onDispose { viewModel.releaseVoiceSamples() } }
                         VideoSection(
-                            settings = settings,
-                            onSettingsChange = { viewModel.updateSettings(it) },
-                            narrationVoiceSettings = narrationVoiceSettings,
+                            settings = settings.copy(videoPace = options?.pace ?: settings.videoPace),
+                            onSettingsChange = { viewModel.setGamePace(gameId, it.videoPace) },
+                            narrationVoiceSettings = gameVoice,
                             voiceInstalled = voiceInstalled,
-                            onNarratorSpeakerChange = { viewModel.setNarratorSpeaker(it) },
+                            onNarratorSpeakerChange = { viewModel.setGameVoice(gameId, NarrationProviderChoice.NEURAL, it) },
                             voiceSampleState = voiceSampleState,
                             onPlayVoiceSample = { viewModel.playVoiceSample(it) },
                             onStopVoiceSample = { viewModel.stopVoiceSample() },
                             onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
                             heading = stringResource(R.string.video_voice_and_pace),
+                            onDeviceVoiceChosen = { viewModel.setGameVoice(gameId, NarrationProviderChoice.DEVICE, gameVoice.speakerId) },
                         )
                     },
                 )
@@ -637,6 +717,10 @@ fun ChessAnalyzerNavHost(
                 onVoicePickerClosed = { viewModel.releaseVoiceSamples() },
                 // C2: Natural wording (on-device AI).
                 commentarySection = { RephraseSettingsSection() },
+                // RF: the review flow's switches (defaults for new games).
+                reviewPreferences = reviewPreferences,
+                onShowReviewOptionsChange = { viewModel.setShowReviewOptionsBeforeEachReview(it) },
+                onPrepareVideoByDefaultChange = { viewModel.setPrepareVideoByDefault(it) },
             )
             if (updateSheetOpen) {
                 UpdateSheet(
@@ -668,7 +752,5 @@ fun ChessAnalyzerNavHost(
  */
 private sealed interface VideoScriptState {
     data object Loading : VideoScriptState
-    /** C2: the narration is being reworded on the device ([done] of [total] beats), skippable. */
-    data class Polishing(val done: Int, val total: Int) : VideoScriptState
     data class Ready(val script: VideoScript?) : VideoScriptState
 }

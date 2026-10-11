@@ -11,6 +11,14 @@ sealed class Destination(val route: String) {
         fun createRoute(gameId: String) = "analysis_progress/$gameId"
     }
     /**
+     * RF: the Review options screen, every choice of a review made once before any processing. `entry` is the
+     * [net.palaya.chessanalyzer.ui.model.ReviewEntry] name (an import, a library row, the Summary): it decides what Back
+     * does (an import is forgotten) and where Start returns to.
+     */
+    data object ReviewOptions : Destination("review_options/{gameId}?entry={entry}") {
+        fun createRoute(gameId: String, entry: net.palaya.chessanalyzer.ui.model.ReviewEntry) = "review_options/$gameId?entry=${entry.name}"
+    }
+    /**
      * The review screen, optionally opened at a specific ply.
      *
      * The ply argument exists because the Game Report's key moments and tactic entries are only
@@ -69,5 +77,6 @@ sealed class Destination(val route: String) {
         const val ARG_PLY = "ply"
         const val ARG_LINE = "line"
         const val ARG_TACTIC_TYPE = "tacticType"
+        const val ARG_ENTRY = "entry"
     }
 }

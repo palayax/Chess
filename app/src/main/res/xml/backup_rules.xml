@@ -41,6 +41,8 @@
          restored elsewhere it would start an analysis by itself. -->
     <exclude domain="file" path="setup_waiting_game.json" />
     <exclude domain="file" path="setup_waiting_game.json.tmp" />
+    <!-- RF: the review run's device-specific files (pending options, measured speeds). -->
+    <exclude domain="file" path="review/" />
     <!-- Older engine layout. -->
     <exclude domain="file" path="engine/" />
     <exclude domain="sharedpref" path="engine_prefs.xml" />

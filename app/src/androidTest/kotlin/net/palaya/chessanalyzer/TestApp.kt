@@ -77,6 +77,23 @@ object TestApp {
         check(netStore.verifiedNetOrNull() != null && voiceStore.isInstalled()) { "setup is not complete after seeding" }
     }
 
+    /**
+     * RF: an import opens the Review options screen first, and a review records the narration by default. A test of
+     * another feature that imports a game establishes "straight to processing with the defaults" and, unless it wants
+     * the recording stage, "no video now" (the tests share one DataStore, CLAUDE.md: establish, never assume).
+     * [restoreReviewDefaults] puts the shipped defaults back.
+     */
+    suspend fun reviewImportsWithDefaults(prepareVideo: Boolean = false) {
+        app.reviewPreferences.setShowBeforeEachReview(false)
+        app.reviewPreferences.setPrepareVideoByDefault(prepareVideo)
+    }
+
+    /** RF: the Review options screen before each import and "Prepare the video" on, as shipped. */
+    suspend fun restoreReviewDefaults() {
+        app.reviewPreferences.setShowBeforeEachReview(true)
+        app.reviewPreferences.setPrepareVideoByDefault(true)
+    }
+
     /** The installed Kokoro model directory, installing it from the test APK first if needed. */
     suspend fun installedVoiceDir(): File {
         ensureSetUp()

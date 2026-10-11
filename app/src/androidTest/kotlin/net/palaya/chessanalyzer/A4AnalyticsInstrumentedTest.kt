@@ -3,7 +3,7 @@ package net.palaya.chessanalyzer
 import android.util.Log
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -70,6 +70,7 @@ class A4AnalyticsInstrumentedTest {
         scenario?.close()
         settingsBefore?.let { runBlocking { app.settingsRepository.save(it) } }
         storedGameFile?.delete()
+        runBlocking { TestApp.restoreReviewDefaults() }
     }
 
     private fun waitForText(text: String, timeoutMs: Long = 30_000) {
@@ -153,6 +154,8 @@ class A4AnalyticsInstrumentedTest {
             val before = app.settingsRepository.current()
             settingsBefore = before
             app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth, username = ""))
+            // RF: the first review goes straight to processing with the defaults (Quick, no video now).
+            TestApp.reviewImportsWithDefaults()
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitForText(app.getString(R.string.home_title))
@@ -198,13 +201,13 @@ class A4AnalyticsInstrumentedTest {
         // ---- 3. Per-game strength ----
         summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_quick))).assertExists()
         summaryItem(app.getString(R.string.reanalyse_button)).performClick()
-        waitForText(app.getString(R.string.reanalyse_title))
-        stage("reanalyse_dialog")
-        // Nothing is picked: Re-analyse is disabled; the current strength is marked.
-        compose.onNodeWithText(app.getString(R.string.reanalyse_confirm)).assertIsNotEnabled()
-        assertTrue(shown("${app.getString(R.string.settings_depth_quick)} (${app.getString(R.string.reanalyse_current)})"))
-        compose.onNodeWithText(app.getString(R.string.settings_depth_standard)).performClick()
-        compose.onNodeWithText(app.getString(R.string.reanalyse_confirm)).performClick()
+        // RF: the game's Review options screen (not a dialog), pre-filled with the game's own strength.
+        waitForText(app.getString(R.string.review_options_title))
+        stage("review_options")
+        compose.onNode(hasText(app.getString(R.string.settings_depth_quick)) and isSelected()).assertExists()
+        compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and hasClickAction()).performClick()
+        compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and isSelected()).assertExists()
+        compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
 
         // The Analysing screen with the real engine, then a new Summary.
         waitForText(app.getString(R.string.progress_title))

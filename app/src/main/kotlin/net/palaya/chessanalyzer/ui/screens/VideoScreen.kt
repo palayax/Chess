@@ -114,6 +114,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.text.style.TextDirection
 import net.palaya.chessanalyzer.core.narration.VideoScript
+import androidx.compose.material3.OutlinedButton
+import net.palaya.chessanalyzer.ui.model.NarrationPrepState
 import net.palaya.chessanalyzer.ui.model.nextPlaybackSpeed
 import net.palaya.chessanalyzer.ui.model.playbackSpeedNumber
 import net.palaya.chessanalyzer.ui.video.BoardSurfaceView
@@ -171,13 +173,35 @@ fun VideoScreen(
      * voice picker and the pace control are the same components; null hides the gear.
      */
     voiceAndPaceSettings: (@Composable () -> Unit)? = null,
+    /**
+     * RF: the narration recording of this game in its voice. While [NarrationPrepState.Preparing], the player area shows
+     * "Preparing the narration in <voice>… 12 of 40 · about 1 min" with Cancel instead of the board (the player would
+     * otherwise read the missing parts with the device voice); [NarrationPrepState.Incomplete] adds a notice with
+     * "Prepare the narration". Each finished recording raises [NarrationPrepState.Ready.version], which rebuilds the
+     * player so it plays the new files.
+     */
+    narrationPrep: NarrationPrepState = NarrationPrepState.Idle,
+    /** The voice's name for the preparation line ("Bella · American, female"). */
+    narrationVoiceName: String = "",
+    onCancelPreparation: () -> Unit = {},
+    onPrepareNarration: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val preparing = narrationPrep as? NarrationPrepState.Preparing
+    // The player is rebuilt for every new recording (version), a new script or a new voice: it reads the narration
+    // files once, when it is made (TimelineBuilder needs their real durations).
+    val playerVersion = when (narrationPrep) {
+        is NarrationPrepState.Ready -> narrationPrep.version
+        is NarrationPrepState.Incomplete -> -1 - narrationPrep.missing
+        else -> 0
+    }
     // Re-created whenever the configured narration provider changes (e.g. the user just switched
     // voice tier in Settings) so live playback picks up pre-generated audio under the new identity
     // rather than staying pinned to whatever was active when this screen first opened.
-    val controller = remember(script, narrationProvider) { VideoPlayerController(context, script, scope, narrationProvider) }
+    val controller = remember(script, narrationProvider, playerVersion) { VideoPlayerController(context, script, scope, narrationProvider) }
+    // Nothing plays while the narration is being recorded.
+    LaunchedEffect(preparing != null) { if (preparing != null) controller.pause() }
     DisposableEffect(controller) { onDispose { controller.release() } }
     val playerState by controller.uiState.collectAsState()
 
@@ -353,6 +377,8 @@ fun VideoScreen(
                 Surface(color = MaterialTheme.colorScheme.background) {
                     Button(
                         onClick = { exportTapped() },
+                        // The recording and the export would both load the voice: one at a time.
+                        enabled = preparing == null,
                         modifier = Modifier
                             .navigationBarsPadding()
                             .fillMaxWidth()
@@ -378,19 +404,32 @@ fun VideoScreen(
             // Upright, the picture is the portrait frame (V4): the board as wide as the screen, like "Show me".
             val portrait = !isLandscape()
             val surface: @Composable () -> Unit = {
-                VideoBoardSurface(
-                    script = script,
-                    playerState = playerState,
-                    fillAvailableSpace = false,
-                    onDoubleTap = { setFullScreen(true) },
-                    modifier = Modifier.fillMaxWidth(),
-                    aspectRatio = if (portrait) PORTRAIT_FRAME_ASPECT else VIDEO_ASPECT,
-                )
+                if (preparing != null) {
+                    NarrationPreparingPanel(
+                        state = preparing,
+                        voiceName = narrationVoiceName,
+                        onCancel = onCancelPreparation,
+                        modifier = Modifier.fillMaxWidth(),
+                        aspectRatio = if (portrait) PORTRAIT_FRAME_ASPECT else VIDEO_ASPECT,
+                    )
+                } else {
+                    VideoBoardSurface(
+                        script = script,
+                        playerState = playerState,
+                        fillAvailableSpace = false,
+                        onDoubleTap = { setFullScreen(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                        aspectRatio = if (portrait) PORTRAIT_FRAME_ASPECT else VIDEO_ASPECT,
+                    )
+                }
             }
             // Everything under (or, in landscape, beside) the picture.
             val controls: @Composable () -> Unit = {
                 if (onFinishSetup != null) {
                     VoiceNotInstalledNotice(onFinishSetup)
+                }
+                if (narrationPrep is NarrationPrepState.Incomplete) {
+                    NarrationIncompleteNotice(voiceName = narrationVoiceName, onPrepare = onPrepareNarration)
                 }
                 if (!playerState.narrationAvailable) {
                     Text(
@@ -402,7 +441,7 @@ fun VideoScreen(
                 }
 
                 // Scrub bar.
-                Row(
+                if (preparing == null) Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 ) {
                     ScrubBar(
@@ -412,14 +451,14 @@ fun VideoScreen(
                     )
                 }
 
-                TransportRow(
+                if (preparing == null) TransportRow(
                     playerState = playerState,
                     controller = controller,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 )
 
                 // Chapters: tap to jump. Chips alone, no label.
-                if (script.chapters.isNotEmpty()) {
+                if (script.chapters.isNotEmpty() && preparing == null) {
                     LazyRow(
                         modifier = Modifier.padding(vertical = 4.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -517,6 +556,78 @@ private fun VoiceAndPaceSheet(onDismiss: () -> Unit, content: @Composable () -> 
             ) {
                 Text(stringResource(R.string.common_done))
             }
+        }
+    }
+}
+
+/**
+ * RF: the player area while the narration is recorded in the game's voice: "Preparing the narration in Bella…", the bar,
+ * "12 of 40 · about 1 min" (measured, ExportTimeLeft) and Cancel. Same shape as the picture, so nothing jumps when the
+ * board replaces it. The status is a polite live region (one TalkBack stop).
+ */
+@Composable
+private fun NarrationPreparingPanel(
+    state: NarrationPrepState.Preparing,
+    voiceName: String,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+    aspectRatio: Float,
+) {
+    val title = stringResource(R.string.video_preparing_narration, voiceName)
+    val count = stringResource(R.string.stage_count, state.done.coerceAtMost(state.total), state.total.coerceAtLeast(1))
+    val left = when (val t = state.timeLeft) {
+        ExportTimeLeft.Hidden -> null
+        ExportTimeLeft.LessThanMinute -> stringResource(R.string.video_export_less_than_minute)
+        is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.video_export_minutes_left, t.minutes, t.minutes)
+    }
+    val status = if (left == null) count else "$count · $left"
+    Box(
+        modifier = modifier
+            .aspectRatio(aspectRatio)
+            .background(MaterialTheme.colorScheme.surfaceContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(textDirection = TextDirection.Content),
+            )
+            LinearProgressIndicator(
+                progress = { if (state.total > 0) state.done.toFloat() / state.total else 0f },
+                modifier = Modifier.fillMaxWidth().semantics { stateDescription = status },
+            )
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(stringResource(R.string.video_preparing_cancel))
+            }
+        }
+    }
+}
+
+/** RF: part of the narration is not recorded in the game's voice (Cancel, or a failed segment): say so, offer to finish it. */
+@Composable
+private fun NarrationIncompleteNotice(voiceName: String, onPrepare: () -> Unit) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = stringResource(R.string.video_narration_incomplete, voiceName),
+            style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 8.dp).align(Alignment.CenterVertically),
+        )
+        TextButton(onClick = onPrepare, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(stringResource(R.string.video_narration_prepare))
         }
     }
 }

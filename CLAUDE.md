@@ -233,11 +233,15 @@ conflict.
   `release.tag`). Downloading it at setup switches the feature on (owner decision §12.3). The cache lives in
   `filesDir/rephrase/cache/<model>/` (NOT `rephrase/<model>/`: `rephrase/models/` holds the GGUF and a model switch
   purges every other cache folder). `rephrase/` is excluded from backup in all three rule sets.
-- **The narration post-pass runs as a pre-step of the Video route** (`ChessAnalyzerNavHost`): when
-  `narrationPolishPending(gameId) > 0` it shows "Polishing the narration (on-device AI)… N of M" with Skip, then the
-  route hands `rephrasedVideoScriptFor(gameId)` (core `RephrasedScript` over the cache) to the VideoScreen, so the
-  player, "Save video" and the exporter all read the finished words and the export never calls the model. A pace or
-  voice change rebuilds the script; its beats are the same texts, already cached, so the pre-step does not reappear.
+- **The narration post-pass runs inside the review's processing run (RF), never at watch time.** The stage "Writing the
+  video narration" (only when the game's "Prepare the video now" is on) builds the paced script and, with the GAME's
+  Natural wording on, rewords its beats (`polishNarration`). The Video route only reads `finishedVideoScriptFor(gameId)`
+  (core `RephrasedScript` over the cache, the originals when the game's wording is off or nothing is cached) and never
+  calls the model; there is no polishing screen any more. The player, "Save video" and the exporter read the same words.
+- **Wording is a per-game option (RF).** `ChessAnalyzerApplication.gameRephraseService` is not gated by the Settings switch;
+  `AnalysisViewModel` uses it only for a game whose stored `naturalWording` is on (`wordingFor`). The Settings switch
+  (`rephraseService`) is only the default for new games. The model is released (`rephraseBackend.release()`) before
+  the voice is loaded for recording.
 
 - **The device-test gates of the wording model.** No AVD here passes `RephraseSupport`'s RAM gate (both have 2 GB,
   the gate is 3.4 GB), so the app shows "Not available on this phone." and Setup offers no wording row; the real
@@ -246,6 +250,26 @@ conflict.
   `rephraserForTesting`; its rewordings must pass the real checker on the CURRENT card texts (probe new ones with a
   throwaway `:core` test first), and it reviews the Opera Game because a Quick run of a miniature can have no key
   moments. The Summary is a LazyColumn: scroll it with `performScrollToNode` before looking a card up.
+
+## Review flow (RF, owner's phone test 2026-10-11)
+
+- **Options are per game; Settings are defaults for new games.** The Review options screen (`ReviewOptionsScreen`, route
+  `review_options/{gameId}?entry=`) opens after an import (unless Settings > Reviews > "Show the review options before
+  each review" is off), from a library row's "Re-analyse with different settings…" and from the Summary. Its choices are
+  stored on `GameRepository.StoredGame` (`depth`, `userColorName`, `voiceProvider`, `speakerId`, `pace`,
+  `naturalWording`, `prepareVideo`; absent keys = not chosen, read as the Settings default) and, until the engine stage
+  succeeds, in `filesDir/review/pending/<id>.json` (F1 resume; excluded from backup with `review/`). Every consumer
+  (Summary, `videoScriptFor`, `buildNarrationProvider(gameId)`, the wording, the Video screen, the export) reads
+  `AnalysisViewModel.gameOptions[gameId]`, never the global settings. A precedence change goes in
+  `prefillReviewOptions` (host-tested), not in a screen.
+- **One processing run** (`runAnalysis`): `reviewStagePlan` decides the stages (engine; polish the key moments; write
+  the narration; record the voice). A plain reopen (a library row tap, no Start) runs only the engine stage, from the
+  eval cache. The overall bar is weighted by measured estimates (`ReviewSpeedStore`, `filesDir/review/speeds.json`) or
+  priors; "About N min left" is measured only (`ReviewTimeLeftTracker`), hidden until honest. Skip cancels only the
+  stage's child job. The processing screen's `whileYouWait` slot is for the insights panel (`processingGame`,
+  `evalsSoFar`).
+- **Deleting a game** (`deleteGame`) removes its JSON, pending options, in-memory state, its pending/waiting request and
+  its eval cache when no other stored game has the same text (`deletePlan`); never the narration WAVs (shared).
 
 ## Emulator gotchas
 
@@ -292,9 +316,16 @@ conflict.
   adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   adb shell am instrument -w -r -e class '<fqcn>#<method>'     net.palaya.chessanalyzer.test/androidx.test.runner.AndroidJUnitRunner
   ```
-- **The Video screen's preview never synthesizes**: it only plays WAVs already in `files/narration/` (put there
-  by an export or "Prepare narration") and otherwise speaks with the device voice. To get Kokoro WAVs onto a
-  device for a check, export ("Save video").
+- **The player (`VideoPlayerController`) never synthesizes**: it plays WAVs already in `files/narration/` for its
+  voice's identity and speaks any other segment with the live device voice. Since RF the narration is RECORDED on
+  purpose by `NarrationPreparer` (through `NarrationCoordinator`, the export's path): the processing run's "Recording
+  the narration voice" stage, and the Video route's inline preparation (`AnalysisViewModel.ensureNarrationPrepared`,
+  "Preparing the narration in <voice>… N of M" in the player area) whenever the game's Kokoro voice is installed and
+  a segment has no WAV in it (an old game, a skipped stage, a voice change in the sheet). The player is rebuilt after
+  each recording (`NarrationPrepState.Ready.version`): it reads the files once, when it is made. This was the cause of
+  the owner's "changing the voice keeps the old narration" (RUN_LOG "RF"). A review run with the Kokoro voice records
+  minutes of audio on an emulator: tests that import a game call `TestApp.reviewImportsWithDefaults()` (screen off, no
+  video) unless they test the recording.
 - **Compose status lines are `clearAndSetSemantics` live regions**: their words are a content description, so
   a test finds them with `onAllNodesWithContentDescription`, not `...WithText` (cost a run in D2e).
 - An exported video lands in `/sdcard/Movies/ChessAnalyzer/`, not `/sdcard/Movies/` — a

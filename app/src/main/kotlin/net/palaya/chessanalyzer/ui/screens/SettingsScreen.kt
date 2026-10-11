@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import net.palaya.chessanalyzer.data.ReviewPreferencesRepository
 import net.palaya.chessanalyzer.ui.model.AdvancedExpander
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.AppLanguage
@@ -133,6 +134,10 @@ fun SettingsScreen(
     onVoicePickerClosed: () -> Unit = {},
     /** C2: the "Commentary" section (Natural wording), placed between the name and Video; null hides it. */
     commentarySection: (@Composable () -> Unit)? = null,
+    /** RF: the review flow's two switches; null hides the "Reviews" card (previews). */
+    reviewPreferences: ReviewPreferencesRepository.Prefs? = null,
+    onShowReviewOptionsChange: (Boolean) -> Unit = {},
+    onPrepareVideoByDefaultChange: (Boolean) -> Unit = {},
 ) {
     var advanced by rememberSaveable(stateSaver = AdvancedExpanderSaver) { mutableStateOf(AdvancedExpander()) }
 
@@ -194,6 +199,28 @@ fun SettingsScreen(
                 }
             }
 
+            if (reviewPreferences != null) item(key = "reviews") {
+                SettingsCard {
+                    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                        SectionHeading(stringResource(R.string.settings_review_header), stringResource(R.string.settings_defaults_subtitle))
+                        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            SwitchRow(
+                                title = stringResource(R.string.settings_show_review_options),
+                                help = stringResource(R.string.settings_show_review_options_help),
+                                checked = reviewPreferences.showBeforeEachReview,
+                                onCheckedChange = onShowReviewOptionsChange,
+                            )
+                            SwitchRow(
+                                title = stringResource(R.string.settings_prepare_video),
+                                help = stringResource(R.string.settings_prepare_video_help),
+                                checked = reviewPreferences.prepareVideoByDefault,
+                                onCheckedChange = onPrepareVideoByDefaultChange,
+                            )
+                        }
+                    }
+                }
+            }
+
             if (commentarySection != null) item(key = "commentary") {
                 SettingsCard { commentarySection() }
             }
@@ -221,6 +248,8 @@ fun SettingsScreen(
                         onPlayVoiceSample = onPlayVoiceSample,
                         onStopVoiceSample = onStopVoiceSample,
                         onVoicePickerClosed = onVoicePickerClosed,
+                        // RF: the voice and pace here are the defaults for new games; each game keeps its own.
+                        subtitle = stringResource(R.string.settings_defaults_subtitle),
                     )
                 }
             }
@@ -481,16 +510,20 @@ internal fun VideoSection(
     onStopVoiceSample: () -> Unit,
     onVoicePickerClosed: () -> Unit,
     heading: String = stringResource(R.string.settings_video_header),
+    /** RF: a line under the heading (Settings: "Defaults for new games..."). */
+    subtitle: String? = null,
+    /** RF: content between the heading and the voice row (the Review options' "Prepare the video now"). */
+    topContent: (@Composable () -> Unit)? = null,
+    /**
+     * RF: non-null makes the phone's built-in voice one of the picker's choices (a game's own voice: the Review options
+     * screen and the Video screen's sheet). Null (Settings) keeps the Advanced switch as the way to it.
+     */
+    onDeviceVoiceChosen: (() -> Unit)? = null,
 ) {
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
     Column {
-        Text(
-            text = heading,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
-                .asHeading(),
-        )
+        SectionHeading(heading, subtitle)
+        topContent?.invoke()
         val chosen = voiceLabel(narrationVoiceSettings.speakerId)
         SettingsRow(
             title = stringResource(R.string.settings_voice_row),
@@ -521,22 +554,25 @@ internal fun VideoSection(
             pickerOpen = false
             onVoicePickerClosed()
         }
+        val deviceOn = narrationVoiceSettings.provider == NarrationProviderChoice.DEVICE
         VoicePickerDialog(
-            selected = narrationVoiceSettings.speakerId,
+            // With the device voice a choice of its own, no speaker row is selected while it is chosen.
+            selected = if (onDeviceVoiceChosen != null && deviceOn) -1 else narrationVoiceSettings.speakerId,
             voiceInstalled = voiceInstalled,
-            deviceVoiceOn = narrationVoiceSettings.provider == NarrationProviderChoice.DEVICE,
+            deviceVoiceOn = deviceOn && onDeviceVoiceChosen == null,
             sampleState = voiceSampleState,
             onSelect = onNarratorSpeakerChange,
             onPlay = onPlayVoiceSample,
             onStop = onStopVoiceSample,
             onDismiss = close,
+            deviceVoiceChoice = onDeviceVoiceChosen?.let { choose -> deviceOn to choose },
         )
     }
 }
 
 /** "Bella · American, female": the name (the blend has none of its own), the accent and the voice. */
 @Composable
-private fun voiceLabel(sid: Int): String {
+internal fun voiceLabel(sid: Int): String {
     val speaker = KokoroVoices.speaker(sid) ?: KokoroVoices.SPEAKERS[KOKORO_DEFAULT_SPEAKER_ID]
     return stringResource(
         R.string.voice_label,
@@ -572,6 +608,8 @@ private fun VoicePickerDialog(
     onPlay: (Int) -> Unit,
     onStop: () -> Unit,
     onDismiss: () -> Unit,
+    /** RF: (selected, choose) for the device voice as the list's last choice; null leaves it out. */
+    deviceVoiceChoice: Pair<Boolean, () -> Unit>? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -611,6 +649,31 @@ private fun VoicePickerDialog(
                             onPlay = { onPlay(sid) },
                             onStop = onStop,
                         )
+                    }
+                }
+                if (deviceVoiceChoice != null) {
+                    item(key = "voice-device") {
+                        val (deviceSelected, chooseDevice) = deviceVoiceChoice
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .selectable(selected = deviceSelected, role = Role.RadioButton, onClick = chooseDevice),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = deviceSelected, onClick = null)
+                            Column(modifier = Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp)) {
+                                Text(
+                                    text = stringResource(R.string.voice_device_option),
+                                    style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content),
+                                )
+                                Text(
+                                    text = stringResource(R.string.voice_device_option_help),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -749,7 +812,7 @@ private fun ReviewDetailControl(thresholdCp: Int, onChange: (ReviewDetail) -> Un
  * what is stored (and never rewrites it unless the user picks one).
  */
 @Composable
-private fun <T> PresetControl(
+internal fun <T> PresetControl(
     title: String,
     help: String,
     options: List<Pair<T, String>>,
@@ -814,7 +877,55 @@ private fun <T> PresetControl(
 }
 
 /** From this font scale up, three preset labels do not fit side by side on a phone. */
-private const val LARGE_FONT_SCALE = 1.3f
+internal const val LARGE_FONT_SCALE = 1.3f
+
+/** A section title (a heading for TalkBack) with an optional muted line under it. */
+@Composable
+internal fun SectionHeading(title: String, subtitle: String? = null) {
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.asHeading(),
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A switch with its title and help line, the whole row one toggle (one TalkBack stop, a 48 dp+ target), like
+ * "Use the phone's built-in voice instead".
+ */
+@Composable
+internal fun SwitchRow(title: String, help: String?, checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .alpha(if (enabled) 1f else 0.6f)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Content))
+            if (help != null) {
+                Text(
+                    text = help,
+                    style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.padding(start = 12.dp))
+    }
+}
 
 /**
  * "Use the phone's built-in voice instead". Off means the bundled natural voice (NEURAL); on

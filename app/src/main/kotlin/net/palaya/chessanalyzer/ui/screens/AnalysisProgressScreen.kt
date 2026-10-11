@@ -1,26 +1,30 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package net.palaya.chessanalyzer.ui.screens
 
+import android.os.SystemClock
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
-import net.palaya.chessanalyzer.ui.a11y.asHeading
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -28,53 +32,66 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.res.pluralStringResource
-import android.os.SystemClock
-import kotlinx.coroutines.delay
-import net.palaya.chessanalyzer.ui.model.formatElapsed
-import net.palaya.chessanalyzer.ui.model.thinkingDeeper
-import net.palaya.chessanalyzer.video.ExportTimeLeft
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import net.palaya.chessanalyzer.R
 import net.palaya.chessanalyzer.data.AnalysisService
+import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
+import net.palaya.chessanalyzer.ui.a11y.asHeading
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
+import net.palaya.chessanalyzer.ui.model.ReviewRunProgress
+import net.palaya.chessanalyzer.ui.model.ReviewStage
+import net.palaya.chessanalyzer.ui.model.StageState
+import net.palaya.chessanalyzer.ui.model.StageStatus
+import net.palaya.chessanalyzer.ui.model.formatElapsed
+import net.palaya.chessanalyzer.ui.model.thinkingDeeper
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
+import net.palaya.chessanalyzer.video.ExportTimeLeft
 
 /**
- * Shown while the engine/net are being prepared and the game is being analyzed move by
- * move. [progress] is expected to be a stream of updates from the (future) `:engine`
- * analysis pipeline; for now the caller drives it however it likes (a ViewModel StateFlow
- * once one exists).
+ * The one processing screen of a review (RF, owner's phone test 2026-10-11, items 5 to 7): every stage the game's
+ * options asked for runs here, once, and the screen ends on the Summary.
  *
- * When [error] is non-null the same screen turns into an error state instead of the caller
- * stacking a dialog on top: a modal whose only button leaves the screen threw the user back to Home
- * with nothing to act on. Here they can [onRetry] (the game text is still registered, and cached
- * evals make a second attempt resume rather than restart), go [onBack], or [onShareDetails] (the
- * diagnostic log, F1).
+ * Top to bottom: ONE overall bar (stages weighted by their estimated time), the measured "About N min left" (hidden
+ * until it can be honest; the current stage's own line meanwhile) with the elapsed clock, a checklist of the stages
+ * (done / current / waiting / skipped, each with its own "N of M", Skip on the optional ones), then [whileYouWait],
+ * which takes the rest of the screen (the game-insights panel), and Cancel pinned at the bottom.
  *
- * The time bar under the progress bar (F1): the elapsed time, "About N min left" once it can be
- * measured, and "Thinking deeper on this move… depth 15 of 18" when one position takes longer than
- * [net.palaya.chessanalyzer.ui.model.THINKING_DEEPER_AFTER_MS]. Design reference (chess.com's game
- * review progress, pattern only): one determinate bar with a short status line, and the secondary
- * facts below it in smaller, muted text that never competes with the status.
+ * When [error] is non-null the same screen turns into an error state instead of the caller stacking a dialog on top:
+ * the user can [onRetry] (the game text is still registered, and cached evals make a second attempt resume rather than
+ * restart), go [onBack], or [onShareDetails] (the diagnostic log, F1).
+ *
+ * Design reference (chess.com's game review progress and its multi-step loaders, pattern only): one determinate bar with
+ * a short status line, secondary facts below it in smaller muted text, the steps as a short list with a check per done
+ * step, and something to look at while it works rather than an empty wait.
  */
 @Composable
 fun AnalysisProgressScreen(
-    progress: AnalysisProgress,
+    run: ReviewRunProgress,
     modifier: Modifier = Modifier,
     onCancel: (() -> Unit)? = null,
     error: AnalysisService.Failure? = null,
@@ -83,131 +100,213 @@ fun AnalysisProgressScreen(
     onShareDetails: (() -> Unit)? = null,
     /** D2c: "Set up" on the SETUP_REQUIRED error, to the Setup screen (the game waits for it). */
     onSetUp: (() -> Unit)? = null,
-    /** C2: Skip during "Polishing the commentary (on-device AI)": the original texts stay. */
-    onSkipPolishing: (() -> Unit)? = null,
+    /** Skip on an optional stage (2 to 4): what is done stays, the rest of that stage is not done. */
+    onSkipStage: ((ReviewStage) -> Unit)? = null,
+    /**
+     * The "while you wait" slot (RF): placed under the progress area, it takes all the remaining space. The game-insights
+     * panel goes here (its data: `AnalysisViewModel.processingGame` and `evalsSoFar`). Empty by default.
+     */
+    whileYouWait: @Composable () -> Unit = {},
 ) {
     if (error != null) {
         AnalysisErrorState(error = error, onRetry = onRetry, onBack = onBack, onShareDetails = onShareDetails, onSetUp = onSetUp, modifier = modifier)
         return
     }
-    Scaffold(modifier = modifier) { innerPadding ->
-        // A centred, scrollable column: centred when it fits, scrolling (never clipped) in landscape
-        // or at a 2.0 font where the ring, the texts, the bar and Cancel are taller than the window.
-        Box(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentAlignment = Alignment.Center,
-        ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            CircularProgressIndicator(
-                progress = { progress.fractionComplete.coerceIn(0f, 1f) },
-                // Decoration: the linear bar below carries the progress for TalkBack (two bars were two stops).
-                modifier = Modifier.size(64.dp).clearAndSetSemantics { },
-                color = MaterialTheme.colorScheme.primary,
-                // A determinate ring draws only the done part; the track shows where it is going.
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                strokeWidth = 5.dp,
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = { AppBarTitle(stringResource(R.string.progress_title)) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Text(
-                text = stringResource(R.string.progress_title),
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.asHeading(),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            val status = statusText(progress)
-            Text(
-                text = status,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(modifier = Modifier.height(20.dp))
-
-            LinearProgressIndicator(
-                progress = { progress.fractionComplete.coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    // "Move 5 of 23" instead of a bare percentage, and TalkBack announces it as it moves.
-                    .semantics { stateDescription = status },
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            )
-
-            AnalysisTimeBar(progress = progress)
-
-            if (progress.phase == AnalysisPhase.POLISHING_COMMENTARY && onSkipPolishing != null) {
-                // C2: the analysis is done; this step only rewords the key moments, so it is skipped, not cancelled.
-                Spacer(modifier = Modifier.height(24.dp))
-                OutlinedButton(onClick = onSkipPolishing, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(text = stringResource(R.string.progress_polishing_skip))
-                }
-            } else if (onCancel != null) {
-                Spacer(modifier = Modifier.height(24.dp))
-                OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Text(text = stringResource(R.string.progress_cancel))
+        },
+        bottomBar = {
+            if (onCancel != null) {
+                // Edge to edge: the bottom bar owns its insets.
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = Modifier
+                            .navigationBarsPadding()
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .heightIn(min = 48.dp),
+                    ) {
+                        Text(text = stringResource(R.string.progress_cancel))
+                    }
                 }
             }
-        }
+        },
+    ) { innerPadding ->
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            val progressMax = maxHeight * 0.62f
+            Column(modifier = Modifier.fillMaxSize()) {
+                // The progress area scrolls inside its own share of the height (landscape, a 2.0 font), so the slot
+                // below always keeps the rest of the screen.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = progressMax)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    OverallProgress(run)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    StageChecklist(run = run, onSkipStage = onSkipStage)
+                }
+                Box(modifier = Modifier.fillMaxWidth().weight(1f)) { whileYouWait() }
+            }
         }
     }
 }
 
-/**
- * Elapsed time, "About N min left" and "Thinking deeper…" under the bar. The elapsed clock ticks
- * every second and is NOT a live region (TalkBack would read it every second); the estimate and the
- * "thinking deeper" line change rarely and sit in a polite live region. Wraps at any font size.
- */
+/** The overall bar, the time left (whole run, or this step's while the whole run's cannot be measured) and the clock. */
 @Composable
-private fun AnalysisTimeBar(progress: AnalysisProgress) {
-    if (progress.runStartedAtMs <= 0L || progress.phase == AnalysisPhase.DONE || progress.phase == AnalysisPhase.POLISHING_COMMENTARY) return
-    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = SystemClock.elapsedRealtime()
-            delay(1_000L)
-        }
-    }
-    Spacer(modifier = Modifier.height(12.dp))
-    Text(
-        text = stringResource(R.string.progress_elapsed, formatElapsed(now - progress.runStartedAtMs)),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
+private fun OverallProgress(run: ReviewRunProgress) {
+    val percent = (run.overallFraction * 100).toInt().coerceIn(0, 100)
+    val overallCd = stringResource(R.string.cd_progress_overall, percent)
+    LinearProgressIndicator(
+        progress = { run.overallFraction.coerceIn(0f, 1f) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .semantics { stateDescription = overallCd },
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
     )
-    val left = when (val t = progress.timeLeft) {
-        ExportTimeLeft.Hidden -> null
+    Spacer(modifier = Modifier.height(8.dp))
+    val left = when (val t = run.overallTimeLeft) {
+        ExportTimeLeft.Hidden -> when (val s = run.stageTimeLeft) {
+            ExportTimeLeft.Hidden -> null
+            ExportTimeLeft.LessThanMinute -> stringResource(R.string.progress_step_less_than_minute)
+            is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.progress_step_minutes_left, s.minutes, s.minutes)
+        }
         ExportTimeLeft.LessThanMinute -> stringResource(R.string.progress_less_than_minute)
         is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.progress_minutes_left, t.minutes, t.minutes)
     }
     if (left != null) {
+        // Changes rarely: a polite live region. The elapsed clock below is not one (it ticks every second).
         Text(
             text = left,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
-    val deeper = thinkingDeeper(progress, now)
-    if (deeper != null) {
-        Spacer(modifier = Modifier.height(8.dp))
+    if (run.runStartedAtMs > 0L) {
+        var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                now = SystemClock.elapsedRealtime()
+                delay(1_000L)
+            }
+        }
         Text(
-            text = stringResource(R.string.progress_thinking_deeper, deeper.first, deeper.second),
-            style = MaterialTheme.typography.bodyMedium,
+            text = stringResource(R.string.progress_elapsed, formatElapsed(now - run.runStartedAtMs)),
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
+        val deeper = thinkingDeeper(run.engine, now)
+        if (deeper != null && run.current?.stage == ReviewStage.ENGINE) {
+            Text(
+                text = stringResource(R.string.progress_thinking_deeper, deeper.first, deeper.second),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+    }
+}
+
+@Composable
+private fun StageChecklist(run: ReviewRunProgress, onSkipStage: ((ReviewStage) -> Unit)?) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (stage in run.stages) {
+            StageRow(stage = stage, engine = run.engine, onSkip = onSkipStage?.takeIf { stage.stage.skippable && stage.status == StageStatus.CURRENT })
+        }
+    }
+}
+
+@StringRes
+internal fun stageLabelRes(stage: ReviewStage): Int = when (stage) {
+    ReviewStage.ENGINE -> R.string.stage_engine
+    ReviewStage.POLISH_COMMENTARY -> R.string.stage_polish
+    ReviewStage.WRITE_NARRATION -> R.string.stage_write_narration
+    ReviewStage.RECORD_VOICE -> R.string.stage_record_voice
+}
+
+/**
+ * The count a stage shows: positions as whole moves for the engine (people count moves, not plies; Home says
+ * "17 moves"), items for the others. Null while the total is not known.
+ */
+internal fun stageCount(stage: StageState): Pair<Int, Int>? {
+    if (stage.total <= 0) return null
+    return if (stage.stage == ReviewStage.ENGINE) wholeMoveCounter(stage.done, stage.total)
+    else stage.done.coerceAtMost(stage.total) to stage.total
+}
+
+/** One checklist row: icon, the stage, its count; Skip on the running optional stage. One TalkBack stop plus Skip. */
+@Composable
+private fun StageRow(stage: StageState, engine: AnalysisProgress, onSkip: ((ReviewStage) -> Unit)?) {
+    val label = stringResource(stageLabelRes(stage.stage))
+    val status = stringResource(
+        when (stage.status) {
+            StageStatus.DONE -> R.string.stage_status_done
+            StageStatus.SKIPPED -> R.string.stage_status_skipped
+            StageStatus.CURRENT -> R.string.stage_status_current
+            StageStatus.PENDING -> R.string.stage_status_pending
+        },
+    )
+    val count = stageCount(stage)?.let { (d, t) -> stringResource(R.string.stage_count, d, t) }
+        // Before the engine counts positions it is starting up ("Starting…").
+        ?: if (stage.stage == ReviewStage.ENGINE && stage.status == StageStatus.CURRENT && engine.phase == AnalysisPhase.PREPARING_ENGINE) {
+            stringResource(R.string.progress_downloading_engine)
+        } else null
+    val rowDescription = if (count != null && stage.status == StageStatus.CURRENT) {
+        stringResource(R.string.cd_stage_row_count, label, status, count)
+    } else {
+        stringResource(R.string.cd_stage_row, label, status)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clearAndSetSemantics { contentDescription = rowDescription },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                when (stage.status) {
+                    StageStatus.DONE -> Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    StageStatus.SKIPPED -> Icon(Icons.Filled.RemoveCircleOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    StageStatus.PENDING -> Icon(Icons.Filled.RadioButtonUnchecked, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
+                    StageStatus.CURRENT -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = if (stage.status == StageStatus.CURRENT) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                    color = if (stage.status == StageStatus.PENDING) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                )
+                if (stage.status == StageStatus.CURRENT && count != null) {
+                    Text(text = count, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (stage.status == StageStatus.SKIPPED) {
+                    Text(text = status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (onSkip != null) {
+            val skipCd = stringResource(R.string.cd_stage_skip, label)
+            TextButton(
+                onClick = { onSkip(stage.stage) },
+                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = skipCd },
+            ) {
+                Text(stringResource(R.string.stage_skip))
+            }
+        }
     }
 }
 
@@ -299,18 +398,6 @@ internal fun failureHintRes(failure: AnalysisService.Failure): Int = when (failu
     AnalysisService.Failure.GAME_TEXT_LOST -> R.string.analysis_failed_lost
 }
 
-@Composable
-private fun statusText(progress: AnalysisProgress): String = when (progress.phase) {
-    AnalysisPhase.PREPARING_ENGINE -> stringResource(R.string.progress_downloading_engine)
-    AnalysisPhase.ANALYZING_MOVES -> {
-        val (done, total) = wholeMoveCounter(progress.currentMoveIndex, progress.totalMoves)
-        stringResource(R.string.progress_analyzing_moves, done, total)
-    }
-    AnalysisPhase.POLISHING_COMMENTARY ->
-        stringResource(R.string.progress_polishing, progress.currentMoveIndex.coerceAtMost(progress.totalMoves), progress.totalMoves)
-    AnalysisPhase.DONE -> stringResource(R.string.progress_title)
-}
-
 /**
  * The engine searches every *position* (the start position plus one per ply), but people count
  * whole moves: Home says "17 moves" for a 33-ply game, so the progress screen must count to 17
@@ -328,13 +415,18 @@ internal fun wholeMoveCounter(positionsDone: Int, positionsTotal: Int): Pair<Int
 private fun AnalysisProgressScreenPreview() {
     ChessAnalyzerTheme {
         AnalysisProgressScreen(
-            progress = AnalysisProgress(
-                phase = AnalysisPhase.ANALYZING_MOVES,
-                currentMoveIndex = 14,
-                totalMoves = 32,
-                fractionComplete = 0.44f,
+            run = ReviewRunProgress(
+                stages = listOf(
+                    StageState(ReviewStage.ENGINE, StageStatus.DONE, 33, 33),
+                    StageState(ReviewStage.POLISH_COMMENTARY, StageStatus.SKIPPED, 2, 5),
+                    StageState(ReviewStage.WRITE_NARRATION, StageStatus.CURRENT, 12, 40),
+                    StageState(ReviewStage.RECORD_VOICE, StageStatus.PENDING),
+                ),
+                overallFraction = 0.64f,
+                overallTimeLeft = ExportTimeLeft.Minutes(3),
             ),
             onCancel = {},
+            onSkipStage = {},
         )
     }
 }
@@ -344,7 +436,7 @@ private fun AnalysisProgressScreenPreview() {
 private fun AnalysisProgressScreenErrorPreview() {
     ChessAnalyzerTheme {
         AnalysisProgressScreen(
-            progress = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE),
+            run = ReviewRunProgress(),
             error = AnalysisService.Failure.PARSE,
             onRetry = {},
             onBack = {},

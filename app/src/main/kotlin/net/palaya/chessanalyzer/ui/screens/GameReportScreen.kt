@@ -3,16 +3,11 @@
 package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.remember
 import net.palaya.chessanalyzer.ui.components.PlayerMaterialRow
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
-import net.palaya.chessanalyzer.ui.model.canReanalyse
 import net.palaya.chessanalyzer.ui.model.customDepthValue
 import net.palaya.chessanalyzer.ui.model.materialViewOrNull
-import net.palaya.chessanalyzer.ui.model.strengthChoices
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -153,8 +148,8 @@ fun GameReportScreen(
     finalFen: String? = null,
     /** The depth this game was analysed at (A4); null while it is not in memory. Shown with "Re-analyse". */
     analysisDepth: Int? = null,
-    /** The user picked another strength and confirmed "Re-analyse" (A4). Null hides the card (previews). */
-    onReanalyse: ((AnalysisStrength) -> Unit)? = null,
+    /** "Re-analyse with different settings…": opens the game's Review options (RF). Null hides the card (previews). */
+    onReanalyse: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     val moments = selectSummaryMoments(report)
@@ -961,13 +956,12 @@ private fun ClassificationTableRow(row: ClassificationRow) {
 }
 
 /**
- * "Analysed at Standard" and a "Re-analyse" button (A4): the strength belongs to the game. The button opens a
- * short chooser (Quick / Standard / Deep, the current one marked); confirming analyses the game again at that
- * strength. The Settings value stays the default for games analysed for the first time.
+ * "Analysed at Standard" and "Re-analyse with different settings…" (A4, RF): the strength belongs to the game. The
+ * button opens the game's Review options screen (the A4 chooser dialog is gone: every choice of a review is made on that
+ * one screen, owner's phone test 2026-10-11), pre-filled with this game's own options.
  */
 @Composable
-private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> Unit) {
-    var choosing by rememberSaveable { mutableStateOf(false) }
+private fun AnalysisStrengthCard(depth: Int, onReanalyse: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         shape = MaterialTheme.shapes.medium,
@@ -983,20 +977,10 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> 
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = { choosing = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+            OutlinedButton(onClick = onReanalyse, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(stringResource(R.string.reanalyse_button))
             }
         }
-    }
-    if (choosing) {
-        ReanalyseDialog(
-            currentDepth = depth,
-            onConfirm = { strength ->
-                choosing = false
-                onReanalyse(strength)
-            },
-            onDismiss = { choosing = false },
-        )
     }
 }
 
@@ -1006,72 +990,6 @@ private fun strengthLabel(depth: Int): String = when (AnalysisStrength.fromDepth
     AnalysisStrength.STANDARD -> stringResource(R.string.settings_depth_standard)
     AnalysisStrength.DEEP -> stringResource(R.string.settings_depth_deep)
     null -> stringResource(R.string.settings_custom_value, customDepthValue(depth))
-}
-
-@Composable
-private fun ReanalyseDialog(currentDepth: Int, onConfirm: (AnalysisStrength) -> Unit, onDismiss: () -> Unit) {
-    var picked by rememberSaveable { mutableStateOf<AnalysisStrength?>(null) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.reanalyse_title)) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.reanalyse_body, strengthLabel(currentDepth)),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                strengthChoices(currentDepth).forEach { choice ->
-                    val label = strengthLabel(choice.strength.depth)
-                    val hint = stringResource(
-                        when (choice.strength) {
-                            AnalysisStrength.QUICK -> R.string.reanalyse_hint_quick
-                            AnalysisStrength.STANDARD -> R.string.reanalyse_hint_standard
-                            AnalysisStrength.DEEP -> R.string.reanalyse_hint_deep
-                        },
-                    )
-                    val current = stringResource(R.string.reanalyse_current)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 56.dp)
-                            .selectable(
-                                selected = picked == choice.strength,
-                                role = Role.RadioButton,
-                                onClick = { picked = choice.strength },
-                            )
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = picked == choice.strength, onClick = null)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = if (choice.isCurrent) "$label ($current)" else label,
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                            Text(
-                                text = hint,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { picked?.let(onConfirm) },
-                enabled = canReanalyse(currentDepth, picked),
-                modifier = Modifier.heightIn(min = 48.dp),
-            ) { Text(stringResource(R.string.reanalyse_confirm)) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.reanalyse_cancel)) }
-        },
-    )
 }
 
 /**

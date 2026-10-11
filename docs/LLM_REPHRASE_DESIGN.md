@@ -787,6 +787,15 @@ reworded script (`rephrasedVideoScriptFor`) to the VideoScreen, so the player, S
 finished words and the export never calls the model. V4's spoken best line (`SegmentKind.BEST_LINE`) is not on the
 allowlist. The "Report this wording" item (§9.2) is not built.
 
+**Review flow (RF, 2026-10-11, after the owner's Pixel 8 test; supersedes the two "Polishing…" phases above):** Natural
+wording is a per-game option chosen on the Review options screen (default: the Settings switch; shown only when the model
+is installed and supported, else a line pointing to Settings). Both passes are stages of the one processing run:
+"Polishing the commentary" (the key moments) and, with "Prepare the video now" on, "Writing the video narration" (the
+beats), each skippable, with the run's overall bar and measured time left. The Video route no longer has a pre-step: it
+reads the cache only (`finishedVideoScriptFor`) and never calls the model. The game's option, not the Settings switch,
+gates every read (`ChessAnalyzerApplication.gameRephraseService`). The model is released before the narration voice is
+loaded for the recording stage.
+
 **Measurement (§5.5):** host CPU only (llama.cpp b11190, the corpus = every distinct card text of the three audited
 games for three sides, 190, and every eligible narration beat of the five pacing games, 388). The other candidates
 ran on all cards and every 4th beat. Their raw outputs are committed (`docs/audit/rephrase/raw_*.jsonl`) and

@@ -53,7 +53,7 @@
     </plurals>
 
     <!-- Analysis progress -->
-    <string name="progress_title">Analyzing game</string>
+    <string name="progress_title">Reviewing the game</string>
     <string name="progress_downloading_engine">Starting…</string>
     <string name="progress_analyzing_moves">Move %1$d of %2$d</string>
     <string name="progress_cancel">Cancel</string>
@@ -251,17 +251,13 @@
         <item quantity="one">To save time, %1$d position was searched less deeply than the rest.</item>
         <item quantity="other">To save time, %1$d positions were searched less deeply than the rest.</item>
     </plurals>
-    <!-- A4: the analysis strength belongs to the game; Re-analyse on the Summary. %1$s = "Quick", "Standard", "Deep" or "Custom (16)". -->
+    <!-- A4: the analysis strength belongs to the game. RF: re-analyse opens the Review options screen. %1$s = "Quick", "Standard", "Deep" or "Custom (16)". -->
     <string name="reanalyse_analysed_at">Analysed at %1$s</string>
-    <string name="reanalyse_button">Re-analyse…</string>
-    <string name="reanalyse_title">Analyse this game again</string>
-    <string name="reanalyse_body">This game was analysed at %1$s. Pick another strength to analyse it again. Other games keep the strength set in Settings.</string>
+    <string name="reanalyse_button">Re-analyse with different settings…</string>
+    <!-- The one-line description of each strength (Review options). -->
     <string name="reanalyse_hint_quick">Fastest, looks a little less deeply.</string>
     <string name="reanalyse_hint_standard">A good balance of speed and accuracy.</string>
     <string name="reanalyse_hint_deep">Slowest, the most accurate.</string>
-    <string name="reanalyse_current">current</string>
-    <string name="reanalyse_confirm">Re-analyse</string>
-    <string name="reanalyse_cancel">Cancel</string>
     <!-- A4: material on the Board and at the end of the game on the Summary. -->
     <string name="summary_move_quality">Move quality</string>
     <string name="summary_final_material">Material at the end</string>
@@ -305,7 +301,7 @@
     <string name="settings_depth_quick">Quick</string>
     <string name="settings_depth_standard">Standard</string>
     <string name="settings_depth_deep">Deep</string>
-    <string name="settings_depth_help">Deeper is more accurate and slower. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
+    <string name="settings_depth_help">Deeper is more accurate and slower. This is the default for new games; each game can be analysed again at another strength from its Review options.</string>
     <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
     <string name="settings_custom_value">Custom (%1$s)</string>
     <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->
@@ -663,11 +659,6 @@
     <string name="update_kind_net">Chess engine data</string>
     <string name="update_kind_voice">Narration voice</string>
     <string name="update_kind_rephrase">Wording model</string>
-    <!-- C2: the Analysing screen's last, skippable step (docs/LLM_REPHRASE_DESIGN.md §6.2). -->
-    <string name="progress_polishing">Polishing the commentary (on-device AI)… %1$d of %2$d</string>
-    <string name="progress_polishing_skip">Skip</string>
-    <string name="video_polishing_title">Polishing the narration</string>
-    <string name="video_polishing">Polishing the narration (on-device AI)… %1$d of %2$d</string>
     <!-- C2: the optional wording model at setup (owner decision 2026-10-09, design §12.3). -->
     <string name="setup_rephrase_offer">Also download the wording model (optional, about %1$s)</string>
     <string name="setup_rephrase_offer_help">Rewords the commentary on your phone with an AI model; every fact is checked against the app\'s own text. The app works fully without it, and you can add it later in Settings.</string>
@@ -733,4 +724,80 @@
     <!-- %1$s = the component, %2$s = "This app has 19", %3$s = its status. -->
     <string name="cd_upstream_row">%1$s. %2$s. %3$s</string>
     <string name="update_metered_body">This update is about %1$s. Download now, or wait until you\'re on Wi-Fi.</string>
+
+    <!-- RF: the Review options screen (everything a review needs, decided once, before any processing) -->
+    <string name="review_options_title">Review options</string>
+    <string name="review_options_start">Start review</string>
+    <string name="review_options_strength">Analysis strength</string>
+    <string name="review_options_strength_auto">Automatic</string>
+    <string name="review_options_hint_auto">Picks how deeply to look for this game.</string>
+    <!-- The game's evaluations at this strength are already on the phone. -->
+    <string name="review_options_strength_ready">Already analysed at this strength: ready at once</string>
+    <!-- A rough time measured on this phone in earlier reviews; shown only when it was measured. -->
+    <plurals name="review_options_strength_minutes">
+        <item quantity="one">About %1$d min on this phone</item>
+        <item quantity="other">About %1$d min on this phone</item>
+    </plurals>
+    <string name="review_options_strength_under_minute">About a minute on this phone</string>
+    <string name="review_options_side_help">The review then says \'you\' and \'your opponent\', and Practise uses your own mistakes.</string>
+    <string name="review_options_wording_help">Rewords the commentary and the narration on this phone. Every fact is checked against the app\'s own text.</string>
+    <string name="review_options_wording_download">Natural wording (on-device AI) needs the wording model, which you can download in Settings.</string>
+    <string name="review_options_open_settings">Open Settings</string>
+    <string name="review_options_video">Narrated video</string>
+    <string name="review_options_prepare_video">Prepare the video now</string>
+    <string name="review_options_prepare_video_help">The narration is written and recorded in this run, so the video plays at once.</string>
+    <!-- %1$s = "White vs Black", %2$s = the result, %3$s = "17 moves". -->
+    <string name="review_options_header">%1$s · %2$s · %3$s</string>
+
+    <!-- RF: the one processing screen -->
+    <string name="stage_engine">Analysing moves</string>
+    <string name="stage_polish">Polishing the commentary</string>
+    <string name="stage_write_narration">Writing the video narration</string>
+    <string name="stage_record_voice">Recording the narration voice</string>
+    <!-- One stage's own count, e.g. "12 of 40". -->
+    <string name="stage_count">%1$d of %2$d</string>
+    <string name="stage_status_done">done</string>
+    <string name="stage_status_skipped">skipped</string>
+    <string name="stage_status_current">in progress</string>
+    <string name="stage_status_pending">waiting</string>
+    <!-- TalkBack: one checklist row, e.g. "Recording the narration voice, in progress, 12 of 40". -->
+    <string name="cd_stage_row">%1$s, %2$s</string>
+    <string name="cd_stage_row_count">%1$s, %2$s, %3$s</string>
+    <string name="stage_skip">Skip</string>
+    <string name="cd_stage_skip">Skip %1$s</string>
+    <!-- The current stage's own time left, when the whole run's cannot be measured yet. -->
+    <plurals name="progress_step_minutes_left">
+        <item quantity="one">&#8206;This step: about %1$d min left</item>
+        <item quantity="other">&#8206;This step: about %1$d min left</item>
+    </plurals>
+    <string name="progress_step_less_than_minute">This step: less than a minute left</string>
+    <!-- %1$d = percent done of the whole review, for the overall bar. -->
+    <string name="cd_progress_overall">%1$d%% of the review done</string>
+
+    <!-- RF: the Video screen prepares missing narration inline. %1$s = the voice, e.g. "Bella · American, female". -->
+    <string name="video_preparing_narration">Preparing the narration in %1$s…</string>
+    <string name="video_preparing_cancel">Cancel</string>
+    <string name="video_narration_incomplete">Part of the narration isn\'t recorded in %1$s yet, so the phone\'s voice reads those parts.</string>
+    <string name="video_narration_prepare">Prepare the narration</string>
+
+    <!-- RF: the library on Home -->
+    <!-- %1$s = "White vs Black". -->
+    <string name="cd_library_menu">More options for %1$s</string>
+    <string name="library_reanalyse">Re-analyse with different settings…</string>
+    <string name="library_delete">Delete</string>
+    <string name="library_delete_title">Delete this game?</string>
+    <!-- %1$s = "White vs Black". -->
+    <string name="library_delete_body">%1$s will be removed from your games. This can\'t be undone.</string>
+    <string name="library_delete_confirm">Delete</string>
+    <string name="library_delete_cancel">Cancel</string>
+
+    <!-- RF: Settings are the defaults for new games -->
+    <string name="settings_defaults_subtitle">Defaults for new games. Each game keeps its own, set on its Review options.</string>
+    <string name="settings_review_header">Reviews</string>
+    <string name="settings_show_review_options">Show the review options before each review</string>
+    <string name="settings_show_review_options_help">Off: a new game is reviewed at once with these defaults. Re-analysing a game always shows them.</string>
+    <string name="settings_prepare_video">Prepare the video with each review</string>
+    <string name="settings_prepare_video_help">The narration is recorded while the game is analysed, so the video plays at once.</string>
+    <string name="voice_device_option">The phone\'s built-in voice</string>
+    <string name="voice_device_option_help">Speaks at once, nothing to prepare.</string>
 </resources>

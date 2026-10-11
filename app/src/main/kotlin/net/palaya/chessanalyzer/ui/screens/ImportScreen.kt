@@ -34,6 +34,13 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -119,6 +126,10 @@ fun ImportScreen(
     onSetupCardClick: () -> Unit = {},
     /** G1: opens the famous-games library (null hides the entry). */
     onFamousGamesClick: (() -> Unit)? = null,
+    /** RF: a library row's "Re-analyse with different settings…" (null hides the row menu). */
+    onReanalyseGame: ((String) -> Unit)? = null,
+    /** RF: a library row's "Delete", after the confirm dialog. */
+    onDeleteGame: ((String) -> Unit)? = null,
 ) {
     val pickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -137,6 +148,8 @@ fun ImportScreen(
         setupCard = setupCard,
         onSetupCardClick = onSetupCardClick,
         onFamousGamesClick = onFamousGamesClick,
+        onReanalyseGame = onReanalyseGame,
+        onDeleteGame = onDeleteGame,
     )
 }
 
@@ -157,7 +170,11 @@ fun ImportScreenContent(
     setupCard: HomeSetupCard? = null,
     onSetupCardClick: () -> Unit = {},
     onFamousGamesClick: (() -> Unit)? = null,
+    onReanalyseGame: ((String) -> Unit)? = null,
+    onDeleteGame: ((String) -> Unit)? = null,
 ) {
+    // RF: the game whose Delete is being confirmed (its id; saved across rotation).
+    var confirmDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
     // The paste field lives in a sheet, not on the page: sharing a game into the app is the main
     // way in, so a permanently open text box was mostly noise. Saveable so rotating the phone with
     // the sheet open does not drop the user back to Home.
@@ -216,10 +233,39 @@ fun ImportScreenContent(
                     )
                 }
                 items(recentGames, key = { it.id }) { game ->
-                    RecentGameRow(game = game, onClick = { onRecentGameSelected(game.id) })
+                    RecentGameRow(
+                        game = game,
+                        onClick = { onRecentGameSelected(game.id) },
+                        onReanalyse = onReanalyseGame?.let { { it(game.id) } },
+                        onDelete = onDeleteGame?.let { { confirmDeleteId = game.id } },
+                    )
                 }
             }
         }
+    }
+
+    val deleting = confirmDeleteId?.let { id -> recentGames.firstOrNull { it.id == id } }
+    if (deleting != null && onDeleteGame != null) {
+        val name = versusLine(stringResource(R.string.game_vs_format), deleting.white, deleting.black)
+        AlertDialog(
+            onDismissRequest = { confirmDeleteId = null },
+            title = { Text(stringResource(R.string.library_delete_title)) },
+            text = { Text(stringResource(R.string.library_delete_body, name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDeleteId = null
+                        onDeleteGame(deleting.id)
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text(stringResource(R.string.library_delete_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteId = null }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(stringResource(R.string.library_delete_cancel))
+                }
+            },
+        )
     }
 
     if (showPasteSheet) {
@@ -470,26 +516,45 @@ private fun PasteMovesSheet(
     }
 }
 
+/**
+ * One library row: tapping it opens the game; the overflow button (RF) offers "Re-analyse with different settings…" and
+ * "Delete". For TalkBack the row is one node (players, date, moves, result) plus the menu button, which is labelled with
+ * the game (accessibility conventions: 48 dp targets, labelled menu items).
+ */
 @Composable
-private fun RecentGameRow(game: RecentGameSummary, onClick: () -> Unit) {
+private fun RecentGameRow(
+    game: RecentGameSummary,
+    onClick: () -> Unit,
+    onReanalyse: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
+    val name = versusLine(stringResource(R.string.game_vs_format), game.white, game.black)
+    var menuOpen by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         shape = MaterialTheme.shapes.medium,
-        onClick = onClick,
     ) {
         Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .weight(1f)
+                .heightIn(min = 56.dp)
+                // clickable merges the texts below into one node (players, date and moves, result); the menu button
+                // stays a node of its own beside it.
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(start = 14.dp, end = if (onReanalyse != null || onDelete != null) 0.dp else 14.dp, top = 12.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = versusLine(stringResource(R.string.game_vs_format), game.white, game.black),
+                    text = name,
                     style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Ltr),
                 )
                 Text(
@@ -504,6 +569,36 @@ private fun RecentGameRow(game: RecentGameSummary, onClick: () -> Unit) {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
+        }
+        if (onReanalyse != null || onDelete != null) {
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.cd_library_menu, name))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (onReanalyse != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.library_reanalyse)) },
+                            onClick = {
+                                menuOpen = false
+                                onReanalyse()
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                    if (onDelete != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.library_delete)) },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                }
+            }
+        }
         }
     }
 }

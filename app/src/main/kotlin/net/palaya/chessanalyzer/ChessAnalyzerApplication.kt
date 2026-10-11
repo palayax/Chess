@@ -191,6 +191,37 @@ class ChessAnalyzerApplication : Application() {
         )
     }
 
+    /**
+     * RF: the same cache, checker and backend as [rephraseService], but NOT gated by the global Settings switch: a game's
+     * own "Natural wording" option (the Review options screen) decides, so the caller uses this one only for a game whose
+     * option is on. With the model missing or unsupported it still does nothing (the backend returns null).
+     */
+    val gameRephraseService: RephraseService by lazy {
+        RephraseService(
+            cache = rephraseCache,
+            rephraser = { rephraserForTesting ?: rephraseBackend.get() },
+            foreground = appForeground,
+            log = { line -> diagnostics.log.log(RephraseService.TAG, line) },
+            activeIdOf = { rephraserForTesting?.id ?: rephraseBackend.activeId() },
+            onJobDone = { if (rephraserForTesting == null) rephraseBackend.scheduleIdleRelease() },
+        )
+    }
+
+    /** RF: true when the wording model can run here and is installed (cheap; no load, no hashing). */
+    fun wordingModelUsable(): Boolean =
+        rephraserForTesting != null ||
+            (rephraseAvailability() == RephraseSupport.Availability.AVAILABLE && rephraseModelStore.isInstalled())
+
+    /** RF: "Show this screen before each review" and "Prepare the video with each review". */
+    val reviewPreferences: net.palaya.chessanalyzer.data.ReviewPreferencesRepository by lazy {
+        net.palaya.chessanalyzer.data.ReviewPreferencesRepository(this)
+    }
+
+    /** RF: this phone's measured review speeds (`filesDir/review/speeds.json`). */
+    val reviewSpeedStore: net.palaya.chessanalyzer.data.ReviewSpeedStore by lazy {
+        net.palaya.chessanalyzer.data.ReviewSpeedStore(filesDir)
+    }
+
     val engineController: EngineController by lazy {
         EngineController(netStore) { line -> diagnostics.log.log(AppDiagnostics.TAG_ENGINE, line) }
     }

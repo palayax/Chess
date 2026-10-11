@@ -26,6 +26,8 @@
         <exclude domain="file" path="pending_analysis.json.tmp" />
         <exclude domain="file" path="setup_waiting_game.json" />
         <exclude domain="file" path="setup_waiting_game.json.tmp" />
+        <!-- RF: the review run's device-specific files (pending options, measured speeds). -->
+        <exclude domain="file" path="review/" />
         <exclude domain="file" path="engine/" />
         <exclude domain="sharedpref" path="engine_prefs.xml" />
     </cloud-backup>
@@ -47,6 +49,8 @@
         <exclude domain="file" path="pending_analysis.json.tmp" />
         <exclude domain="file" path="setup_waiting_game.json" />
         <exclude domain="file" path="setup_waiting_game.json.tmp" />
+        <!-- RF: the review run's device-specific files (pending options, measured speeds). -->
+        <exclude domain="file" path="review/" />
         <exclude domain="file" path="engine/" />
         <exclude domain="sharedpref" path="engine_prefs.xml" />
     </device-transfer>

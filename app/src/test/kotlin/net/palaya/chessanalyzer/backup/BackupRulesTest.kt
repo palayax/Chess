@@ -59,6 +59,8 @@ class BackupRulesTest {
         // D2c: a game shared before setup, waiting for the net (same reason: it would start by itself).
         Rule("file", PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME),
         Rule("file", PendingAnalysisStore.WAITING_FOR_SETUP_FILE_NAME + ".tmp"),
+        // RF: a game's pending review options and this phone's measured review speeds.
+        Rule("file", net.palaya.chessanalyzer.data.GameRepository.REVIEW_DIR_NAME + "/"),
     )
 
     @Test

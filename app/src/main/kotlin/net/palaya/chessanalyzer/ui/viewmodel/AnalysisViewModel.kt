@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,8 +16,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -25,6 +28,7 @@ import net.palaya.chessanalyzer.ChessAnalyzerApplication
 import net.palaya.chessanalyzer.data.AnalysisService
 import net.palaya.chessanalyzer.data.GameRepository
 import net.palaya.chessanalyzer.data.PendingAnalysisStore
+import net.palaya.chessanalyzer.data.ReviewPreferencesRepository
 import net.palaya.chessanalyzer.diagnostics.AppDiagnostics
 import net.palaya.chessanalyzer.ui.model.AnalysisTimeLeftTracker
 import net.palaya.chessanalyzer.data.mapper.applySideToCommentary
@@ -42,16 +46,44 @@ import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameReport
 import net.palaya.chessanalyzer.ui.model.ImportedGame
+import net.palaya.chessanalyzer.ui.model.NarrationPrepState
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings
-import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 import net.palaya.chessanalyzer.ui.model.PieceColor
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
+import net.palaya.chessanalyzer.ui.model.ReviewDefaults
+import net.palaya.chessanalyzer.ui.model.ReviewEntry
+import net.palaya.chessanalyzer.ui.model.ReviewOptions
+import net.palaya.chessanalyzer.ui.model.ReviewOptionsDraft
+import net.palaya.chessanalyzer.ui.model.ReviewOptionsLoad
+import net.palaya.chessanalyzer.ui.model.ReviewRunProgress
+import net.palaya.chessanalyzer.ui.model.ReviewStage
+import net.palaya.chessanalyzer.ui.model.ReviewTimeLeftTracker
 import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.StageState
+import net.palaya.chessanalyzer.ui.model.StageStatus
+import net.palaya.chessanalyzer.ui.model.deletePlan
+import net.palaya.chessanalyzer.ui.model.detectSide
+import net.palaya.chessanalyzer.ui.model.estimateAnalysisRemainingMs
+import net.palaya.chessanalyzer.ui.model.finished
+import net.palaya.chessanalyzer.ui.model.initialStageStates
+import net.palaya.chessanalyzer.ui.model.isKeyOfGame
+import net.palaya.chessanalyzer.ui.model.libraryAfterDelete
+import net.palaya.chessanalyzer.ui.model.narrationNeedsPreparation
+import net.palaya.chessanalyzer.ui.model.overallFraction
+import net.palaya.chessanalyzer.ui.model.prefillReviewOptions
 import net.palaya.chessanalyzer.ui.model.resolveSide
+import net.palaya.chessanalyzer.ui.model.reviewStagePlan
+import net.palaya.chessanalyzer.ui.model.showReviewOptions
+import net.palaya.chessanalyzer.ui.model.stageWeights
+import net.palaya.chessanalyzer.ui.model.strengthEstimateMs
+import net.palaya.chessanalyzer.ui.model.updated
 import net.palaya.chessanalyzer.ui.model.usernameToRemember
+import net.palaya.chessanalyzer.ui.model.wordingInEffect
+import net.palaya.chessanalyzer.ui.model.wordingOption
 import net.palaya.chessanalyzer.core.analysis.CommentaryGenerator
 import net.palaya.chessanalyzer.core.analysis.GameReport as CoreGameReport
+import net.palaya.chessanalyzer.core.analysis.PositionEval
 import net.palaya.chessanalyzer.core.analysis.PracticeSelector
 import net.palaya.chessanalyzer.core.analysis.PracticeSet
 import net.palaya.chessanalyzer.core.analysis.TacticSimulation
@@ -62,10 +94,16 @@ import net.palaya.chessanalyzer.core.narration.VideoScriptGenerator
 import net.palaya.chessanalyzer.ui.model.AppLocales
 import net.palaya.chessanalyzer.core.narration.NarrationLocales
 import net.palaya.chessanalyzer.core.pgn.PgnGame
+import net.palaya.chessanalyzer.core.pgn.PgnParser
+import net.palaya.chessanalyzer.ui.model.SearchBudget
+import net.palaya.chessanalyzer.video.DeviceTtsProvider
+import net.palaya.chessanalyzer.video.ExportTimeLeftTracker
+import net.palaya.chessanalyzer.video.NarrationPreparer
 import net.palaya.chessanalyzer.video.NarrationProviderSelection
 import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.NarrationVoiceProvider
 import net.palaya.chessanalyzer.video.NeuralTtsProvider
+import net.palaya.chessanalyzer.video.narrationCacheFingerprint
 import net.palaya.chessanalyzer.video.selectNarrationProvider
 import net.palaya.chessanalyzer.video.narrationOptionsFor
 import net.palaya.chessanalyzer.video.VoiceSamplePlayer
@@ -73,14 +111,18 @@ import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.video.VoiceStore
 
 /**
- * Owns the real import -> analyze -> review -> report flow, replacing the placeholder
- * [net.palaya.chessanalyzer.ui.navigation.GameStore] + timer-driven progress simulation that
- * previously stood in for it. Held at the nav-host level via `viewModel()` so it (and its
- * `viewModelScope`) survive configuration changes independently of any one screen.
+ * Owns the real import -> review options -> processing -> review -> report flow. Held at the nav-host level via
+ * `viewModel()` so it (and its `viewModelScope`) survive configuration changes independently of any one screen.
  *
- * The single [net.palaya.chessanalyzer.data.EngineController] and its net gate live
- * one level up on [ChessAnalyzerApplication] (see that class), not here — this class only
- * orchestrates calls into it via [AnalysisService].
+ * RF (owner's phone test, 2026-10-11): a review's choices are made once, on the Review options screen, and stored with
+ * the game ([gameOptions], `GameRepository.StoredGame`); one processing run ([runAnalysis]) then does every stage they
+ * ask for (engine, commentary wording, narration script and its wording, the narration recording) with one progress
+ * model ([run]); the Video screen only plays, and records missing narration inline ([ensureNarrationPrepared]).
+ * Every consumer reads the GAME's options, not the global settings (which are only the defaults for new games).
+ *
+ * The single [net.palaya.chessanalyzer.data.EngineController] and its net gate live one level up on
+ * [ChessAnalyzerApplication] (see that class), not here — this class only orchestrates calls into it via
+ * [AnalysisService].
  */
 class AnalysisViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -105,8 +147,17 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         app.narrationSettingsRepository.settingsFlow
             .stateIn(viewModelScope, SharingStarted.Eagerly, NarrationVoiceSettings())
 
+    /** RF: "Show the review options before each review" and "Prepare the video with each review" (Settings). */
+    val reviewPreferences: StateFlow<ReviewPreferencesRepository.Prefs> = app.reviewPreferences.prefsFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ReviewPreferencesRepository.Prefs())
+
     /** The persistent (`filesDir`-backed) narration cache — see [NarrationStore]'s class doc. */
     private val narrationStore: NarrationStore by lazy { NarrationStore.forApp(application) }
+
+    /** RF: records narration into [narrationStore] (the processing run's last stage and the Video screen). */
+    private val narrationPreparer: NarrationPreparer by lazy {
+        NarrationPreparer(narrationStore, { DeviceTtsProvider(app) }, File(app.cacheDir, "narration_prep"))
+    }
 
     private val _narrationStorageBytes = MutableStateFlow(0L)
     val narrationStorageBytes: StateFlow<Long> = _narrationStorageBytes
@@ -128,7 +179,14 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     private val voiceStore: VoiceStore get() = app.voiceStore
 
     private val _progress = MutableStateFlow(AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE))
+
+    /** The engine stage's own progress (kept for callers that only need the engine; the screen reads [run]). */
     val progress: StateFlow<AnalysisProgress> = _progress
+
+    private val _run = MutableStateFlow(ReviewRunProgress())
+
+    /** RF: the whole processing run (every stage, the overall bar, the measured time left), drawn by the processing screen. */
+    val run: StateFlow<ReviewRunProgress> = _run
 
     /**
      * Why the last analysis failed, or null. A reason rather than a message: the progress screen
@@ -156,6 +214,43 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     /** In-memory results for games analyzed this session (Compose-observable, like the old GameStore). */
     val games = mutableStateMapOf<String, ImportedGame>()
     val reports = mutableStateMapOf<String, GameReport>()
+
+    /**
+     * RF: the review options of every game this process has run (Compose-observable: the Video route rebuilds its
+     * script and its voice when the game's voice or pace changes in its sheet).
+     */
+    val gameOptions = mutableStateMapOf<String, ReviewOptions>()
+
+    /** RF: options chosen for the next run of a game (the Review options screen's Start, or the defaults with it off). */
+    private val pendingOptionsByGameId = mutableMapOf<String, ReviewOptions>()
+
+    // ---- RF: what the "while you wait" panel reads (built by another agent; this class only provides the data) ----
+
+    /** The game being processed now: its id, its moves in SAN and the user's side (UNKNOWN when not known). */
+    data class ProcessingGame(val gameId: String, val sanMoves: List<String>, val userSide: SideChoice)
+
+    private val _processingGame = MutableStateFlow<ProcessingGame?>(null)
+    val processingGame: StateFlow<ProcessingGame?> = _processingGame
+
+    private val _evalsSoFar = MutableStateFlow<List<PositionEval?>>(emptyList())
+
+    /**
+     * The engine's evaluation of each position of the game being processed, so far (index 0 = the start position, i =
+     * after ply i; null = not evaluated yet). Filled by [recordPositionEval].
+     */
+    val evalsSoFar: StateFlow<List<PositionEval?>> = _evalsSoFar
+
+    /**
+     * One position's evaluation from the engine stage. TODO(RF merge): pass `onPositionEvaluated = ::recordPositionEval`
+     * to `analysisService.analyze` once the auto-depth branch adds that parameter; until then [evalsSoFar] is filled only
+     * when the run ends (from the finished report is not possible either: the evaluations stay inside the service).
+     */
+    @Suppress("unused")
+    private fun recordPositionEval(index: Int, eval: PositionEval) {
+        val current = _evalsSoFar.value
+        val size = maxOf(current.size, index + 1)
+        _evalsSoFar.value = List(size) { i -> if (i == index) eval else current.getOrNull(i) }
+    }
 
     /**
      * The raw `:core` artifacts behind each [reports] entry, kept only so the narrated-video
@@ -186,66 +281,49 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     private val wordedReports = HashMap<String, CoreGameReport>()
 
-    @Volatile private var polishJob: Job? = null
     @Volatile private var backgroundWording: Job? = null
 
-    /** The Analysing screen's Skip during "Polishing the commentary": the originals stay, the rest goes on lazily. */
-    fun skipPolishing() {
-        polishJob?.cancel()
+    /** RF: whether [gameId]'s own Natural wording option is on and the model can run (never the global switch). */
+    private fun wordingFor(gameId: String): Boolean {
+        val options = gameOptions[gameId] ?: return false
+        return wordingInEffect(options, app.wordingModelUsable())
     }
 
     /**
      * Swaps every cached rewording of [gameId]'s card texts into the UI copies (file reads only, no model). A card
-     * already on screen keeps its words until it is composed again (design §6.2).
+     * already on screen keeps its words until it is composed again (design §6.2). With the game's wording off, the
+     * originals.
      */
     private suspend fun applyCachedWording(gameId: String) {
         val artifacts = coreArtifacts[gameId] ?: return
-        val worded = withContext(Dispatchers.IO) { app.rephraseService.applyCached(artifacts.report) }
+        val worded = withContext(Dispatchers.IO) {
+            if (wordingFor(gameId)) app.gameRephraseService.applyCached(artifacts.report) else artifacts.report
+        }
         if (worded === artifacts.report) {
-            wordedReports.remove(gameId)
-            return
+            if (wordedReports.remove(gameId) == null) return
+        } else {
+            wordedReports[gameId] = worded
         }
-        wordedReports[gameId] = worded
-        games[gameId]?.let { g -> games[gameId] = g.copy(moves = worded.annotations.map { it.toMoveRecord() }) }
+        val shown = wordedReports[gameId] ?: artifacts.report
+        games[gameId]?.let { g -> games[gameId] = g.copy(moves = shown.annotations.map { it.toMoveRecord() }) }
         val threshold = reports[gameId]?.tacticThresholdCp ?: 0
-        reports[gameId] = worded.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), threshold, artifacts.sideNotMe, narrationStrings())
+        reports[gameId] = shown.toUiReport(artifacts.header, artifacts.userColor?.toUiColor(), threshold, artifacts.sideNotMe, narrationStrings())
             .copy(cappedPositions = artifacts.cappedPositions)
-    }
-
-    /**
-     * The blocking phase at the end of an analysis: the key moments of the current side, with progress and Skip.
-     * Nothing happens when the feature is off, no model is installed, or every text is already cached.
-     */
-    private suspend fun polishKeyMoments(report: CoreGameReport) {
-        val items = RephraseService.keyMomentTexts(report)
-        val pending = app.rephraseService.pending(items)
-        if (pending == 0) return
-        _progress.value = AnalysisProgress(phase = AnalysisPhase.POLISHING_COMMENTARY, totalMoves = items.size, fractionComplete = 0f)
-        val job = viewModelScope.launch(Dispatchers.Default) {
-            app.rephraseService.polish(items) { done, total ->
-                _progress.value = AnalysisProgress(
-                    phase = AnalysisPhase.POLISHING_COMMENTARY, currentMoveIndex = done, totalMoves = total,
-                    fractionComplete = if (total > 0) done.toFloat() / total else 1f,
-                )
-            }
-        }
-        polishJob = job
-        job.join()
-        polishJob = null
-        if (job.isCancelled) diagnostics.log(RephraseService.TAG, "polishing skipped by the user")
     }
 
     /**
      * The lazy part (§6.2): every other card text of [gameId], key moments first then by distance from [aroundPly],
      * one worker, only while a screen of ours is in the foreground; the cards pick the rewordings up when next drawn.
+     * Only for a game whose own wording option is on.
      */
     fun startBackgroundWording(gameId: String, aroundPly: Int = 0) {
         val artifacts = coreArtifacts[gameId] ?: return
         backgroundWording?.cancel()
         backgroundWording = viewModelScope.launch(Dispatchers.Default) {
+            if (!wordingFor(gameId)) return@launch
             val items = RephraseService.cardOrder(artifacts.report, aroundPly)
-            if (app.rephraseService.pending(items) == 0) return@launch
-            app.rephraseService.polish(items)
+            if (app.gameRephraseService.pending(items) == 0) return@launch
+            app.gameRephraseService.polish(items)
             applyCachedWording(gameId)
         }
     }
@@ -299,12 +377,13 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         if (rebuilt != null) games[gameId] = rebuilt
         val updated = artifacts.copy(report = report, userColor = sideColor, sideNotMe = choice == SideChoice.NOT_ME)
         coreArtifacts[gameId] = updated
+        gameOptions[gameId]?.let { gameOptions[gameId] = it.copy(side = choice) }
         // C2: the texts for the new side are different strings, so new cache keys: the originals show now, the
         // cached rewordings of this side (if any) are swapped in, and the background job refills the rest.
         wordedReports.remove(gameId)
         // The video script is written "to you" or "to White" depending on the side, and its cache
         // key does not include it, so a cached script for this game would now be stale.
-        videoScripts.keys.removeAll { it.startsWith("$gameId:") }
+        videoScripts.keys.removeAll { isKeyOfGame(it, gameId) }
         val threshold = reports[gameId]?.tacticThresholdCp ?: 0
         reports[gameId] = updated.report.toUiReport(updated.header, updated.userColor?.toUiColor(), threshold, updated.sideNotMe, narrationStrings())
             .copy(cappedPositions = updated.cappedPositions)
@@ -340,8 +419,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     private val pendingSideByGameId = mutableMapOf<String, SideChoice>()
 
     /**
-     * The depth a registered game is analysed at when it is not the Settings default (A4): the strength a game
-     * was analysed with when it is reopened, or the one picked for a re-analyse. Absent = the Settings default.
+     * The depth a registered game is analysed at when it is not the Settings default (A4): the strength picked on the
+     * Review options screen. Absent = the strength the game was analysed with, else the Settings default.
      */
     private val pendingDepthByGameId = mutableMapOf<String, Int>()
 
@@ -381,7 +460,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * The game waiting for setup, registered for analysis and removed from the waiting file; null when
-     * none waits. Call only when the net is installed. The analysis then uses the settings in force now.
+     * none waits. Call only when the net is installed. The caller then opens its Review options (or starts it with
+     * the defaults when that screen is switched off), exactly like a fresh import.
      */
     suspend fun takeGameWaitingForSetup(): String? {
         val request = withContext(Dispatchers.IO) { waitingStore.load() } ?: return null
@@ -395,7 +475,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     fun newGameId(): String = "imported-${idCounter.getAndIncrement()}-${System.currentTimeMillis()}"
 
     /**
-     * Registers PGN text to be analyzed once the caller navigates to the AnalysisProgress route.
+     * Registers PGN text to be reviewed: the Review options screen reads it, and the processing run analyses it.
      * [initialSide] is the side the game opens with until the user answers "Which side were you?":
      * [SideChoice.NOT_ME] for a game from the Famous games library (G1-device: nobody in it is the user,
      * so no "you" wording and the real names); [SideChoice.UNKNOWN] (a share, a paste, a file) leaves it
@@ -418,6 +498,131 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 onReady()
             }
         }
+    }
+
+    // ---- RF: the Review options screen ----
+
+    /** The Settings values, which are the defaults of a game with nothing stored (read from the repositories). */
+    suspend fun reviewDefaults(): ReviewDefaults {
+        val s = app.settingsRepository.current()
+        return ReviewDefaults(
+            depth = s.depth,
+            naturalWording = app.settingsRepository.rephraseEnabled.first(),
+            prepareVideo = app.reviewPreferences.current().prepareVideoByDefault,
+            voice = app.narrationSettingsRepository.current(),
+            pace = s.videoPace,
+        )
+    }
+
+    /** Whether a review started from [entry] opens the Review options screen first (Settings switch for imports). */
+    suspend fun shouldShowReviewOptions(entry: ReviewEntry): Boolean =
+        showReviewOptions(entry, app.reviewPreferences.current().showBeforeEachReview)
+
+    /**
+     * The game text registered under [gameId]: an import, a reopened or re-analysed game, a game in memory, or a stored
+     * one. Null when nothing is known under that id.
+     */
+    private suspend fun pgnTextFor(gameId: String): String? =
+        pendingPgnByGameId[gameId]
+            ?: games[gameId]?.pgnText?.takeIf { it.isNotBlank() }
+            ?: app.gameRepository.load(gameId)?.pgnText?.also { pendingPgnByGameId[gameId] = it }
+
+    /**
+     * What the Review options screen shows for [gameId]: the game's header, its options pre-filled (this game's stored
+     * options, else the Settings defaults), what Natural wording can offer here, and a rough time per strength measured
+     * on this phone.
+     */
+    suspend fun reviewOptionsLoad(gameId: String): ReviewOptionsLoad = withContext(Dispatchers.Default) {
+        val text = pgnTextFor(gameId) ?: return@withContext ReviewOptionsLoad.Missing
+        val game = try {
+            PgnParser.parse(text).firstOrNull()
+        } catch (e: Exception) {
+            null
+        } ?: return@withContext ReviewOptionsLoad.Unreadable
+        val header = game.toHeader()
+        val stored = app.gameRepository.load(gameId)
+        val storedOptions = app.gameRepository.loadPendingOptions(gameId) ?: stored?.reviewOptions()
+        val settingsNow = app.settingsRepository.current()
+        val prefilled = pendingOptionsByGameId[gameId] ?: prefillReviewOptions(
+            stored = storedOptions,
+            defaults = reviewDefaults(),
+            detectedSide = detectSide(header.white, header.black, settingsNow.username),
+            initialSide = pendingSideByGameId[gameId] ?: SideChoice.UNKNOWN,
+        )
+        val positions = game.moves.size + 1
+        val speeds = withContext(Dispatchers.IO) { app.reviewSpeedStore.load() }
+        val estimates = AnalysisStrength.entries.associateWith { strength ->
+            val budget = runCatching { strength.budget }.getOrNull()
+            val cached = budget != null && strength.depth > 0 &&
+                app.gameRepository.hasEvalCache(app.gameRepository.cacheKey(text, strength.depth, settingsNow.multiPv, budget.cacheKeyPart))
+            strengthEstimateMs(positions, budget?.typicalNodes, speeds.engineMsPerNode, cached)
+        }
+        val supported = app.rephraserForTesting != null ||
+            app.rephraseAvailability() == net.palaya.chessanalyzer.rephrase.RephraseSupport.Availability.AVAILABLE
+        ReviewOptionsLoad.Ready(
+            ReviewOptionsDraft(
+                gameId = gameId,
+                header = header,
+                plies = game.moves.size,
+                options = prefilled,
+                wording = wordingOption(supported, app.wordingModelUsable()),
+                voiceInstalled = voiceStore.isInstalled(),
+                strengthEstimatesMs = estimates,
+            ),
+        )
+    }
+
+    /**
+     * "Start review": [options] are this game's from now on. Kept in memory and on disk (a process killed during the run
+     * resumes with them), the strength goes into the depth path (A4), and a game already reviewed is dropped from memory
+     * so the run does every stage again (the engine stage reads the eval cache of that strength when it exists).
+     */
+    fun startReview(gameId: String, options: ReviewOptions) {
+        pendingOptionsByGameId[gameId] = options
+        pendingDepthByGameId[gameId] = options.strength.depth
+        // The options' side is the user's answer; the side the game opened with must not come back.
+        if (options.side != SideChoice.UNKNOWN) pendingSideByGameId.remove(gameId)
+        games[gameId]?.pgnText?.takeIf { it.isNotBlank() }?.let { pendingPgnByGameId[gameId] = it }
+        activeRequest = null
+        games.remove(gameId)
+        videoScripts.keys.removeAll { isKeyOfGame(it, gameId) }
+        practiceSets.keys.removeAll { isKeyOfGame(it, gameId) }
+        solvedPuzzlePlies.remove(gameId)
+        _error.value = null
+        viewModelScope.launch { app.gameRepository.savePendingOptions(gameId, options) }
+        diagnostics.log(
+            AppDiagnostics.TAG_ANALYSIS,
+            "review options for $gameId: ${options.strength.name.lowercase()}, side ${options.side}, wording ${options.naturalWording}, " +
+                "video ${options.prepareVideo}, voice ${options.voice}/${options.speakerId}, pace ${options.pace}",
+        )
+    }
+
+    /** An import with the Review options screen switched off: the defaults (and the detected side) are its options. */
+    suspend fun startReviewWithDefaults(gameId: String) {
+        val load = reviewOptionsLoad(gameId)
+        val options = (load as? ReviewOptionsLoad.Ready)?.draft?.options ?: prefillReviewOptions(
+            stored = null,
+            defaults = reviewDefaults(),
+            initialSide = pendingSideByGameId[gameId] ?: SideChoice.UNKNOWN,
+        )
+        startReview(gameId, options)
+    }
+
+    /** Back from the Review options screen of a new import: the game is forgotten (nothing was stored). */
+    fun forgetPendingImport(gameId: String) {
+        if (games.containsKey(gameId)) return
+        pendingPgnByGameId.remove(gameId)
+        pendingSideByGameId.remove(gameId)
+        pendingOptionsByGameId.remove(gameId)
+        pendingDepthByGameId.remove(gameId)
+    }
+
+    fun setShowReviewOptionsBeforeEachReview(show: Boolean) {
+        viewModelScope.launch { app.reviewPreferences.setShowBeforeEachReview(show) }
+    }
+
+    fun setPrepareVideoByDefault(prepare: Boolean) {
+        viewModelScope.launch { app.reviewPreferences.setPrepareVideoByDefault(prepare) }
     }
 
     /**
@@ -443,7 +648,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             return PendingAnalysisStore.Request(
                 gameId = gameId,
                 pgnText = text,
-                // A4: a re-analyse's pick, else the strength a reopened game was analysed with, else the Settings default.
+                // A4/RF: the Review options' pick, else the strength a reopened game was analysed with, else the default.
                 depth = gameAnalysisDepth(
                     explicit = pendingDepthByGameId[gameId],
                     stored = app.gameRepository.load(gameId)?.depth,
@@ -464,14 +669,118 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Runs (or re-runs) analysis for [gameId], whose PGN text must already be registered via
+     * The options a run of [gameId] uses and whether it is a full review: the Review options' pick (in memory, or on
+     * disk after a restart: F1), else the game's stored options or the defaults for a plain reopen (a library row), which
+     * runs only the engine stage (see [reviewStagePlan]).
+     */
+    private suspend fun optionsForRun(gameId: String, request: PendingAnalysisStore.Request): Pair<ReviewOptions, Boolean> {
+        pendingOptionsByGameId[gameId]?.let { return it to true }
+        val defaults = reviewDefaults()
+        app.gameRepository.loadPendingOptions(gameId)?.let { saved ->
+            return prefillReviewOptions(saved, defaults, initialSide = SideChoice.fromStored(request.initialSide)) to true
+        }
+        val stored = app.gameRepository.load(gameId)
+        return prefillReviewOptions(stored?.reviewOptions(), defaults, initialSide = SideChoice.fromStored(request.initialSide)) to false
+    }
+
+    // ---- RF: the processing run's stages ----
+
+    /** The stage coroutine running now, cancelled by "Skip" ([skipStage]). */
+    @Volatile private var stageJob: Job? = null
+    @Volatile private var stageJobStage: ReviewStage? = null
+
+    /** "Skip" on an optional stage of the processing screen: what is done stays, the rest of that stage is not done. */
+    fun skipStage(stage: ReviewStage) {
+        if (!stage.skippable || stageJobStage != stage) return
+        diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "stage ${stage.name.lowercase()} skipped by the user")
+        stageJob?.cancel()
+    }
+
+    /** The current run's bookkeeping: the plan, the stage weights, the time-left tracker. */
+    private inner class RunState(
+        plan: List<ReviewStage>,
+        val weights: Map<ReviewStage, Double>,
+        val tracker: ReviewTimeLeftTracker,
+        val startedAtMs: Long,
+    ) {
+        @Volatile var stages: List<StageState> = initialStageStates(plan)
+        @Volatile var engine: AnalysisProgress = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
+        @Volatile var engineRemainingMs: Long? = null
+        @Volatile var stageStartedAtMs: Long = startedAtMs
+
+        @Synchronized
+        fun emit() {
+            val (overall, step) = tracker.update(stages, engineRemainingMs)
+            _run.value = ReviewRunProgress(
+                stages = stages,
+                overallFraction = overallFraction(stages, weights),
+                overallTimeLeft = overall,
+                stageTimeLeft = step,
+                engine = engine,
+                runStartedAtMs = startedAtMs,
+            )
+        }
+
+        @Synchronized
+        fun stageProgress(stage: ReviewStage, done: Int, total: Int) {
+            stages = stages.updated(stage) { it.copy(done = done, total = total) }
+            if (stage != ReviewStage.ENGINE) tracker.onStageProgress(stage, done, SystemClock.elapsedRealtime())
+            emit()
+        }
+
+        @Synchronized
+        fun finish(stage: ReviewStage, skipped: Boolean) {
+            stages = stages.finished(stage, skipped)
+            stageStartedAtMs = SystemClock.elapsedRealtime()
+            emit()
+        }
+    }
+
+    /**
+     * Runs one optional stage as a child coroutine, so "Skip" ([skipStage]) cancels only it and a Cancel of the whole
+     * run cancels it too. A stage that fails is logged and treated as skipped (the originals stay). Records the stage's
+     * measured time for later estimates when it ran to the end.
+     */
+    private suspend fun runStage(state: RunState, stage: ReviewStage, plies: Int, block: suspend (report: (Int, Int) -> Unit) -> Unit) {
+        val startedAt = SystemClock.elapsedRealtime()
+        var failed = false
+        val skipped = coroutineScope {
+            val job = launch {
+                try {
+                    block { done, total -> state.stageProgress(stage, done, total) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    diagnostics.error(AppDiagnostics.TAG_ANALYSIS, "stage ${stage.name.lowercase()} failed; the review goes on without it", e)
+                }
+            }
+            stageJob = job
+            stageJobStage = stage
+            job.join()
+            stageJob = null
+            stageJobStage = null
+            job.isCancelled
+        }
+        if (!skipped && !failed) {
+            val took = SystemClock.elapsedRealtime() - startedAt
+            withContext(Dispatchers.IO) { app.reviewSpeedStore.update { it.withStage(stage, took, plies) } }
+        }
+        state.finish(stage, skipped || failed)
+    }
+
+    /**
+     * Runs (or re-runs) the review of [gameId], whose PGN text must already be registered via
      * [registerPendingImport]/[registerReopen] — or, after the process was killed, be on disk in
      * [PendingAnalysisStore]. Safe to call more than once for the same id (e.g. on recomposition)
      * — a prior in-flight job for a different id is cancelled first, since only one
      * [net.palaya.chessanalyzer.engine.StockfishEngine] exists for the app.
      *
-     * The request is written to disk as the run starts and deleted when it succeeds or the user
-     * cancels ([cancelAnalysis]), so a kill in between resumes from the per-ply checkpoint.
+     * RF: one run does every stage the game's options ask for ([reviewStagePlan]): the engine, then the key-moment
+     * wording, the narration script and its wording, and the narration recording, each with its own count and the
+     * overall bar and measured time left in [run]. The request is written to disk as the run starts and deleted when
+     * the engine stage succeeds or the user cancels ([cancelAnalysis]), so a kill in between resumes from the per-ply
+     * checkpoint (F1).
      */
     fun runAnalysis(gameId: String, onComplete: () -> Unit) {
         _error.value = null
@@ -484,6 +793,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         // A retry starts from the top; without this the screen would flash the previous run's
         // last "Move 12 of 34" until the first new progress update arrives.
         _progress.value = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
+        _run.value = ReviewRunProgress()
         analysisJob = viewModelScope.launch(Dispatchers.Default) {
             val request = requestFor(gameId) ?: run {
                 diagnostics.error(AppDiagnostics.TAG_ANALYSIS, "game text lost for $gameId: nothing in memory or on disk")
@@ -498,32 +808,80 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 multiPv = request.multiPv,
                 username = request.username,
             )
+            val (options, fullReview) = optionsForRun(gameId, request)
+            gameOptions[gameId] = options
+            val parsed = runCatching { PgnParser.parse(pgnText).firstOrNull() }.getOrNull()
+            val plies = parsed?.moves?.size ?: 0
+            _processingGame.value = ProcessingGame(
+                gameId = gameId,
+                sanMoves = parsed?.moves?.map { it.san }.orEmpty(),
+                userSide = options.side.takeIf { it != SideChoice.UNKNOWN }
+                    ?: SideChoice.of(parsed?.let { detectSide(it.tags["White"].orEmpty(), it.tags["Black"].orEmpty(), request.username) }),
+            )
+            _evalsSoFar.value = List(plies + 1) { null }
+            // The plan, and the weights of its stages from what this phone measured before (priors when it has not).
+            val modelUsable = app.wordingModelUsable()
+            val kokoro = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+            val plan = reviewStagePlan(options, modelUsable, kokoro, reopen = !fullReview)
+            val speeds = withContext(Dispatchers.IO) { app.reviewSpeedStore.load() }
+            val budget = currentSettings.searchBudget
+            val engineCached = app.gameRepository.hasEvalCache(
+                app.gameRepository.cacheKey(pgnText, currentSettings.depth, currentSettings.multiPv, budget.cacheKeyPart),
+            )
+            val estimates = plan.associateWith { stage ->
+                if (stage == ReviewStage.ENGINE) strengthEstimateMs(plies + 1, budget.typicalNodes, speeds.engineMsPerNode, engineCached)
+                else speeds.estimateMs(stage, plies)
+            }
+            val runStartedAt = SystemClock.elapsedRealtime()
+            val state = RunState(plan, stageWeights(plan, estimates), ReviewTimeLeftTracker(speeds, plies), runStartedAt)
+            state.emit()
+            diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "review plan for $gameId: ${plan.joinToString { it.name.lowercase() }}")
+
             // The tactic significance gate (ANALYSIS_SPEC §9.6) has to be *correct*, so read the
             // persisted threshold rather than the eagerly-seeded StateFlow (see CLAUDE.md).
             val tacticThresholdCp = currentSettings.narrationThresholdCp
-            val runStartedAt = SystemClock.elapsedRealtime()
             val timeLeft = AnalysisTimeLeftTracker(currentSettings.searchBudget.typicalNodes)
+            var lastEngine = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
             val outcome = analysisService.analyze(
                 pgnText = pgnText,
                 username = currentSettings.username,
                 settings = currentSettings,
                 onProgress = { p ->
                     val shown = timeLeft.onProgress(p)
-                    _progress.value = p.copy(runStartedAtMs = runStartedAt, timeLeft = shown)
+                    val withTime = p.copy(runStartedAtMs = runStartedAt, timeLeft = shown)
+                    _progress.value = withTime
+                    if (p.runPositionsSearched > 0) lastEngine = p
+                    state.engine = withTime
+                    if (p.phase == AnalysisPhase.ANALYZING_MOVES && p.totalMoves > 0 && p.currentMoveIndex < p.totalMoves) {
+                        state.engineRemainingMs = estimateAnalysisRemainingMs(
+                            done = p.currentMoveIndex,
+                            total = p.totalMoves,
+                            runNodes = p.runNodes,
+                            runMs = p.runSearchMs,
+                            runPositions = p.runPositionsSearched,
+                            typicalNodes = currentSettings.searchBudget.typicalNodes,
+                        ) ?: state.engineRemainingMs
+                    }
+                    state.stageProgress(ReviewStage.ENGINE, p.currentMoveIndex, p.totalMoves)
                 },
             )
             when (outcome) {
                 is AnalysisService.Outcome.Success -> {
+                    withContext(Dispatchers.IO) {
+                        app.reviewSpeedStore.update { it.withEngine(lastEngine.runSearchMs, lastEngine.runNodes, lastEngine.runPositionsSearched) }
+                    }
                     val header = outcome.game.toHeader()
-                    // The username auto-detection only covers a user who set a name. An answer to the
-                    // Summary's "Which side were you?" from an earlier visit to this game wins over
-                    // it (explicit, per game), so reopening a game keeps "you" / "Not me". A famous
-                    // game opens as "Not me" (the request's initial side) unless answered otherwise.
-                    val side = resolveSide(
-                        stored = SideChoice.fromStored(app.gameRepository.load(gameId)?.userColorName),
+                    val previous = app.gameRepository.load(gameId)
+                    // RF: the side picked on the Review options screen is the user's answer. A plain reopen keeps the
+                    // old rule: an answer from an earlier visit, then the side the game opened with (a famous game:
+                    // "Not me"), then the username detection.
+                    val resolved = resolveSide(
+                        stored = SideChoice.fromStored(previous?.userColorName),
                         detected = outcome.userColor?.toUiColor(),
                         initial = SideChoice.fromStored(request.initialSide),
                     )
+                    val side = if (fullReview && options.side != SideChoice.UNKNOWN) options.side else resolved
+                    if (options.side != side) gameOptions[gameId] = options.copy(side = side)
                     val sideColor = side.color?.toCoreColor()
                     // The analysis wrote the card texts for the side it detected; the side that wins
                     // may differ ("Not me", or an earlier answer), so the texts are written for it.
@@ -547,35 +905,51 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     reports[gameId] = sidedReport.toUiReport(header, side.color, tacticThresholdCp, side == SideChoice.NOT_ME, narrationStrings())
                         .copy(cappedPositions = outcome.cappedPositions)
                     coreArtifacts[gameId] = CoreArtifacts(outcome.game, sidedReport, sideColor, header, side == SideChoice.NOT_ME, outcome.cappedPositions)
-                    app.gameRepository.save(
-                        GameRepository.StoredGame(
-                            id = gameId,
-                            pgnText = pgnText,
-                            white = header.white,
-                            black = header.black,
-                            result = header.result,
-                            date = header.date ?: SimpleDateFormat("yyyy.MM.dd", Locale.US).format(Date()),
-                            plyCount = moveRecords.size,
-                            depth = currentSettings.depth,
-                            multiPv = currentSettings.multiPv,
-                            userColorName = side.storedName,
-                        )
+                    val fresh = GameRepository.StoredGame(
+                        id = gameId,
+                        pgnText = pgnText,
+                        white = header.white,
+                        black = header.black,
+                        result = header.result,
+                        date = header.date ?: SimpleDateFormat("yyyy.MM.dd", Locale.US).format(Date()),
+                        plyCount = moveRecords.size,
+                        depth = currentSettings.depth,
+                        multiPv = currentSettings.multiPv,
+                        userColorName = side.storedName,
                     )
-                    // Done: nothing left to resume.
+                    // A full review stores its options with the game; a plain reopen keeps what the game had.
+                    val toStore = if (fullReview) {
+                        fresh.withReviewOptions(options.copy(side = side)).copy(depth = currentSettings.depth)
+                    } else {
+                        fresh.copy(
+                            voiceProvider = previous?.voiceProvider,
+                            speakerId = previous?.speakerId,
+                            pace = previous?.pace,
+                            naturalWording = previous?.naturalWording,
+                            prepareVideo = previous?.prepareVideo,
+                        )
+                    }
+                    app.gameRepository.save(toStore)
+                    // Done with the engine: nothing left to resume.
                     withContext(Dispatchers.IO) { pendingStore.clear(gameId) }
+                    app.gameRepository.clearPendingOptions(gameId)
+                    pendingOptionsByGameId.remove(gameId)
+                    pendingDepthByGameId.remove(gameId)
                     activeRequest = null
                     refreshRecentGames()
                     _pasteDraft.value = ""
-                    // C2: the key moments are reworded now (skippable), the rest lazily in the background.
-                    try {
-                        polishKeyMoments(sidedReport)
-                        applyCachedWording(gameId)
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        diagnostics.error(RephraseService.TAG, "polishing failed; the original texts stay", e)
+                    if (fullReview && side.color != null) {
+                        val current = app.settingsRepository.current()
+                        usernameToRemember(header, side, current.username)?.let { name ->
+                            app.settingsRepository.save(current.copy(username = name))
+                        }
                     }
+                    state.finish(ReviewStage.ENGINE, skipped = false)
+
+                    runRemainingStages(state, gameId, plan, sidedReport, plies)
+                    applyCachedWording(gameId)
                     startBackgroundWording(gameId)
+                    _processingGame.value = null
                     // The analysis loop runs on Dispatchers.Default, but [onComplete] drives
                     // NavController, and NavController touches LifecycleRegistry, which throws
                     // "setCurrentState must be called on the main thread" off the main thread.
@@ -610,44 +984,71 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /**
-     * "Re-analyse" on the Summary (A4): analyse [gameId] again with [strength] instead of the one it has. The
-     * game's text and its answer to "Which side were you?" are kept; its in-memory result is dropped so the
-     * next [runAnalysis] runs (or reads the eval cache of that strength: the budget is in the key, so an
-     * earlier run at the same strength is instant). The choice is stored with the game once the run finishes,
-     * so reopening the game keeps it; a cancelled run leaves the old result and the old strength untouched.
-     *
-     * The Summary showing now keeps its report until the new one replaces it (the screen pops itself when a
-     * report disappears). Returns false when the game is not in memory.
-     */
-    fun reanalyseGame(gameId: String, strength: AnalysisStrength): Boolean {
-        val pgnText = games[gameId]?.pgnText?.takeIf { it.isNotBlank() } ?: return false
-        pendingPgnByGameId[gameId] = pgnText
-        pendingDepthByGameId[gameId] = strength.depth
-        // The side the game opened with must not come back (a famous game's "Not me" is an answer the user
-        // may have changed); the stored answer is what runAnalysis reads.
-        pendingSideByGameId.remove(gameId)
-        activeRequest = null
-        games.remove(gameId)
-        videoScripts.keys.removeAll { it.startsWith("$gameId:") }
-        practiceSets.keys.removeAll { it.startsWith("$gameId:") }
-        solvedPuzzlePlies.remove(gameId)
-        _error.value = null
-        diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "re-analysing $gameId at ${strength.name.lowercase()} (depth ${strength.depth})")
-        return true
+    /** Stages 2 to 4 of [plan], in order, each skippable; the engine stage is done when this runs. */
+    private suspend fun runRemainingStages(state: RunState, gameId: String, plan: List<ReviewStage>, report: CoreGameReport, plies: Int) {
+        if (ReviewStage.POLISH_COMMENTARY in plan) {
+            // C2: the key moments of the current side, now; the rest lazily in the background afterwards.
+            runStage(state, ReviewStage.POLISH_COMMENTARY, plies) { progress ->
+                val items = RephraseService.keyMomentTexts(report)
+                progress(0, items.size)
+                if (app.gameRephraseService.pending(items) > 0) app.gameRephraseService.polish(items, progress)
+                progress(items.size, items.size)
+            }
+            applyCachedWording(gameId)
+        }
+        if (ReviewStage.WRITE_NARRATION in plan) {
+            // The paced script for this game's voice and pace, its beats reworded when the game's wording is on.
+            runStage(state, ReviewStage.WRITE_NARRATION, plies) { progress ->
+                val base = videoScriptFor(gameId) ?: return@runStage
+                if (wordingFor(gameId)) {
+                    val items = RephraseService.narrationOrder(base)
+                    progress(0, items.size)
+                    if (app.gameRephraseService.pending(items) > 0) polishNarration(gameId, progress)
+                    progress(items.size, items.size)
+                } else {
+                    progress(1, 1)
+                }
+            }
+        }
+        if (ReviewStage.RECORD_VOICE in plan) {
+            runStage(state, ReviewStage.RECORD_VOICE, plies) { progress ->
+                val script = finishedVideoScriptFor(gameId) ?: return@runStage
+                val provider = buildNarrationProvider(gameId) ?: return@runStage
+                // The wording model holds ~1.2 GB of native memory; the voice model needs its own. Free it first.
+                releaseWordingModel()
+                narrationPreparer.prepare(script, provider, progress)
+                markNarrationPrepared(gameId, script, provider)
+            }
+        }
+    }
+
+    /** Frees the wording model before the voice is loaded (design §2.2: one big model at a time). */
+    private suspend fun releaseWordingModel() {
+        if (app.rephraserForTesting == null) app.rephraseBackend.release()
     }
 
     /**
-     * The user's own Cancel (or Back) on the Analysing screen: stops the run and forgets the saved
+     * The user's own Cancel (or Back) on the processing screen: stops the run and forgets the saved
      * request, so it is not resumed on the next launch. The partial eval cache stays, so analysing
-     * the same game again later still starts from where this run stopped.
+     * the same game again later still starts from where this run stopped. A game the run had not stored yet is
+     * forgotten with its pending options; a stored game keeps its old result and options.
      */
     fun cancelAnalysis() {
         analysisJob?.cancel()
+        stageJob?.cancel()
         val request = activeRequest
         activeRequest = null
+        _processingGame.value = null
         diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "analysis cancelled by the user")
-        viewModelScope.launch(Dispatchers.IO) { pendingStore.clear(request?.gameId) }
+        val gameId = request?.gameId
+        if (gameId != null) {
+            pendingOptionsByGameId.remove(gameId)
+            pendingDepthByGameId.remove(gameId)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            pendingStore.clear(gameId)
+            if (gameId != null) app.gameRepository.clearPendingOptions(gameId)
+        }
     }
 
     /**
@@ -691,14 +1092,41 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.narrationSettingsRepository.setProvider(provider) }
     }
 
-    /** V1: the narrator voice picked in Settings (a Kokoro sid). */
+    /** V1: the narrator voice picked in Settings (a Kokoro sid). The default for new games since RF. */
     fun setNarratorSpeaker(sid: Int) {
         viewModelScope.launch { app.narrationSettingsRepository.setSpeakerId(sid) }
     }
 
-    /** V3: Settings, Video, Pace. */
+    /** V3: Settings, Video, Pace (the default for new games since RF). */
     fun setVideoPace(pace: VideoPace) {
         viewModelScope.launch { app.settingsRepository.setVideoPace(pace) }
+    }
+
+    // ---- RF: one game's voice and pace (the Video screen's "Voice and pace" sheet) ----
+
+    /**
+     * Changes [gameId]'s narration voice (the Video screen's sheet): stored with the game, and the Video route then
+     * rebuilds the script and the provider and records the narration in the new voice inline (item 3 of the owner's
+     * phone test). [provider] DEVICE is a valid explicit choice and needs no recording.
+     */
+    fun setGameVoice(gameId: String, provider: NarrationProviderChoice, sid: Int) {
+        val current = gameOptions[gameId] ?: return
+        updateGameOptions(gameId, current.copy(voice = provider, speakerId = sid))
+    }
+
+    /** Changes [gameId]'s video pace (the Video screen's sheet). The recordings stay valid (same sentences). */
+    fun setGamePace(gameId: String, pace: VideoPace) {
+        val current = gameOptions[gameId] ?: return
+        updateGameOptions(gameId, current.copy(pace = pace))
+    }
+
+    private fun updateGameOptions(gameId: String, options: ReviewOptions) {
+        if (gameOptions[gameId] == options) return
+        gameOptions[gameId] = options
+        videoScripts.keys.removeAll { isKeyOfGame(it, gameId) }
+        viewModelScope.launch {
+            app.gameRepository.load(gameId)?.let { stored -> app.gameRepository.save(stored.withReviewOptions(options).copy(depth = stored.depth)) }
+        }
     }
 
     /**
@@ -730,17 +1158,23 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
 
     override fun onCleared() {
         backgroundWording?.cancel()
+        prepJob?.cancel()
         releaseVoiceSamples()
         super.onCleared()
     }
 
     /**
-     * Builds the [NarrationVoiceProvider] the current settings select, or null for the device
-     * default. The rule itself is [selectNarrationProvider] (pure, tested on its own); this only
-     * turns the selection into a live object.
+     * Builds the [NarrationVoiceProvider] the global settings select, or null for the device default (Settings' own
+     * uses). The rule itself is [selectNarrationProvider] (pure, tested on its own).
      */
-    fun buildNarrationProvider(): NarrationVoiceProvider? =
-        when (val selection = selectNarrationProvider(narrationVoiceSettings.value) { voiceStore.isInstalled() }) {
+    fun buildNarrationProvider(): NarrationVoiceProvider? = providerFor(narrationVoiceSettings.value)
+
+    /** RF: the provider [gameId]'s own voice selects (the player, the recording and the export of that game). */
+    fun buildNarrationProvider(gameId: String): NarrationVoiceProvider? =
+        providerFor(gameOptions[gameId]?.voiceSettings ?: narrationVoiceSettings.value)
+
+    private fun providerFor(voice: NarrationVoiceSettings): NarrationVoiceProvider? =
+        when (val selection = selectNarrationProvider(voice) { voiceStore.isInstalled() }) {
             NarrationProviderSelection.Device -> null
             is NarrationProviderSelection.Neural ->
                 NeuralTtsProvider(
@@ -750,6 +1184,60 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     voiceVersionId = voiceStore.installedVersionId(),
                 )
         }
+
+    // ---- RF: one game's delete (Home's library menu) ----
+
+    /**
+     * Deletes [gameId]: its stored JSON, its pending options, its in-memory state, the pending or waiting request when
+     * it is this game's, and its eval cache when no other stored game has the same text ([deletePlan]). The narration
+     * audio stays (shared, keyed by sentence; Settings clears it).
+     */
+    fun deleteGame(gameId: String) {
+        _recentGames.value = libraryAfterDelete(_recentGames.value, gameId)
+        viewModelScope.launch {
+            val repo = app.gameRepository
+            val stored = repo.load(gameId)
+            val plan = deletePlan(
+                gameId = gameId,
+                pendingRequestGameId = withContext(Dispatchers.IO) { pendingStore.load()?.gameId },
+                waitingGameId = withContext(Dispatchers.IO) { waitingStore.load()?.gameId },
+                pgnText = stored?.pgnText,
+                otherGamesPgnTexts = repo.storedPgnTexts(exceptId = gameId),
+            )
+            if (activeRequest?.gameId == gameId) {
+                analysisJob?.cancel()
+                activeRequest = null
+            }
+            if (plan.clearPendingRequest) withContext(Dispatchers.IO) { pendingStore.clear(gameId) }
+            if (plan.clearWaitingGame) {
+                withContext(Dispatchers.IO) { waitingStore.clear(gameId) }
+                _gameWaitingForSetup.value = false
+            }
+            if (plan.deleteEvalCache && stored != null) {
+                val keys = AnalysisStrength.entries.mapNotNull { s ->
+                    runCatching { repo.cacheKey(stored.pgnText, s.depth, stored.multiPv, s.budget.cacheKeyPart) }.getOrNull()
+                } + repo.cacheKey(stored.pgnText, stored.depth, stored.multiPv, SearchBudget.forDepth(stored.depth).cacheKeyPart)
+                val deleted = repo.deleteEvalCacheFor(keys.distinct())
+                diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "deleted $deleted eval-cache file(s) of $gameId")
+            }
+            repo.delete(gameId)
+            games.remove(gameId)
+            reports.remove(gameId)
+            coreArtifacts.remove(gameId)
+            wordedReports.remove(gameId)
+            gameOptions.remove(gameId)
+            videoScripts.keys.removeAll { isKeyOfGame(it, gameId) }
+            practiceSets.keys.removeAll { isKeyOfGame(it, gameId) }
+            solvedPuzzlePlies.remove(gameId)
+            pendingPgnByGameId.remove(gameId)
+            pendingSideByGameId.remove(gameId)
+            pendingDepthByGameId.remove(gameId)
+            pendingOptionsByGameId.remove(gameId)
+            preparedNarration.removeAll { it.startsWith("$gameId|") }
+            diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "game $gameId deleted by the user")
+            refreshRecentGames()
+        }
+    }
 
     // ---- Practise your own mistakes (docs/PRACTICE_DESIGN.md §4, §7.2) ----
 
@@ -788,14 +1276,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         games[gameId]?.moves?.firstOrNull { it.ply == ply }?.core?.simulation
 
     /**
-     * Builds (and caches) the narrated-video [VideoScript] for an already-analyzed game.
-     * Deterministic and pure per [VideoScriptGenerator]'s contract, so the cache never goes
-     * stale for a given [gameId]/[options] pair — only the options a user might change (depth,
-     * style) would need a fresh build, which is why the cache key includes them.
-     */
-    /**
      * [NarrationOptions] matching the voice that will actually speak this script, the review detail and
-     * the pace (the rule is [narrationOptionsFor], pure and host-tested).
+     * the pace (the rule is [narrationOptionsFor], pure and host-tested), from the GLOBAL settings (Settings' own uses).
      * [NarrationOptions.speechWpm] is what `VideoScriptGenerator.estimateSpeechMs` uses to lay the
      * timeline out *before* TTS runs, so it has to describe the real voice: each Kokoro speaker was
      * measured at its own rate (V1: 127 to 177 wpm at `length_scale` 1.20), and estimating the wrong
@@ -812,17 +1294,31 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Builds (and caches) the narrated-video script. Suspends because the significance threshold
-     * is read from persisted settings; the caller shows a spinner for the one frame that takes.
+     * RF: the [NarrationOptions] of [gameId]: its own voice (the speaker's measured rate) and pace; the review detail
+     * (threshold) stays the Settings value, as for the Summary. Falls back to the global settings for a game with no
+     * options in memory.
+     */
+    suspend fun narrationOptionsForGame(gameId: String): NarrationOptions {
+        val options = gameOptions[gameId] ?: return narrationOptionsForCurrentVoice()
+        val installed = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+        return narrationOptionsFor(options.voiceSettings, installed, app.settingsRepository.current().copy(videoPace = options.pace))
+    }
+
+    /**
+     * Builds (and caches) the narrated-video script of [gameId] with ITS options (voice rate, pace). Suspends because
+     * the significance threshold is read from persisted settings; the caller shows a spinner for the one frame that takes.
      */
     suspend fun videoScriptFor(gameId: String): VideoScript? {
         // The language is read from the repository, not the eagerly-seeded StateFlow, for the
         // same reason as the threshold: it decides what the script *says*, so it has to be right.
         val language = app.settingsRepository.current().language
-        return videoScriptFor(gameId, narrationOptionsForCurrentVoice(), AppLocales.narrationTag(app, language))
+        return videoScriptFor(gameId, narrationOptionsForGame(gameId), AppLocales.narrationTag(app, language))
     }
 
     /**
+     * Deterministic and pure per [VideoScriptGenerator]'s contract, so the cache never goes stale for a given
+     * [gameId]/[options] pair.
+     *
      * @param languageTag BCP-47 tag the narration is generated in; resolved through
      *   [NarrationLocales.forTag], which falls back to English for anything unsupported. Part of
      *   the cache key so a language change never serves a script in the old language.
@@ -841,48 +1337,129 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         return script
     }
 
-    // ---- C2: the narration post-pass (docs/LLM_REPHRASE_DESIGN.md §6.2) ----
+    // ---- C2: the narration post-pass (docs/LLM_REPHRASE_DESIGN.md §6.2), RF: inside the processing run ----
     //
-    // Wired into the Video route (ChessAnalyzerNavHost): `narrationPolishPending` decides whether the "Polishing the
-    // narration" pre-step shows, `polishNarration` runs it (Skip = cancel), and `rephrasedVideoScriptFor` is the script the
-    // VideoScreen, the player, NarrationCoordinator and the exporter get. The narration WAV cache is keyed by sentence text,
-    // so the originals' WAVs stay valid for the setting-off case; the export never calls the model.
+    // The processing run's "Writing the video narration" stage rewords the beats (`polishNarration`); the Video route
+    // only reads the result (`finishedVideoScriptFor`) and never calls the model. The narration WAV cache is keyed by
+    // sentence text, so the originals' WAVs stay valid for the wording-off case; the export never calls the model.
 
     /**
-     * The finished, paced script of [gameId] with every cached narration rewording applied by the pure
-     * [net.palaya.chessanalyzer.core.text.RephrasedScript] post-pass (allowlisted prose beats only, speech re-estimated,
-     * lead-ins/holds/boards untouched, the story capped at 1.10x and the §9.7 budget). Reads files only. Cached per
-     * rephraser id, so turning the feature off or a model update shows the right words at once.
+     * The finished, paced script of [gameId]: with the game's wording on, every cached narration rewording applied by
+     * the pure [net.palaya.chessanalyzer.core.text.RephrasedScript] post-pass (allowlisted prose beats only, speech
+     * re-estimated, lead-ins/holds/boards untouched, the story capped at 1.10x and the §9.7 budget); else the original.
+     * Reads files only, never the model. Cached per rephraser id.
      */
-    suspend fun rephrasedVideoScriptFor(gameId: String): VideoScript? {
+    suspend fun finishedVideoScriptFor(gameId: String): VideoScript? {
         val base = videoScriptFor(gameId) ?: return null
-        val id = app.rephraseService.activeId() ?: return base
-        val options = narrationOptionsForCurrentVoice()
+        if (!withContext(Dispatchers.IO) { wordingFor(gameId) }) return base
+        val service = app.gameRephraseService
+        val id = service.activeId() ?: return base
+        val options = narrationOptionsForGame(gameId)
         val key = "rephrased:$gameId:${options}:$id:${base.hashCode()}"
         videoScripts[key]?.let { return it }
         val fullMoves = ((coreArtifacts[gameId]?.report?.annotations?.size ?: 0) + 1) / 2 // ScriptBuilder.budgetMs
         val worded = withContext(Dispatchers.IO) {
-            app.rephraseService.applyCachedScript(base, options.speechWpm, VideoScriptGenerator.budgetMs(fullMoves))
+            service.applyCachedScript(base, options.speechWpm, VideoScriptGenerator.budgetMs(fullMoves))
         }
         videoScripts[key] = worded
         return worded
     }
 
-    /** How many narration beats of [gameId] still need the model: 0 = no "Polishing the narration" step to show. */
+    /** The name the C2 tests know: the same as [finishedVideoScriptFor]. */
+    suspend fun rephrasedVideoScriptFor(gameId: String): VideoScript? = finishedVideoScriptFor(gameId)
+
+    /** How many narration beats of [gameId] still need the model (0 with the game's wording off). */
     suspend fun narrationPolishPending(gameId: String): Int {
+        if (!wordingFor(gameId)) return 0
         val base = videoScriptFor(gameId) ?: return 0
-        return app.rephraseService.pending(RephraseService.narrationOrder(base))
+        return app.gameRephraseService.pending(RephraseService.narrationOrder(base))
     }
 
     /**
-     * The Video screen's "Polishing the narration… N of M" pass: rewords every eligible beat that is not cached yet,
-     * one request per beat (the sentences of a beat refer to each other). Cancel the calling coroutine to Skip.
+     * Rewords every eligible beat of [gameId]'s narration that is not cached yet, one request per beat (the sentences
+     * of a beat refer to each other). Cancel the calling coroutine to Skip.
      */
     suspend fun polishNarration(gameId: String, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): RephraseService.Stats? {
         val base = videoScriptFor(gameId) ?: return null
-        val stats = app.rephraseService.polish(RephraseService.narrationOrder(base), onProgress)
+        val stats = app.gameRephraseService.polish(RephraseService.narrationOrder(base), onProgress)
         videoScripts.keys.removeAll { it.startsWith("rephrased:$gameId:") }
         return stats
+    }
+
+    // ---- RF: the Video screen's inline narration recording ----
+
+    private val _narrationPrep = MutableStateFlow<NarrationPrepState>(NarrationPrepState.Idle)
+
+    /** What the Video screen's player area shows about the narration recording of the game on screen. */
+    val narrationPrep: StateFlow<NarrationPrepState> = _narrationPrep
+
+    @Volatile private var prepJob: Job? = null
+    private val prepVersion = AtomicInteger(0)
+
+    /**
+     * (game, voice fingerprint, script) triples recorded in this process, so an attempt that left segments unrecorded
+     * (the device voice reads them) is not repeated every time the screen opens; "Prepare the narration" forces it.
+     */
+    private val preparedNarration: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+
+    private fun preparationKey(gameId: String, script: VideoScript, provider: NarrationVoiceProvider): String =
+        "$gameId|${provider.displayName}|${provider.narrationCacheFingerprint()}|${script.hashCode()}"
+
+    private fun markNarrationPrepared(gameId: String, script: VideoScript, provider: NarrationVoiceProvider) {
+        preparedNarration += preparationKey(gameId, script, provider)
+    }
+
+    /**
+     * Makes sure the narration of [gameId]'s finished script is recorded in the game's voice before it plays: when it
+     * is ([narrationNeedsPreparation] says no) the state is Ready at once; otherwise the missing segments are recorded
+     * here, with progress and a measured time left, then Ready. The Video route calls it when it opens and whenever the
+     * game's voice or pace changes; [force] = the user's "Prepare the narration" after a Cancel.
+     */
+    fun ensureNarrationPrepared(gameId: String, force: Boolean = false) {
+        prepJob?.cancel()
+        prepJob = viewModelScope.launch(Dispatchers.Default) {
+            val script = finishedVideoScriptFor(gameId) ?: return@launch
+            val voice = gameOptions[gameId]?.voice ?: narrationVoiceSettings.value.provider
+            val provider = buildNarrationProvider(gameId)
+            val installed = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+            val missing = if (provider == null) 0 else withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+            if (provider == null || !narrationNeedsPreparation(voice, installed, missing)) {
+                _narrationPrep.value = NarrationPrepState.Ready(gameId, prepVersion.get())
+                return@launch
+            }
+            val key = preparationKey(gameId, script, provider)
+            if (!force && key in preparedNarration) {
+                _narrationPrep.value = NarrationPrepState.Incomplete(gameId, missing)
+                return@launch
+            }
+            releaseWordingModel()
+            val timeLeft = ExportTimeLeftTracker()
+            _narrationPrep.value = NarrationPrepState.Preparing(gameId, 0, script.segments.size, net.palaya.chessanalyzer.video.ExportTimeLeft.Hidden)
+            try {
+                narrationPreparer.prepare(script, provider) { done, total ->
+                    val left = timeLeft.onProgress(done, total, SystemClock.elapsedRealtime())
+                    _narrationPrep.value = NarrationPrepState.Preparing(gameId, done, total, left)
+                }
+                preparedNarration += key
+                val after = withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+                _narrationPrep.value = if (after == 0) {
+                    NarrationPrepState.Ready(gameId, prepVersion.incrementAndGet())
+                } else {
+                    NarrationPrepState.Incomplete(gameId, after)
+                }
+            } catch (e: CancellationException) {
+                val after = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+                _narrationPrep.value = NarrationPrepState.Incomplete(gameId, after)
+                prepVersion.incrementAndGet()
+                throw e
+            }
+        }
+    }
+
+    /** Cancel in the player area, or the Video screen closing: stops the recording (what is done stays). */
+    fun cancelNarrationPreparation() {
+        prepJob?.cancel()
+        prepJob = null
     }
 
     private fun refreshRecentGames() {

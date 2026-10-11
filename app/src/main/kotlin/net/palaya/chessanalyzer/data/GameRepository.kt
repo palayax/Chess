@@ -7,7 +7,14 @@ import kotlinx.coroutines.withContext
 import net.palaya.chessanalyzer.core.analysis.EngineLineInput
 import net.palaya.chessanalyzer.core.analysis.PositionEval
 import net.palaya.chessanalyzer.engine.NetStore
+import net.palaya.chessanalyzer.core.narration.VideoPace
+import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
+import net.palaya.chessanalyzer.ui.model.ReviewOptions
+import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.StoredReviewOptions
+import net.palaya.chessanalyzer.video.KokoroVoices
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -62,7 +69,39 @@ class GameRepository(
         val multiPv: Int,
         val userColorName: String?,
         val savedAtMs: Long = System.currentTimeMillis(),
-    )
+        // ---- The game's review options (Review options screen, RF). Null = never chosen for this game (a game saved
+        // before RF): every reader then falls back to the Settings default. Absent keys read as null. ----
+        /** `NarrationProviderChoice` name. */
+        val voiceProvider: String? = null,
+        /** Kokoro speaker sid. */
+        val speakerId: Int? = null,
+        /** `VideoPace` name. */
+        val pace: String? = null,
+        val naturalWording: Boolean? = null,
+        val prepareVideo: Boolean? = null,
+    ) {
+        /** The options stored with this game, for [net.palaya.chessanalyzer.ui.model.prefillReviewOptions]. */
+        fun reviewOptions(): StoredReviewOptions = StoredReviewOptions(
+            depth = depth,
+            side = SideChoice.fromStored(userColorName),
+            naturalWording = naturalWording,
+            prepareVideo = prepareVideo,
+            voice = NarrationProviderChoice.fromPersistedOrNull(voiceProvider),
+            speakerId = speakerId?.takeIf { KokoroVoices.isKnown(it) },
+            pace = VideoPace.fromPersistedOrNull(pace),
+        )
+
+        /** This game with [options] stored (the strength goes to [depth], the side to [userColorName]). */
+        fun withReviewOptions(options: ReviewOptions): StoredGame = copy(
+            depth = options.strength.depth,
+            userColorName = options.side.storedName ?: userColorName,
+            voiceProvider = options.voice.name,
+            speakerId = options.speakerId,
+            pace = options.pace.name,
+            naturalWording = options.naturalWording,
+            prepareVideo = options.prepareVideo,
+        )
+    }
 
     // -----------------------------------------------------------------
     // Imported-game index (drives the Import screen's "recent games")
@@ -81,8 +120,107 @@ class GameRepository(
             put("multiPv", game.multiPv)
             put("userColorName", game.userColorName ?: JSONObject.NULL)
             put("savedAtMs", game.savedAtMs)
+            game.voiceProvider?.let { put("voiceProvider", it) }
+            game.speakerId?.let { put("speakerId", it) }
+            game.pace?.let { put("pace", it) }
+            game.naturalWording?.let { put("naturalWording", it) }
+            game.prepareVideo?.let { put("prepareVideo", it) }
         }
         File(gamesDir, "${game.id}.json").writeText(json.toString())
+    }
+
+    /**
+     * Deletes the game [id] (Home's library menu, RF): its JSON and its pending review options. Returns false when it
+     * was not there. The caller decides about the eval cache ([deleteEvalCacheFor], `deletePlan`) and never deletes the
+     * narration audio (shared across games, keyed by sentence; Settings clears it).
+     */
+    suspend fun delete(id: String): Boolean = withContext(Dispatchers.IO) {
+        clearPendingOptionsBlocking(id)
+        val file = File(gamesDir, "$id.json")
+        file.exists() && file.delete()
+    }
+
+    /** The texts of every stored game except [exceptId] (two imports of the same game share their eval cache). */
+    suspend fun storedPgnTexts(exceptId: String? = null): List<String> = withContext(Dispatchers.IO) {
+        gamesDir.listFiles { f -> f.extension == "json" }.orEmpty()
+            .mapNotNull { parseStoredGame(it) }
+            .filter { it.id != exceptId }
+            .map { it.pgnText }
+    }
+
+    /**
+     * Deletes the eval-cache files (complete, partial and its temp) under [keys] in every net's folder. Returns how
+     * many files went.
+     */
+    suspend fun deleteEvalCacheFor(keys: Collection<String>): Int = withContext(Dispatchers.IO) {
+        var deleted = 0
+        for (folder in evalCache.root.listFiles { f -> f.isDirectory }.orEmpty()) {
+            for (key in keys) {
+                for (name in listOf("$key.json", "$key.partial.json", "$key.partial.tmp")) {
+                    if (File(folder, name).delete()) deleted++
+                }
+            }
+        }
+        deleted
+    }
+
+    /** True when the complete evaluations under [key] are in the active net's folder (a run at that strength is instant). */
+    fun hasEvalCache(key: String): Boolean = File(evalCacheDir(netPrefix()), "$key.json").isFile
+
+    // ---- Review options of a game not analysed yet (RF) --------------------------------------------------------------
+    // The options screen runs before the engine, and a game is stored only once its analysis succeeds. Until then its
+    // options are kept here, so a process killed during the run (F1's resume) still runs the stages the user chose.
+    // `filesDir/review/pending/<id>.json`, device-specific like the pending request (excluded from backup).
+
+    private val pendingOptionsDir = File(filesDir, "$REVIEW_DIR_NAME/pending")
+
+    suspend fun savePendingOptions(id: String, options: ReviewOptions) = withContext(Dispatchers.IO) {
+        pendingOptionsDir.mkdirs()
+        val json = JSONObject().apply {
+            put("depth", options.strength.depth)
+            put("strength", options.strength.name)
+            options.side.storedName?.let { put("side", it) }
+            put("naturalWording", options.naturalWording)
+            put("prepareVideo", options.prepareVideo)
+            put("voiceProvider", options.voice.name)
+            put("speakerId", options.speakerId)
+            put("pace", options.pace.name)
+        }
+        val tmp = File(pendingOptionsDir, "$id.json.tmp")
+        tmp.writeText(json.toString())
+        val target = File(pendingOptionsDir, "$id.json")
+        target.delete()
+        tmp.renameTo(target)
+        Unit
+    }
+
+    /** The options saved by [savePendingOptions] for [id], or null (none, or unreadable: then it is deleted). */
+    suspend fun loadPendingOptions(id: String): StoredReviewOptions? = withContext(Dispatchers.IO) {
+        val file = File(pendingOptionsDir, "$id.json")
+        if (!file.isFile) return@withContext null
+        try {
+            val json = JSONObject(file.readText())
+            val strengthDepth = AnalysisStrength.entries.firstOrNull { it.name == json.optString("strength", "") }?.depth
+            StoredReviewOptions(
+                depth = strengthDepth ?: if (json.has("depth")) json.getInt("depth") else null,
+                side = SideChoice.fromStored(json.optString("side", "")),
+                naturalWording = if (json.has("naturalWording")) json.getBoolean("naturalWording") else null,
+                prepareVideo = if (json.has("prepareVideo")) json.getBoolean("prepareVideo") else null,
+                voice = NarrationProviderChoice.fromPersistedOrNull(json.optString("voiceProvider", "")),
+                speakerId = if (json.has("speakerId")) json.getInt("speakerId").takeIf { KokoroVoices.isKnown(it) } else null,
+                pace = VideoPace.fromPersistedOrNull(json.optString("pace", "")),
+            )
+        } catch (e: Exception) {
+            file.delete()
+            null
+        }
+    }
+
+    suspend fun clearPendingOptions(id: String) = withContext(Dispatchers.IO) { clearPendingOptionsBlocking(id) }
+
+    private fun clearPendingOptionsBlocking(id: String) {
+        File(pendingOptionsDir, "$id.json").delete()
+        File(pendingOptionsDir, "$id.json.tmp").delete()
     }
 
     suspend fun load(id: String): StoredGame? = withContext(Dispatchers.IO) {
@@ -91,7 +229,8 @@ class GameRepository(
         parseStoredGame(file)
     }
 
-    suspend fun listRecent(limit: Int = 20): List<RecentGameSummary> = withContext(Dispatchers.IO) {
+    /** The library, newest first; every game by default (RF: no longer only the last 20). */
+    suspend fun listRecent(limit: Int = Int.MAX_VALUE): List<RecentGameSummary> = withContext(Dispatchers.IO) {
         gamesDir.listFiles { f -> f.extension == "json" }
             ?.sortedByDescending { it.lastModified() }
             ?.take(limit)
@@ -124,6 +263,11 @@ class GameRepository(
             multiPv = json.optInt("multiPv", SettingsRepository.DEFAULT_MULTI_PV),
             userColorName = json.optString("userColorName", null).takeUnless { it.isNullOrEmpty() },
             savedAtMs = json.optLong("savedAtMs", file.lastModified()),
+            voiceProvider = json.optString("voiceProvider", "").takeUnless { it.isEmpty() },
+            speakerId = if (json.has("speakerId")) json.getInt("speakerId") else null,
+            pace = json.optString("pace", "").takeUnless { it.isEmpty() },
+            naturalWording = if (json.has("naturalWording")) json.getBoolean("naturalWording") else null,
+            prepareVideo = if (json.has("prepareVideo")) json.getBoolean("prepareVideo") else null,
         )
     } catch (e: Exception) {
         null
@@ -244,5 +388,10 @@ class GameRepository(
             depth = json.getInt("depth"),
             requestedDepth = if (json.has("requestedDepth")) json.getInt("requestedDepth") else null,
         )
+    }
+
+    companion object {
+        /** `filesDir/review/`: the review run's device-specific files (pending options, measured speeds). Not backed up. */
+        const val REVIEW_DIR_NAME = "review"
     }
 }
