@@ -237,7 +237,8 @@ fun SettingsScreen(
                             ) {
                                 AnalysisStrengthControl(
                                     depth = settings.depth,
-                                    onChange = { onSettingsChange(settings.copy(depth = it.depth)) },
+                                    autoDepth = settings.autoDepth,
+                                    onChange = { onSettingsChange(settings.copy(depth = it.depth, autoDepth = it.autoDepth)) },
                                 )
                                 ReviewDetailControl(
                                     thresholdCp = settings.narrationThresholdCp,
@@ -697,10 +698,13 @@ private fun VoicePickerRow(
     }
 }
 
-/** "Analysis strength": Quick / Standard / Deep. A stored depth outside those shows "Custom (N)". */
+/**
+ * "Analysis strength": Quick / Standard / Deep / Auto (ANALYSIS_SPEC §8.5: deeper on the critical moves). A stored
+ * depth outside those shows "Custom (N)".
+ */
 @Composable
-private fun AnalysisStrengthControl(depth: Int, onChange: (AnalysisStrength) -> Unit) {
-    val preset = AnalysisStrength.fromDepth(depth)
+private fun AnalysisStrengthControl(depth: Int, autoDepth: Boolean, onChange: (AnalysisStrength) -> Unit) {
+    val preset = AnalysisStrength.of(depth, autoDepth)
     PresetControl(
         title = stringResource(R.string.settings_depth),
         help = stringResource(R.string.settings_depth_help),
@@ -708,6 +712,7 @@ private fun AnalysisStrengthControl(depth: Int, onChange: (AnalysisStrength) -> 
             AnalysisStrength.QUICK to stringResource(R.string.settings_depth_quick),
             AnalysisStrength.STANDARD to stringResource(R.string.settings_depth_standard),
             AnalysisStrength.DEEP to stringResource(R.string.settings_depth_deep),
+            AnalysisStrength.AUTO to stringResource(R.string.settings_depth_auto),
         ),
         selected = preset,
         customLabel = if (preset == null) stringResource(R.string.settings_custom_value, customDepthValue(depth)) else null,

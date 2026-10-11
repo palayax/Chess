@@ -12,18 +12,30 @@ import java.util.Locale
  * an old install with a value the presets cannot express keeps working and reads as "Custom".
  */
 
-/** "Analysis strength": Quick / Standard / Deep = search depth 12 / 14 / 18 (design §3.1). */
-enum class AnalysisStrength(val depth: Int) {
+/**
+ * "Analysis strength": Quick / Standard / Deep = search depth 12 / 14 / 18 (design §3.1), and Auto (ANALYSIS_SPEC
+ * §8.5): every position at Standard, then the critical moves searched again at Deep. A depth Int alone cannot say
+ * Auto, so it is stored as its base depth plus [autoDepth] (`EngineSettings.autoDepth`, the pending request, the
+ * stored game).
+ */
+enum class AnalysisStrength(val depth: Int, val autoDepth: Boolean = false) {
     QUICK(12),
     STANDARD(14),
-    DEEP(18);
+    DEEP(18),
+    AUTO(14, autoDepth = true);
 
-    /** The per-position search limits for this strength (ANALYSIS_SPEC §8.1). */
+    /**
+     * The per-position search limits of this strength (ANALYSIS_SPEC §8.1). For [AUTO] that is its first pass
+     * (Standard's); the deeper pass uses [AutoDepthBudget.deep].
+     */
     val budget: SearchBudget get() = SearchBudget.forStrength(this)
 
     companion object {
-        /** The preset whose depth is exactly [depth], or null when the stored value is "Custom". */
-        fun fromDepth(depth: Int): AnalysisStrength? = entries.firstOrNull { it.depth == depth }
+        /** The fixed-depth preset whose depth is exactly [depth], or null when the stored value is "Custom". Never [AUTO]. */
+        fun fromDepth(depth: Int): AnalysisStrength? = entries.firstOrNull { !it.autoDepth && it.depth == depth }
+
+        /** The strength a stored (depth, Auto flag) pair means; null for an old custom depth without Auto. */
+        fun of(depth: Int, autoDepth: Boolean): AnalysisStrength? = if (autoDepth) AUTO else fromDepth(depth)
     }
 }
 

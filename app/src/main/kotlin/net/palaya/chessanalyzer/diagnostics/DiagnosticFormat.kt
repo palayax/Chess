@@ -119,11 +119,17 @@ data class PositionLogLine(
     val capped: Boolean,
     /** "cp -35" / "mate 3" from the side to move, or "none" (terminal position). */
     val score: String,
+    /**
+     * Auto-depth's second pass (ANALYSIS_SPEC §8.5): why the position was searched again, e.g.
+     * "deeper (mistake, swing)", or with "from the cache" when an earlier deep result was reused. Null otherwise.
+     */
+    val note: String? = null,
 )
 
 fun formatPositionLine(p: PositionLogLine): String =
     "pos ${p.index} ${p.san ?: "start"} depth ${p.reachedDepth}/${p.requestedDepth} nodes ${p.nodes} " +
-        "ms ${p.timeMs} capped ${if (p.capped) "yes" else "no"} score ${p.score}"
+        "ms ${p.timeMs} capped ${if (p.capped) "yes" else "no"} score ${p.score}" +
+        (p.note?.let { " $it" } ?: "")
 
 fun scoreText(scoreCp: Int?, mateIn: Int?): String = when {
     mateIn != null -> "mate $mateIn"

@@ -24,6 +24,11 @@ import net.palaya.chessanalyzer.video.timeLeftFor
  * gave 12-13 min after 6 positions instead of 14). A game much heavier than the calibration games is
  * underestimated; the display then rises once it is off by 2 minutes or 25%. Replayed on that run's log it shows 14 min after 6 positions
  * (19.3 left), 14 after 20 (16.6 left), 12 after 30 (12.5 left) and 6 after 50 (4.6 left).
+ *
+ * Auto-depth (ANALYSIS_SPEC §8.4, §8.5) adds its second pass to the work left: the positions it will search again
+ * x the nodes a deepened position typically takes. Before the second pass that count is the expected share of the
+ * game ([AnalysisProgress.deepPassExpected]); during it, the positions picked and not yet searched. So the estimate
+ * never reaches "less than a minute" at the end of the first pass while a second one is still to come.
  */
 
 /** Positions the engine has searched in this run before an estimate is shown (its speed is then measured). */
@@ -48,15 +53,30 @@ fun estimateAnalysisRemainingMs(
     runMs: Long,
     runPositions: Int,
     typicalNodes: Long,
+    deepLeft: Int = 0,
+    deepTypicalNodes: Long = 0L,
 ): Long? {
     if (runPositions < MIN_POSITIONS_FOR_ESTIMATE || runNodes <= 0L || runMs <= 0L || total <= 0) return null
     val msPerNode = runMs.toDouble() / runNodes
     val left = (total - done).coerceAtLeast(0)
-    return Math.round(left * typicalNodes.toDouble() * msPerNode)
+    val nodesLeft = left * typicalNodes.toDouble() + deepLeft.coerceAtLeast(0) * deepTypicalNodes.toDouble()
+    return Math.round(nodesLeft * msPerNode)
 }
 
-/** The running estimate for one analysis run: feed it every progress update, read the line to show. */
-class AnalysisTimeLeftTracker(private val typicalNodes: Long) {
+/**
+ * Auto-depth's second-pass positions still to search for [progress]: the picked ones not yet searched during the
+ * second pass, the expected count before it (spec §8.5). 0 for any other strength.
+ */
+fun deepPositionsLeft(progress: AnalysisProgress): Int =
+    if (progress.deepPassTotal > 0) (progress.deepPassTotal - progress.deepPassDone).coerceAtLeast(0)
+    else progress.deepPassExpected.coerceAtLeast(0)
+
+/**
+ * The running estimate for one analysis run: feed it every progress update, read the line to show.
+ * [deepTypicalNodes] is Auto-depth's per-position cost of its second pass (`AutoDepthBudget.TYPICAL_DEEPENED_NODES`),
+ * 0 for the other strengths.
+ */
+class AnalysisTimeLeftTracker(private val typicalNodes: Long, private val deepTypicalNodes: Long = 0L) {
     private var shown: ExportTimeLeft = ExportTimeLeft.Hidden
     private var lastDone = -1
 
@@ -64,9 +84,12 @@ class AnalysisTimeLeftTracker(private val typicalNodes: Long) {
     @Synchronized
     fun onProgress(progress: AnalysisProgress): ExportTimeLeft {
         if (progress.phase != AnalysisPhase.ANALYZING_MOVES || progress.totalMoves <= 0) return shown
-        if (progress.currentMoveIndex <= lastDone) return shown
-        lastDone = progress.currentMoveIndex
-        if (progress.currentMoveIndex >= progress.totalMoves) {
+        // Positions done across both of Auto's passes (the second pass counts on after the first).
+        val done = progress.currentMoveIndex + progress.deepPassDone
+        if (done <= lastDone) return shown
+        lastDone = done
+        val deepLeft = deepPositionsLeft(progress)
+        if (progress.currentMoveIndex >= progress.totalMoves && deepLeft == 0) {
             shown = ExportTimeLeft.Hidden
             return shown
         }
@@ -77,6 +100,8 @@ class AnalysisTimeLeftTracker(private val typicalNodes: Long) {
             runMs = progress.runSearchMs,
             runPositions = progress.runPositionsSearched,
             typicalNodes = typicalNodes,
+            deepLeft = deepLeft,
+            deepTypicalNodes = deepTypicalNodes,
         ) ?: return shown
         shown = nextDisplayedTimeLeft(shown, timeLeftFor(remaining))
         return shown

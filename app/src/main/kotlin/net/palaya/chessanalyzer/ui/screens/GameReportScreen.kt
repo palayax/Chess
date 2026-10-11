@@ -3,11 +3,14 @@
 package net.palaya.chessanalyzer.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.RadioButton
 import androidx.compose.runtime.remember
 import net.palaya.chessanalyzer.ui.components.PlayerMaterialRow
+import net.palaya.chessanalyzer.ui.model.AnalysisLevel
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.canReanalyse
 import net.palaya.chessanalyzer.ui.model.customDepthValue
@@ -153,6 +156,8 @@ fun GameReportScreen(
     finalFen: String? = null,
     /** The depth this game was analysed at (A4); null while it is not in memory. Shown with "Re-analyse". */
     analysisDepth: Int? = null,
+    /** The game was analysed with Auto-depth (ANALYSIS_SPEC §8.5); [analysisDepth] is then its first pass's depth. */
+    analysisAutoDepth: Boolean = false,
     /** The user picked another strength and confirmed "Re-analyse" (A4). Null hides the card (previews). */
     onReanalyse: ((AnalysisStrength) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
@@ -245,7 +250,7 @@ fun GameReportScreen(
             }
 
             if (onReanalyse != null && analysisDepth != null) {
-                item(key = "analysis-strength") { AnalysisStrengthCard(analysisDepth, onReanalyse) }
+                item(key = "analysis-strength") { AnalysisStrengthCard(AnalysisLevel(analysisDepth, analysisAutoDepth), onReanalyse) }
             }
 
             item(key = "details-header") {
@@ -962,11 +967,11 @@ private fun ClassificationTableRow(row: ClassificationRow) {
 
 /**
  * "Analysed at Standard" and a "Re-analyse" button (A4): the strength belongs to the game. The button opens a
- * short chooser (Quick / Standard / Deep, the current one marked); confirming analyses the game again at that
+ * short chooser (Quick / Standard / Deep / Auto, the current one marked); confirming analyses the game again at that
  * strength. The Settings value stays the default for games analysed for the first time.
  */
 @Composable
-private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> Unit) {
+private fun AnalysisStrengthCard(level: AnalysisLevel, onReanalyse: (AnalysisStrength) -> Unit) {
     var choosing by rememberSaveable { mutableStateOf(false) }
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -979,7 +984,7 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> 
                 modifier = Modifier.asHeading(),
             )
             Text(
-                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(depth)),
+                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(level)),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -990,7 +995,7 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> 
     }
     if (choosing) {
         ReanalyseDialog(
-            currentDepth = depth,
+            current = level,
             onConfirm = { strength ->
                 choosing = false
                 onReanalyse(strength)
@@ -1001,37 +1006,40 @@ private fun AnalysisStrengthCard(depth: Int, onReanalyse: (AnalysisStrength) -> 
 }
 
 @Composable
-private fun strengthLabel(depth: Int): String = when (AnalysisStrength.fromDepth(depth)) {
+private fun strengthLabel(level: AnalysisLevel): String = when (level.strength) {
     AnalysisStrength.QUICK -> stringResource(R.string.settings_depth_quick)
     AnalysisStrength.STANDARD -> stringResource(R.string.settings_depth_standard)
     AnalysisStrength.DEEP -> stringResource(R.string.settings_depth_deep)
-    null -> stringResource(R.string.settings_custom_value, customDepthValue(depth))
+    AnalysisStrength.AUTO -> stringResource(R.string.settings_depth_auto)
+    null -> stringResource(R.string.settings_custom_value, customDepthValue(level.depth))
 }
 
 @Composable
-private fun ReanalyseDialog(currentDepth: Int, onConfirm: (AnalysisStrength) -> Unit, onDismiss: () -> Unit) {
+private fun ReanalyseDialog(current: AnalysisLevel, onConfirm: (AnalysisStrength) -> Unit, onDismiss: () -> Unit) {
     var picked by rememberSaveable { mutableStateOf<AnalysisStrength?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.reanalyse_title)) },
         text = {
-            Column {
+            // Four choices: scrollable so none is cut off at a large font (CLAUDE.md accessibility conventions).
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    text = stringResource(R.string.reanalyse_body, strengthLabel(currentDepth)),
+                    text = stringResource(R.string.reanalyse_body, strengthLabel(current)),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                strengthChoices(currentDepth).forEach { choice ->
-                    val label = strengthLabel(choice.strength.depth)
+                strengthChoices(current).forEach { choice ->
+                    val label = strengthLabel(AnalysisLevel.of(choice.strength))
                     val hint = stringResource(
                         when (choice.strength) {
                             AnalysisStrength.QUICK -> R.string.reanalyse_hint_quick
                             AnalysisStrength.STANDARD -> R.string.reanalyse_hint_standard
                             AnalysisStrength.DEEP -> R.string.reanalyse_hint_deep
+                            AnalysisStrength.AUTO -> R.string.reanalyse_hint_auto
                         },
                     )
-                    val current = stringResource(R.string.reanalyse_current)
+                    val currentMark = stringResource(R.string.reanalyse_current)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1048,7 +1056,7 @@ private fun ReanalyseDialog(currentDepth: Int, onConfirm: (AnalysisStrength) -> 
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = if (choice.isCurrent) "$label ($current)" else label,
+                                text = if (choice.isCurrent) "$label ($currentMark)" else label,
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                             Text(
@@ -1064,7 +1072,7 @@ private fun ReanalyseDialog(currentDepth: Int, onConfirm: (AnalysisStrength) -> 
         confirmButton = {
             TextButton(
                 onClick = { picked?.let(onConfirm) },
-                enabled = canReanalyse(currentDepth, picked),
+                enabled = canReanalyse(current, picked),
                 modifier = Modifier.heightIn(min = 48.dp),
             ) { Text(stringResource(R.string.reanalyse_confirm)) }
         },

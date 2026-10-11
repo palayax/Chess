@@ -62,6 +62,11 @@ class GameRepository(
         val multiPv: Int,
         val userColorName: String?,
         val savedAtMs: Long = System.currentTimeMillis(),
+        /**
+         * Analysed with Auto-depth (ANALYSIS_SPEC §8.5; [depth] is then its first pass's depth), so reopening the
+         * game keeps Auto. Absent in games saved before Auto: false.
+         */
+        val autoDepth: Boolean = false,
     )
 
     // -----------------------------------------------------------------
@@ -81,6 +86,7 @@ class GameRepository(
             put("multiPv", game.multiPv)
             put("userColorName", game.userColorName ?: JSONObject.NULL)
             put("savedAtMs", game.savedAtMs)
+            put("autoDepth", game.autoDepth)
         }
         File(gamesDir, "${game.id}.json").writeText(json.toString())
     }
@@ -124,6 +130,7 @@ class GameRepository(
             multiPv = json.optInt("multiPv", SettingsRepository.DEFAULT_MULTI_PV),
             userColorName = json.optString("userColorName", null).takeUnless { it.isNullOrEmpty() },
             savedAtMs = json.optLong("savedAtMs", file.lastModified()),
+            autoDepth = json.optBoolean("autoDepth", false),
         )
     } catch (e: Exception) {
         null

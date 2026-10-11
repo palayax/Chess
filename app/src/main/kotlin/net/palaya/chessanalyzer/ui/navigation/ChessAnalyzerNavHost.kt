@@ -397,6 +397,7 @@ fun ChessAnalyzerNavHost(
                     // A4: the material at the end, and the strength this game has with a way to change it.
                     finalFen = viewModel.games[gameId]?.moves?.lastOrNull()?.fenAfter,
                     analysisDepth = viewModel.games[gameId]?.analysisDepth?.takeIf { it > 0 },
+                    analysisAutoDepth = viewModel.games[gameId]?.autoDepth == true,
                     onReanalyse = { strength ->
                         // The Summary is replaced by the Analysing screen, which ends on a new Summary.
                         if (viewModel.reanalyseGame(gameId, strength)) {

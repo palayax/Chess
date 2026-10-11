@@ -118,6 +118,8 @@ data class ImportedGame(
     val multiPv: Int = 0,
     /** Multi-move runs to draw as single coloured units in the move list (ANALYSIS_SPEC §9.3). */
     val sequences: List<MoveSequenceView> = emptyList(),
+    /** Analysed with Auto-depth (ANALYSIS_SPEC §8.5): [analysisDepth] is then its first pass's depth. */
+    val autoDepth: Boolean = false,
 )
 
 data class RecentGameSummary(
@@ -163,6 +165,18 @@ data class AnalysisProgress(
     val runStartedAtMs: Long = 0L,
     /** "About N min left", measured (set by the ViewModel, see [AnalysisTimeLeftTracker]). */
     val timeLeft: net.palaya.chessanalyzer.video.ExportTimeLeft = net.palaya.chessanalyzer.video.ExportTimeLeft.Hidden,
+    /**
+     * Auto-depth's second pass (ANALYSIS_SPEC §8.5): positions searched again so far, of [deepPassTotal] picked so
+     * far (a later round can pick more). 0 / 0 outside the second pass; [currentMoveIndex] then stays at
+     * [totalMoves] (every position has its first-pass evaluation).
+     */
+    val deepPassDone: Int = 0,
+    val deepPassTotal: Int = 0,
+    /**
+     * Auto-depth, before the second pass knows its count: the positions it is expected to search again
+     * (`AutoDepthBudget.EXPECTED_DEEP_FRACTION` of the game), for the time-left estimate. 0 otherwise.
+     */
+    val deepPassExpected: Int = 0,
 )
 
 data class ClassificationCount(val classification: MoveClassification, val count: Int)
@@ -311,7 +325,10 @@ sealed interface PracticeEntryState {
 }
 
 data class EngineSettings(
-    /** Search depth. Settings offers the presets 12 / 14 / 18; any stored value 6..30 is still honoured. */
+    /**
+     * Search depth. Settings offers the presets 12 / 14 / 18; any stored value 6..30 is still honoured. With
+     * [autoDepth] it is the depth of Auto's first pass (14).
+     */
     val depth: Int = 14,
     /** Not a user setting any more (kept at 3: the tactic gate needs the second-best line). */
     val multiPv: Int = 3,
@@ -336,9 +353,17 @@ data class EngineSettings(
      * Applies to the in-app player and the MP4 alike, because both play the same script.
      */
     val videoPace: VideoPace = VideoPace.DEFAULT,
+    /**
+     * "Auto" analysis strength (ANALYSIS_SPEC §8.5): every position at [depth], then the critical moves searched
+     * again at Deep (`AutoDepthBudget`). False for Quick / Standard / Deep and an old custom depth.
+     */
+    val autoDepth: Boolean = false,
 ) {
-    /** The per-position node and time limits that go with [depth] (ANALYSIS_SPEC §8.1). */
+    /** The per-position node and time limits that go with [depth] (ANALYSIS_SPEC §8.1); Auto's first pass. */
     val searchBudget: SearchBudget get() = SearchBudget.forDepth(depth)
+
+    /** The named strength these settings are, or null for an old custom depth. */
+    val strength: AnalysisStrength? get() = AnalysisStrength.of(depth, autoDepth)
 }
 
 /** Placeholder sample data so every screen has something realistic to render in @Preview and initial state. */

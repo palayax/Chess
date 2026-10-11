@@ -67,6 +67,8 @@
     <string name="progress_less_than_minute">Less than a minute left</string>
     <!-- Shown when one position takes longer than about 3 s. %1$d = depth reached, %2$d = depth asked for. -->
     <string name="progress_thinking_deeper">Thinking deeper on this move… depth %1$d of %2$d</string>
+    <!-- Auto-depth's second pass (ANALYSIS_SPEC §8.5): critical positions searched again, N of M picked so far. -->
+    <string name="progress_deeper_moves">Taking a deeper look at the critical moves: %1$d of %2$d</string>
 
     <!-- Analysis failed (shown inside the progress screen, never as a modal) -->
     <string name="analysis_failed_hint">Check the moves and try again.</string>
@@ -259,6 +261,7 @@
     <string name="reanalyse_hint_quick">Fastest, looks a little less deeply.</string>
     <string name="reanalyse_hint_standard">A good balance of speed and accuracy.</string>
     <string name="reanalyse_hint_deep">Slowest, the most accurate.</string>
+    <string name="reanalyse_hint_auto">Deeper on the critical moves only, so much faster than Deep.</string>
     <string name="reanalyse_current">current</string>
     <string name="reanalyse_confirm">Re-analyse</string>
     <string name="reanalyse_cancel">Cancel</string>
@@ -305,7 +308,8 @@
     <string name="settings_depth_quick">Quick</string>
     <string name="settings_depth_standard">Standard</string>
     <string name="settings_depth_deep">Deep</string>
-    <string name="settings_depth_help">Deeper is more accurate and slower. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
+    <string name="settings_depth_auto">Auto</string>
+    <string name="settings_depth_help">Deeper is more accurate and slower. Auto looks at every move like Standard, then deeper at the critical moves. This is the default for new games; each game can be analysed again at another strength from its summary.</string>
     <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
     <string name="settings_custom_value">Custom (%1$s)</string>
     <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->

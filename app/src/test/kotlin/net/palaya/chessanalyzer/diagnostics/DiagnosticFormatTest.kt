@@ -110,6 +110,16 @@ class DiagnosticFormatTest {
     }
 
     @Test
+    fun anAutoDepthPositionLineSaysWhyItWasSearchedAgainAndAPlainLineIsUnchanged() {
+        val plain = PositionLogLine(12, "Rdg1", 14, 14, 900, 12, false, "cp 35")
+        assertEquals("pos 12 Rdg1 depth 14/14 nodes 900 ms 12 capped no score cp 35", formatPositionLine(plain))
+        assertEquals(
+            "pos 12 Rdg1 depth 18/18 nodes 0 ms 0 capped no score cp 35 deeper (mistake, swing), from the cache",
+            formatPositionLine(plain.copy(requestedDepth = 18, reachedDepth = 18, nodes = 0, timeMs = 0, note = "deeper (mistake, swing), from the cache")),
+        )
+    }
+
+    @Test
     fun theGameIsLoggedWithItsTagsAndItsMovesInSan() {
         val game = PgnParser.parse(
             """

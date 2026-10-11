@@ -34,6 +34,11 @@ class SettingsRepository(private val context: Context) {
 
     private object Keys {
         val DEPTH = intPreferencesKey("depth")
+        /**
+         * "Auto" analysis strength (ANALYSIS_SPEC §8.5): [DEPTH] then holds its first pass's depth. Absent (every
+         * store written before Auto) = false, so an old Quick/Standard/Deep/custom depth reads exactly as before.
+         */
+        val AUTO_DEPTH = booleanPreferencesKey("auto_depth")
         val USERNAME = stringPreferencesKey("username")
         val NARRATION_THRESHOLD_CP = intPreferencesKey("narration_threshold_cp")
         /** BCP-47 tag of the chosen [AppLanguage]; absent or empty means "follow the system". */
@@ -72,13 +77,18 @@ class SettingsRepository(private val context: Context) {
             narrationThresholdCp = prefs[Keys.NARRATION_THRESHOLD_CP] ?: DEFAULT_NARRATION_THRESHOLD_CP,
             language = AppLanguage.fromTag(prefs[Keys.LANGUAGE]),
             videoPace = VideoPace.fromPersistedOrNull(prefs[Keys.VIDEO_PACE]) ?: VideoPace.DEFAULT,
+            autoDepth = prefs[Keys.AUTO_DEPTH] ?: false,
         )
     }
 
     suspend fun current(): EngineSettings = settingsFlow.first()
 
+    /** A fixed search depth (Quick/Standard/Deep or a custom one): Auto is switched off. */
     suspend fun setDepth(depth: Int) {
-        context.dataStore.edit { it[Keys.DEPTH] = depth.coerceIn(6, 30) }
+        context.dataStore.edit {
+            it[Keys.DEPTH] = depth.coerceIn(6, 30)
+            it[Keys.AUTO_DEPTH] = false
+        }
     }
 
     suspend fun setUsername(username: String) {
@@ -98,6 +108,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun save(settings: EngineSettings) {
         context.dataStore.edit { prefs ->
             prefs[Keys.DEPTH] = settings.depth.coerceIn(6, 30)
+            prefs[Keys.AUTO_DEPTH] = settings.autoDepth
             prefs[Keys.USERNAME] = settings.username
             prefs[Keys.NARRATION_THRESHOLD_CP] = settings.narrationThresholdCp.coerceIn(0, 300)
             prefs[Keys.LANGUAGE] = settings.language.tag

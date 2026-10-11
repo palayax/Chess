@@ -2,7 +2,7 @@ package net.palaya.chessanalyzer.ui.model
 
 /*
  * Per-game analysis strength (A4). Settings › Analysis strength is the DEFAULT for a game analysed for the
- * first time; a game keeps the strength it was analysed with (`GameRepository.StoredGame.depth`), and its
+ * first time; a game keeps the strength it was analysed with (`GameRepository.StoredGame.depth` + `.autoDepth`), and its
  * Summary can re-analyse it with another one. The rules are here, pure, so each has a host test.
  *
  * Reference (owner's rule, recorded in RUN_LOG A4): chess.com's Game Review lets the player choose how deep
@@ -12,23 +12,37 @@ package net.palaya.chessanalyzer.ui.model
  */
 
 /**
- * The depth a game is analysed at, in order of authority: an explicit choice for this run (a re-analyse),
- * the strength the game was last analysed with (reopening a game from Home), and only then the Settings
+ * What a game is analysed with: a search [depth] (a preset's, or an old custom one) and whether Auto-depth deepens
+ * its critical moves afterwards (ANALYSIS_SPEC §8.5; [depth] is then Auto's first pass). A depth alone cannot say
+ * Auto, so this pair is what the request, the stored game and the chooser carry.
+ */
+data class AnalysisLevel(val depth: Int, val autoDepth: Boolean = false) {
+    /** The named strength, or null for an old custom depth. */
+    val strength: AnalysisStrength? get() = AnalysisStrength.of(depth, autoDepth)
+
+    companion object {
+        fun of(strength: AnalysisStrength): AnalysisLevel = AnalysisLevel(strength.depth, strength.autoDepth)
+    }
+}
+
+/**
+ * The level a game is analysed at, in order of authority: an explicit choice for this run (a re-analyse), the level
+ * the game was last analysed with (reopening a game from Home: an Auto game stays Auto), and only then the Settings
  * default (a game analysed for the first time).
  */
-fun gameAnalysisDepth(explicit: Int?, stored: Int?, settingsDefault: Int): Int =
+fun gameAnalysisLevel(explicit: AnalysisLevel?, stored: AnalysisLevel?, settingsDefault: AnalysisLevel): AnalysisLevel =
     explicit ?: stored ?: settingsDefault
 
 /** One line of the "Re-analyse" chooser. */
 data class StrengthChoice(val strength: AnalysisStrength, val isCurrent: Boolean)
 
-/** The three strengths, Quick to Deep; the one [currentDepth] belongs to is marked (none for a custom depth). */
-fun strengthChoices(currentDepth: Int): List<StrengthChoice> =
-    AnalysisStrength.entries.map { StrengthChoice(it, isCurrent = it.depth == currentDepth) }
+/** The four strengths, Quick, Standard, Deep, then Auto; the one [current] is marked (none for a custom depth). */
+fun strengthChoices(current: AnalysisLevel): List<StrengthChoice> =
+    AnalysisStrength.entries.map { StrengthChoice(it, isCurrent = it == current.strength) }
 
 /**
  * Whether "Re-analyse" can be pressed: something is picked and it differs from the strength the game
  * already has. (The same strength would hit the eval cache and change nothing.)
  */
-fun canReanalyse(currentDepth: Int, picked: AnalysisStrength?): Boolean =
-    picked != null && picked.depth != currentDepth
+fun canReanalyse(current: AnalysisLevel, picked: AnalysisStrength?): Boolean =
+    picked != null && picked != current.strength

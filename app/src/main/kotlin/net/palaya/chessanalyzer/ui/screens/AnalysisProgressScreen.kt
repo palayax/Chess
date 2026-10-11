@@ -302,7 +302,10 @@ internal fun failureHintRes(failure: AnalysisService.Failure): Int = when (failu
 @Composable
 private fun statusText(progress: AnalysisProgress): String = when (progress.phase) {
     AnalysisPhase.PREPARING_ENGINE -> stringResource(R.string.progress_downloading_engine)
-    AnalysisPhase.ANALYZING_MOVES -> {
+    AnalysisPhase.ANALYZING_MOVES -> if (progress.deepPassTotal > 0) {
+        // Auto-depth's second pass (ANALYSIS_SPEC §8.5): the position being searched again, of those picked so far.
+        stringResource(R.string.progress_deeper_moves, (progress.deepPassDone + 1).coerceAtMost(progress.deepPassTotal), progress.deepPassTotal)
+    } else {
         val (done, total) = wholeMoveCounter(progress.currentMoveIndex, progress.totalMoves)
         stringResource(R.string.progress_analyzing_moves, done, total)
     }

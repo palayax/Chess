@@ -86,6 +86,36 @@ class AnalysisTimeLeftTest {
     }
 
     @Test
+    fun autosSecondPassIsPartOfTheWorkLeft() {
+        // 6 positions searched at 0.6 M nodes/s; 61 Standard positions and 20 deep ones left.
+        val ms = estimateAnalysisRemainingMs(
+            6, 67, runNodes = 6_000_000, runMs = 10 * second, runPositions = 6, typicalNodes = 3_450_000,
+            deepLeft = 20, deepTypicalNodes = AutoDepthBudget.TYPICAL_DEEPENED_NODES,
+        )
+        assertEquals(Math.round((61 * 3_450_000.0 + 20 * AutoDepthBudget.TYPICAL_DEEPENED_NODES) * (10_000.0 / 6_000_000)), ms)
+        // The positions left of the second pass: the expected share before it, the picked ones not done during it.
+        assertEquals(20, deepPositionsLeft(progress(30, nodes = 1, ms = 1).copy(deepPassExpected = 20)))
+        assertEquals(7, deepPositionsLeft(progress(67, nodes = 1, ms = 1).copy(deepPassDone = 5, deepPassTotal = 12, deepPassExpected = 20)))
+        assertEquals(0, deepPositionsLeft(progress(30, nodes = 1, ms = 1)))
+    }
+
+    @Test
+    fun anAutoRunKeepsAnEstimateAfterItsFirstPassAndHidesItOnlyWhenTheSecondPassIsDone() {
+        val tracker = AnalysisTimeLeftTracker(typicalNodes = 6_000_000, deepTypicalNodes = 12_000_000)
+        for (done in 0..66) tracker.onProgress(progress(done, nodes = done * 6_000_000L, ms = done * 6 * second).copy(deepPassExpected = 20))
+        // First pass done, 20 deep positions expected: 20 x 12 s = 4 min, not hidden.
+        val afterFirst = tracker.onProgress(progress(67, nodes = 402_000_000, ms = 402 * second).copy(deepPassExpected = 20))
+        assertTrue("shown $afterFirst", afterFirst != ExportTimeLeft.Hidden)
+        // The second pass counts on: done 10 of 20.
+        val mid = tracker.onProgress(progress(67, positions = 77, nodes = 522_000_000, ms = 522 * second).copy(deepPassDone = 10, deepPassTotal = 20))
+        assertTrue("shown $mid", mid != ExportTimeLeft.Hidden)
+        assertEquals(
+            ExportTimeLeft.Hidden,
+            tracker.onProgress(progress(67, positions = 87, nodes = 642_000_000, ms = 642 * second).copy(deepPassDone = 20, deepPassTotal = 20)),
+        )
+    }
+
+    @Test
     fun elapsedTimeReadsLikeAClock() {
         assertEquals("0:00", formatElapsed(0))
         assertEquals("0:42", formatElapsed(42_900))
