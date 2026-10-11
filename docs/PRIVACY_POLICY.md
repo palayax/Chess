@@ -6,7 +6,7 @@ is not part of the page.
 
 # Palaya Chess — Privacy Policy
 
-**Effective date:** 10 October 2026 (version 1.1 of the app)
+**Effective date:** 11 October 2026 (version 1.1 of the app)
 
 Palaya Chess is an Android app for reviewing your chess games. It is made by Dor Amit, Palaya Cyber
 Security LTD ("we"). You can reach us at **Chess@palaya.net**.
