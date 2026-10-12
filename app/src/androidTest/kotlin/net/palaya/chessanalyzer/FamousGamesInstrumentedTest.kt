@@ -139,7 +139,11 @@ class FamousGamesInstrumentedTest {
         // G1-device: the request in flight carries the famous game's initial side, "Not me".
         val pending = PendingAnalysisStore(app.filesDir)
         compose.waitUntil(10_000) { pending.load() != null }
-        assertEquals("a famous game opens as Not me", SideChoice.NOT_ME.storedName, pending.load()?.initialSide)
+        // RF: Start review makes the options' side the user's answer, so "Not me" travels in the game's pending options
+        // (written just after the tap), no longer as the request's initialSide.
+        val gameId = pending.load()!!.gameId
+        compose.waitUntil(10_000) { runBlocking { app.gameRepository.loadPendingOptions(gameId) } != null }
+        assertEquals("a famous game opens as Not me", SideChoice.NOT_ME, runBlocking { app.gameRepository.loadPendingOptions(gameId) }?.side)
         // Leave the analysis: Analysing's Back cancels it and returns to the library.
         compose.onNodeWithText(app.getString(R.string.progress_cancel)).performClick()
         waitForText(app.getString(R.string.famous_search_label))

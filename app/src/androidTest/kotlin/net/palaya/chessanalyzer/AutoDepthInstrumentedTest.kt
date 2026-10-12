@@ -74,7 +74,9 @@ class AutoDepthInstrumentedTest {
         assertEquals(8, auto.size)
         assertTrue("the first pass is a Standard result", base.all { it.requestedDepth == AnalysisStrength.STANDARD.depth })
         val deepened = auto.indices.filter { auto[it].requestedDepth == AnalysisStrength.DEEP.depth }
-        assertTrue("the blunder 3...Nf6 (positions 5 and 6) is searched again: $deepened", deepened.containsAll(listOf(5, 6)))
+        // The cap (25% of the 7 searchable positions, floored) is ONE position. The mate Qxf7# needs only position 6 (7 is
+        // the checkmate on the board), the blunder 3...Nf6 needs 5 and 6, so only the mate fits (spec 8.5.1, cap and ranking).
+        assertEquals("only the position before the mate is searched again (cap 1): $deepened", listOf(6), deepened)
         assertTrue("the checkmate on the board (7) is never searched", 7 !in deepened)
         for (i in auto.indices) if (i !in deepened) assertEquals("position $i keeps its first-pass result", base[i], auto[i])
 
