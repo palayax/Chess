@@ -279,7 +279,10 @@ fun ChessAnalyzerNavHost(
             val gameId = backStackEntry.arguments?.getString(Destination.ARG_GAME_ID).orEmpty()
             val entry = runCatching { ReviewEntry.valueOf(backStackEntry.arguments?.getString(Destination.ARG_ENTRY).orEmpty()) }
                 .getOrDefault(ReviewEntry.IMPORT)
-            val load by produceState<ReviewOptionsLoad>(ReviewOptionsLoad.Loading, gameId) { value = viewModel.reviewOptionsLoad(gameId) }
+            val load by produceState<ReviewOptionsLoad>(ReviewOptionsLoad.Loading, gameId) {
+                val loaded = viewModel.reviewOptionsLoad(gameId)
+                withContext(Dispatchers.Main.immediate) { value = loaded }
+            }
             val leave: () -> Unit = {
                 // An import that is not started is forgotten (nothing was stored); a stored game keeps what it had.
                 if (entry == ReviewEntry.IMPORT) viewModel.forgetPendingImport(gameId)
@@ -327,10 +330,12 @@ fun ChessAnalyzerNavHost(
         composable(Destination.FamousGames.route) {
             // G1: read from the APK's assets once per process, off the main thread.
             val state by produceState<FamousGamesState>(FamousGamesState.Loading) {
-                value = withContext(Dispatchers.IO) {
+                val loaded = withContext(Dispatchers.IO) {
                     runCatching { FamousGamesStore.load(context) }
                         .fold({ FamousGamesState.Ready(it) }, { FamousGamesState.Failed })
                 }
+                // Publish on the main thread (a no-op in the app; a Compose test's effect scope resumes on the IO thread).
+                withContext(Dispatchers.Main.immediate) { value = loaded }
             }
             FamousGamesScreen(
                 state = state,
