@@ -801,4 +801,80 @@
     <string name="settings_prepare_video_help">The narration is recorded while the game is analysed, so the video plays at once.</string>
     <string name="voice_device_option">The phone\'s built-in voice</string>
     <string name="voice_device_option_help">Speaks at once, nothing to prepare.</string>
+
+    <!-- While you wait (docs/WAITING_CONTENT.md): the panel on the analysis screen. English only for now. -->
+    <string name="wait_title">While you wait</string>
+    <string name="wait_kind_insights">Your game so far</string>
+    <string name="wait_kind_fact">Chess fact</string>
+    <string name="wait_kind_player">Chess player</string>
+    <string name="wait_kind_game">Famous game</string>
+    <string name="wait_kind_puzzle">Puzzle</string>
+    <string name="wait_previous">Previous card</string>
+    <string name="wait_next">Next card</string>
+    <string name="wait_pause">Pause the cards</string>
+    <string name="wait_resume">Resume the cards</string>
+    <string name="wait_insights_empty">Insights about your game appear here as the analysis moves along.</string>
+    <!-- Live insights. Every one is an exact derivation from the game\'s moves and the evaluations so far (LiveInsightsTest pins each). -->
+    <!-- %1$s = the opening, %2$s = its ECO code. -->
+    <string name="wait_insight_opening">Opening: %1$s (%2$s)</string>
+    <!-- %1$s = the move, e.g. 17…Qxd4; %2$s and %3$s = the White-relative scores before and after it. -->
+    <string name="wait_insight_swing">Biggest swing so far: %1$s (White\'s view: %2$s → %3$s)</string>
+    <string name="wait_insight_swing_yours">Biggest swing so far: %1$s, your move (White\'s view: %2$s → %3$s)</string>
+    <string name="wait_insight_swing_opponent">Biggest swing so far: %1$s, your opponent\'s move (White\'s view: %2$s → %3$s)</string>
+    <!-- %1$s = the move after which the material was counted. -->
+    <string name="wait_insight_material_level">Material after %1$s: level</string>
+    <!-- %1$s = the move, %2$s = White/Black, %3$d = points ahead (pawn 1, knight and bishop 3, rook 5, queen 9). -->
+    <string name="wait_insight_material_ahead">Material after %1$s: %2$s +%3$d</string>
+    <!-- %1$s = White/Black, %2$d = moves in a row, %3$d and %4$d = the first and last move number. -->
+    <string name="wait_insight_run">Longest precise run so far: %1$s, %2$d moves in a row (moves %3$d to %4$d), each losing under 2 points of win chance</string>
+    <!-- %1$d = moves in a row, %2$d and %3$d = the first and last move number. -->
+    <string name="wait_insight_run_yours">Your longest precise run so far: %1$d moves in a row (moves %2$d to %3$d), each losing under 2 points of win chance</string>
+    <string name="wait_insight_run_opponent">Your opponent\'s longest precise run so far: %1$d moves in a row (moves %2$d to %3$d), each losing under 2 points of win chance</string>
+    <!-- %1$s = White/Black, %2$s = that side\'s own score, %3$s = the move it was reached after. -->
+    <string name="wait_insight_peak">Best evaluation for %1$s so far: %2$s (after %3$s)</string>
+    <!-- %1$d = how many times. -->
+    <string name="wait_insight_lead_changes">Times the evaluation has switched between White and Black so far: %1$d</string>
+    <!-- %1$d = White\'s count, %2$d = Black\'s. -->
+    <string name="wait_insight_checks">Checks in the moves analysed so far: White %1$d, Black %2$d</string>
+    <string name="wait_insight_captures">Captures in the moves analysed so far: White %1$d, Black %2$d</string>
+    <!-- %1$s = the first move that is not in the opening book. -->
+    <string name="wait_insight_left_book">The game left the opening book with %1$s</string>
+    <!-- %1$s = the move after which no queen is left on the board. -->
+    <string name="wait_insight_queens_off">First position without queens: after %1$s</string>
+    <!-- %1$s = White/Black, %2$d = the move number. -->
+    <string name="wait_insight_castled_short">%1$s castled kingside on move %2$d</string>
+    <string name="wait_insight_castled_long">%1$s castled queenside on move %2$d</string>
+    <string name="wait_insight_not_castled">%1$s did not castle in this game</string>
+    <string name="wait_insight_promotions">Pawn promotions: White %1$d, Black %2$d</string>
+    <string name="wait_insight_game_length">Moves in this game: White %1$d, Black %2$d</string>
+    <string name="wait_insight_progress">Analysed %1$d of %2$d positions</string>
+    <!-- Famous game card. %1$s and %2$s = the players. -->
+    <string name="wait_game_versus">%1$s vs %2$s</string>
+    <!-- %1$d = year, %2$s = the event. -->
+    <string name="wait_game_when_event">%1$d · %2$s</string>
+    <string name="wait_game_result_white">White won</string>
+    <string name="wait_game_result_black">Black won</string>
+    <string name="wait_game_result_draw">Draw</string>
+    <string name="wait_game_final_position">Position at the end of the game</string>
+    <!-- Player card. %1$s = the years, %2$s = the country. -->
+    <string name="wait_player_facts">%1$s · %2$s</string>
+    <!-- Puzzle card. %1$s = White/Black. -->
+    <string name="wait_puzzle_to_play">%1$s to play</string>
+    <!-- %1$s = the game\'s title, %2$d = the move number. -->
+    <string name="wait_puzzle_from_game">From %1$s, move %2$d</string>
+    <string name="wait_puzzle_goal_mate">Find the mate in %1$d</string>
+    <string name="wait_puzzle_goal_best">Find the best move</string>
+    <string name="wait_puzzle_wrong">That isn\'t the best move here. Try another, or show the solution.</string>
+    <!-- %1$s = the opponent\'s reply, played automatically. -->
+    <string name="wait_puzzle_continue">Right. The reply is %1$s. Find the next move.</string>
+    <string name="wait_puzzle_solved_mate">Checkmate. You found the mate in %1$d.</string>
+    <string name="wait_puzzle_solved_best">Correct. %1$s is the best move.</string>
+    <!-- %1$s = the whole line with move numbers. -->
+    <string name="wait_puzzle_solved_line">Correct. You found the whole line: %1$s</string>
+    <string name="wait_puzzle_first_move_played">The first move is the one played in the game.</string>
+    <string name="wait_puzzle_revealed">Solution: %1$s</string>
+    <!-- %1$s = White/Black, %2$d = search depth, %3$s = score of the best move, %4$s = score of the next best (both from that side\'s view). -->
+    <string name="wait_puzzle_scores">Engine scores for %1$s at depth %2$d: %3$s for the best move, %4$s for the next best</string>
+    <string name="wait_puzzle_score_best_only">Engine score for %1$s at depth %2$d: %3$s for the best move</string>
+    <string name="wait_puzzle_show_solution">Show solution</string>
 </resources>
