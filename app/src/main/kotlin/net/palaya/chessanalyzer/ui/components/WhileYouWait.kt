@@ -188,6 +188,13 @@ fun WhileYouWaitPanel(
                     modifier = Modifier.weight(1f).asHeading(),
                 )
                 IconButton(
+                    onClick = { state = controller.previous(controller.touch(state, SystemClock.elapsedRealtime()), SystemClock.elapsedRealtime()) },
+                    enabled = state.canGoBack,
+                    modifier = Modifier.size(48.dp).testTag(WaitingTags.PREVIOUS),
+                ) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = stringResource(R.string.wait_previous))
+                }
+                IconButton(
                     onClick = { state = controller.setPaused(controller.touch(state, SystemClock.elapsedRealtime()), !state.paused, SystemClock.elapsedRealtime()) },
                     modifier = Modifier.size(48.dp).testTag(WaitingTags.PAUSE),
                 ) {
@@ -196,9 +203,16 @@ fun WhileYouWaitPanel(
                         contentDescription = stringResource(if (state.paused) R.string.wait_resume else R.string.wait_pause),
                     )
                 }
+                IconButton(
+                    onClick = { state = controller.next(controller.touch(state, SystemClock.elapsedRealtime()), SystemClock.elapsedRealtime(), latestSignature) },
+                    modifier = Modifier.size(48.dp).testTag(WaitingTags.NEXT),
+                ) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = stringResource(R.string.wait_next))
+                }
             }
 
-            // Swipe left for the next card, right for the previous one (the arrows below do the same for everyone).
+            // Swipe left for the next card, right for the previous one (the header's arrows do the same for everyone; they sit
+            // in the header so they stay put whatever the card's height, device pass 2026-10-12).
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -230,26 +244,6 @@ fun WhileYouWaitPanel(
                         },
                         onNext = { state = controller.next(state, SystemClock.elapsedRealtime(), latestSignature) },
                     )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                IconButton(
-                    onClick = { state = controller.previous(controller.touch(state, SystemClock.elapsedRealtime()), SystemClock.elapsedRealtime()) },
-                    enabled = state.canGoBack,
-                    modifier = Modifier.size(48.dp).testTag(WaitingTags.PREVIOUS),
-                ) {
-                    Icon(Icons.Filled.ChevronLeft, contentDescription = stringResource(R.string.wait_previous))
-                }
-                IconButton(
-                    onClick = { state = controller.next(controller.touch(state, SystemClock.elapsedRealtime()), SystemClock.elapsedRealtime(), latestSignature) },
-                    modifier = Modifier.size(48.dp).testTag(WaitingTags.NEXT),
-                ) {
-                    Icon(Icons.Filled.ChevronRight, contentDescription = stringResource(R.string.wait_next))
                 }
             }
         }
