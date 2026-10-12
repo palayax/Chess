@@ -63,6 +63,16 @@ class LiveInsightsTest {
     }
 
     @Test
+    fun aMoveThatLosesMoreThanTwoPointsOfWinChanceBreaksTheRun() {
+        // 100 -> 20 cp is a drop of about 5.4 win-percent points: above the 2.0 bound, far below any "blunder" bound.
+        val steady = listOf(20, 30, 20, 40, 20, 30, 300, 280, 100, 20, 100)
+        val got = lines(liveInsights(T.ITALIAN, T.evalsOf(T.ITALIAN, steady), null))
+        assertTrue(got.toString(), "Longest precise run so far: White, 4 moves in a row (moves 1 to 4), each losing under 2 points of win chance" in got)
+        assertTrue(got.toString(), "Longest precise run so far: Black, 2 moves in a row (moves 1 to 2), each losing under 2 points of win chance" in got)
+        assertFalse(got.any { it.startsWith("Longest precise run so far: White, 5") })
+    }
+
+    @Test
     fun withOnlyTheFirstEvaluationsKnownTheCountsStopThere() {
         val partial = evals.filterKeys { it <= 3 }
         val got = lines(liveInsights(T.ITALIAN, partial, null, T.miniBook()))

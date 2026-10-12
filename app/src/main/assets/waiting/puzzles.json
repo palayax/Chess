@@ -1,0 +1,960 @@
+{
+ "version": 1,
+ "engine": "Stockfish 19",
+ "rules": {
+  "winCp": 150,
+  "marginCp": 150,
+  "maxMate": 4,
+  "maxSolverMoves": 2,
+  "confirmDepth": 18,
+  "finalDepth": 20,
+  "obviousDepth": 1
+ },
+ "puzzles": [
+  {
+   "id": "p002",
+   "game": "immortal-game-1851",
+   "ply": 43,
+   "fen": "r1bk2nr/p2p1pNp/n2B4/1p1NP2P/6P1/3P1Q2/P1P1K3/q5b1 w - - 1 22",
+   "prev": "e8d8",
+   "goal": {
+    "type": "mate",
+    "moves": 2
+   },
+   "solution": [
+    "f3f6",
+    "g8f6",
+    "d6e7"
+   ],
+   "san": [
+    "Qf6+",
+    "Nxf6",
+    "Be7#"
+   ],
+   "secondCp": null,
+   "depth": 18
+  },
+  {
+   "id": "p003",
+   "game": "paulsen-morphy-1857",
+   "ply": 36,
+   "fen": "4r1k1/p1pb1ppp/Qbp1r3/8/1P6/2P2P2/R2P1P1P/2B2RK1 b - - 0 18",
+   "prev": "g2f3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e6g6",
+    "g1h1",
+    "d7h3"
+   ],
+   "san": [
+    "Rg6+",
+    "Kh1",
+    "Bh3"
+   ],
+   "bestCp": 508,
+   "secondCp": -305,
+   "depth": 18
+  },
+  {
+   "id": "p004",
+   "game": "paulsen-morphy-1857",
+   "ply": 56,
+   "fen": "6k1/p1p2ppp/2p4r/8/1P1P4/2P5/4rb1P/R1B2R1K b - - 0 28",
+   "prev": "d2d4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f2e3"
+   ],
+   "san": [
+    "Be3"
+   ],
+   "bestCp": 866,
+   "secondCp": 338,
+   "depth": 18
+  },
+  {
+   "id": "p005",
+   "game": "opera-game-1858",
+   "ply": 31,
+   "fen": "4kb1r/p2n1ppp/4q3/4p1B1/4P3/1Q6/PPP2PPP/2KR4 w k - 0 16",
+   "prev": "f6d7",
+   "goal": {
+    "type": "mate",
+    "moves": 2
+   },
+   "solution": [
+    "b3b8",
+    "d7b8",
+    "d1d8"
+   ],
+   "san": [
+    "Qb8+",
+    "Nxb8",
+    "Rd8#"
+   ],
+   "secondCp": 466,
+   "depth": 18
+  },
+  {
+   "id": "p006",
+   "game": "dubois-steinitz-1862",
+   "ply": 50,
+   "fen": "2k4r/ppp2p2/5n2/2P3p1/2P3P1/3Bp1P1/P5K1/RN3R1r b - - 2 25",
+   "prev": "g1g2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "h8h2",
+    "g2f3",
+    "h1f1"
+   ],
+   "san": [
+    "R8h2+",
+    "Kf3",
+    "Rxf1+"
+   ],
+   "bestCp": 644,
+   "secondCp": -212,
+   "depth": 18
+  },
+  {
+   "id": "p007",
+   "game": "dubois-steinitz-1862",
+   "ply": 64,
+   "fen": "8/pppk1p2/8/2P3p1/P1P5/2K1n1P1/R7/1N3r2 b - - 3 32",
+   "prev": "a1a2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f1b1"
+   ],
+   "san": [
+    "Rxb1"
+   ],
+   "bestCp": 686,
+   "secondCp": 528,
+   "depth": 18
+  },
+  {
+   "id": "p009",
+   "game": "wcc-1886-game-1",
+   "ply": 74,
+   "fen": "1r2k3/p1b2q2/2p5/P1Pp2pp/3Pp1b1/2B1N3/3KNQ2/4R2R b - - 0 37",
+   "prev": "g2f2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f7f2"
+   ],
+   "san": [
+    "Qxf2"
+   ],
+   "bestCp": 752,
+   "secondCp": 24,
+   "depth": 18
+  },
+  {
+   "id": "p010",
+   "game": "wcc-1886-game-20",
+   "ply": 31,
+   "fen": "r3k2r/pppbb1pp/5p1n/3P1n2/4NBq1/3B1NP1/PPP3K1/R3Q2R w kq - 2 16",
+   "prev": "g8h6",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f4h6"
+   ],
+   "san": [
+    "Bxh6"
+   ],
+   "bestCp": 595,
+   "secondCp": 423,
+   "depth": 18
+  },
+  {
+   "id": "p011",
+   "game": "lasker-bauer-1889",
+   "ply": 33,
+   "fen": "r4rk1/1b2bpp1/ppq1p3/2ppB2Q/5P2/1P2P3/P1PP2PP/R4RK1 w - - 1 17",
+   "prev": "h7g8",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e5g7",
+    "g8g7",
+    "h5g4"
+   ],
+   "san": [
+    "Bxg7",
+    "Kxg7",
+    "Qg4+"
+   ],
+   "bestCp": 710,
+   "secondCp": -409,
+   "depth": 18
+  },
+  {
+   "id": "p015",
+   "game": "lasker-napier-1904",
+   "ply": 45,
+   "fen": "r1b1B2k/pp2N2p/8/2B3Pp/4np2/8/PbP5/R3K2R w KQ - 0 23",
+   "prev": "g7b2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "a1b1"
+   ],
+   "san": [
+    "Rb1"
+   ],
+   "bestCp": 248,
+   "secondCp": 36,
+   "depth": 18
+  },
+  {
+   "id": "p018",
+   "game": "levitsky-marshall-1912",
+   "ply": 40,
+   "fen": "4r1k1/pp4pp/4pr2/3R3Q/3n4/2q4B/P1P2PPP/5RK1 b - - 2 20",
+   "prev": "e2h5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e8f8"
+   ],
+   "san": [
+    "Ref8"
+   ],
+   "bestCp": 535,
+   "secondCp": 0,
+   "depth": 18
+  },
+  {
+   "id": "p019",
+   "game": "lasker-capablanca-1914",
+   "ply": 63,
+   "fen": "b5r1/4rk2/1nppNp2/1p3Pp1/1P2P1P1/2N2KR1/2P5/3R4 w - - 0 32",
+   "prev": "h6g5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "g3h3"
+   ],
+   "san": [
+    "Rh3"
+   ],
+   "bestCp": 558,
+   "secondCp": 317,
+   "depth": 18
+  },
+  {
+   "id": "p020",
+   "game": "reti-alekhine-1925",
+   "ply": 64,
+   "fen": "r5k1/1N3pp1/8/8/2R1n1b1/4rNP1/3RnP1K/7B b - - 3 32",
+   "prev": "c1c4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4f2"
+   ],
+   "san": [
+    "Nxf2"
+   ],
+   "bestCp": 336,
+   "secondCp": 47,
+   "depth": 18
+  },
+  {
+   "id": "p021",
+   "game": "wcc-1927-game-34",
+   "ply": 153,
+   "fen": "8/5p2/k6K/r6p/4RP1P/8/8/8 w - - 0 77",
+   "prev": "f5a5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4e5"
+   ],
+   "san": [
+    "Re5"
+   ],
+   "bestCp": 521,
+   "secondCp": 21,
+   "depth": 18
+  },
+  {
+   "id": "p023",
+   "game": "peruvian-immortal-1934",
+   "ply": 25,
+   "fen": "2kr2nr/pp1n1ppp/2p1p3/8/1P1P1B2/2N2Q1P/1PPKBPP1/7q w - - 0 13",
+   "prev": "a1h1",
+   "goal": {
+    "type": "mate",
+    "moves": 2
+   },
+   "solution": [
+    "f3c6",
+    "b7c6",
+    "e2a6"
+   ],
+   "san": [
+    "Qxc6+",
+    "bxc6",
+    "Ba6#"
+   ],
+   "secondCp": -386,
+   "depth": 18
+  },
+  {
+   "id": "p024",
+   "game": "wcc-1935-game-26",
+   "ply": 89,
+   "fen": "4r3/pN2P3/5k1p/1ppP4/2P5/8/PP1r3P/4R2K w - - 4 45",
+   "prev": "g7f6",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e1e6"
+   ],
+   "san": [
+    "Re6+"
+   ],
+   "bestCp": 669,
+   "secondCp": 331,
+   "depth": 18
+  },
+  {
+   "id": "p025",
+   "game": "botvinnik-capablanca-1938",
+   "ply": 49,
+   "fen": "r5k1/p6p/1p3np1/3p1P2/q1pP4/1nP3N1/1B3QPP/4rRK1 w - - 0 25",
+   "prev": "e8e1",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f1e1"
+   ],
+   "san": [
+    "Rxe1"
+   ],
+   "bestCp": 324,
+   "secondCp": -51,
+   "depth": 18
+  },
+  {
+   "id": "p026",
+   "game": "botvinnik-capablanca-1938",
+   "ply": 63,
+   "fen": "8/p5kp/1p2Pn2/3pQ2p/2pP4/qnP5/6PP/6K1 w - - 0 32",
+   "prev": "g6h5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e5g5"
+   ],
+   "san": [
+    "Qg5+"
+   ],
+   "bestCp": 847,
+   "secondCp": -697,
+   "depth": 18
+  },
+  {
+   "id": "p027",
+   "game": "uruguayan-immortal-1943",
+   "ply": 54,
+   "fen": "6k1/3nbppp/4p3/p6q/PpP1PBn1/5b2/4BP1P/R3RQK1 b - - 4 27",
+   "prev": "d3e2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "d7e5"
+   ],
+   "san": [
+    "Nde5"
+   ],
+   "bestCp": 341,
+   "secondCp": 112,
+   "depth": 18
+  },
+  {
+   "id": "p029",
+   "game": "game-of-the-century-1956",
+   "ply": 34,
+   "fen": "r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q1n2N2/P4PPP/3R1K1R b - - 3 17",
+   "prev": "e1f1",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "g4e6",
+    "a3c3",
+    "b6c5"
+   ],
+   "san": [
+    "Be6",
+    "Qxc3",
+    "Qxc5"
+   ],
+   "bestCp": 266,
+   "secondCp": -142,
+   "depth": 18
+  },
+  {
+   "id": "p031",
+   "game": "wcc-1961-game-21",
+   "ply": 51,
+   "fen": "r4r2/5k2/p2p1nR1/2pPp1p1/2p3b1/2N5/PPB3P1/1K5R w - - 2 26",
+   "prev": "g7f7",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "h1f1"
+   ],
+   "san": [
+    "Rf1"
+   ],
+   "bestCp": 534,
+   "secondCp": -49,
+   "depth": 18
+  },
+  {
+   "id": "p032",
+   "game": "wcc-1961-game-21",
+   "ply": 65,
+   "fen": "r4n2/2kb1R2/p7/2pPp1p1/2N5/8/PPB3P1/1K6 w - - 3 33",
+   "prev": "d8c7",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "d5d6"
+   ],
+   "san": [
+    "d6+"
+   ],
+   "bestCp": 811,
+   "secondCp": 575,
+   "depth": 18
+  },
+  {
+   "id": "p033",
+   "game": "wcc-1963-game-19",
+   "ply": 127,
+   "fen": "1b6/1P6/8/p4kp1/P3p3/8/3B1PK1/8 w - - 2 64",
+   "prev": "g4f5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "g2h3"
+   ],
+   "san": [
+    "Kh3"
+   ],
+   "bestCp": 421,
+   "secondCp": 25,
+   "depth": 18
+  },
+  {
+   "id": "p034",
+   "game": "wcc-1966-game-10",
+   "ply": 53,
+   "fen": "r5k1/5r1p/p2pB3/nppP4/2P1N2q/1P2N3/PQ5P/6K1 w - - 4 27",
+   "prev": "d8h4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4d6"
+   ],
+   "san": [
+    "Nxd6"
+   ],
+   "bestCp": 567,
+   "secondCp": 205,
+   "depth": 18
+  },
+  {
+   "id": "p035",
+   "game": "wcc-1969-game-19",
+   "ply": 47,
+   "fen": "r2qrb1k/1p1b2p1/p3p1Qp/7n/3pN3/1B6/PPP4P/1K3RR1 w - - 0 24",
+   "prev": "e5d4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4g5",
+    "d8g5",
+    "g1g5"
+   ],
+   "san": [
+    "Ng5",
+    "Qxg5",
+    "Rxg5"
+   ],
+   "bestCp": 728,
+   "secondCp": 476,
+   "depth": 18
+  },
+  {
+   "id": "p036",
+   "game": "larsen-spassky-1970",
+   "ply": 24,
+   "fen": "2kr3r/ppp1qpp1/2p5/2b2b1p/2P1pPn1/1P2P1PP/PBQPB3/RN2K2R b KQ - 0 12",
+   "prev": "h2h3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "h5h4"
+   ],
+   "san": [
+    "h4"
+   ],
+   "bestCp": 685,
+   "secondCp": 320,
+   "depth": 18
+  },
+  {
+   "id": "p037",
+   "game": "wcc-1972-game-13",
+   "ply": 140,
+   "fen": "5Br1/6P1/8/8/2p2p2/1p6/pK2k3/2R5 b - - 7 70",
+   "prev": "d1c1",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f4f3"
+   ],
+   "san": [
+    "f3"
+   ],
+   "bestCp": 380,
+   "secondCp": 5,
+   "depth": 18
+  },
+  {
+   "id": "p038",
+   "game": "bagirov-gufeld-1973",
+   "ply": 52,
+   "fen": "3q3k/2p4p/p2pB3/7P/1n1PPQP1/r1p5/8/1K1R2R1 b - - 0 26",
+   "prev": "c4e6",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "b4d3"
+   ],
+   "san": [
+    "Nd3"
+   ],
+   "bestCp": 929,
+   "secondCp": 0,
+   "depth": 18
+  },
+  {
+   "id": "p040",
+   "game": "wcc-1986-game-16",
+   "ply": 73,
+   "fen": "6R1/3nkp2/b6N/3Pq3/5Q2/1r1p3P/5PPK/8 w - - 3 37",
+   "prev": "f8e7",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "d5d6",
+    "e7e6",
+    "g8e8"
+   ],
+   "san": [
+    "d6+",
+    "Ke6",
+    "Re8+"
+   ],
+   "bestCp": 725,
+   "secondCp": -626,
+   "depth": 18
+  },
+  {
+   "id": "p041",
+   "game": "wcc-1986-game-22",
+   "ply": 91,
+   "fen": "5N2/5pp1/3Q2bk/5q1p/7P/P1p2P2/6PK/8 w - - 0 46",
+   "prev": "c4c3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "d6d4",
+    "g6h7",
+    "d4c3"
+   ],
+   "san": [
+    "Qd4",
+    "Bh7",
+    "Qxc3"
+   ],
+   "bestCp": 610,
+   "secondCp": -170,
+   "depth": 18
+  },
+  {
+   "id": "p042",
+   "game": "wcc-1987-game-24",
+   "ply": 63,
+   "fen": "2r3k1/q4pp1/1p1np2p/4N3/n7/4PBP1/5P1P/1QR3K1 w - - 0 32",
+   "prev": "c5a4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "c1c8",
+    "d6c8",
+    "b1b5"
+   ],
+   "san": [
+    "Rxc8+",
+    "Nxc8",
+    "Qb5"
+   ],
+   "bestCp": 550,
+   "secondCp": 11,
+   "depth": 18
+  },
+  {
+   "id": "p043",
+   "game": "wcc-1987-game-24",
+   "ply": 113,
+   "fen": "3q1nk1/1Q6/2B1p1p1/7p/4P2P/6P1/5PK1/8 w - - 15 57",
+   "prev": "c7d8",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4e5"
+   ],
+   "san": [
+    "e5"
+   ],
+   "bestCp": 399,
+   "secondCp": 167,
+   "depth": 18
+  },
+  {
+   "id": "p045",
+   "game": "kasparovs-immortal-1999",
+   "ply": 73,
+   "fen": "7r/1R3p1p/6p1/1p6/2q5/5PP1/1Q1r3P/1K1k1B2 w - - 6 37",
+   "prev": "d8d2",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "b7d7",
+    "d2d7",
+    "f1c4"
+   ],
+   "san": [
+    "Rd7",
+    "Rxd7",
+    "Bxc4"
+   ],
+   "bestCp": 490,
+   "secondCp": 1,
+   "depth": 18
+  },
+  {
+   "id": "p047",
+   "game": "anand-radjabov-2003",
+   "ply": 66,
+   "fen": "2r3k1/5rp1/1P2b3/4Bn2/B2pp2p/P6P/6P1/4Q1K1 b - - 0 33",
+   "prev": "b5b6",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4e3"
+   ],
+   "san": [
+    "e3"
+   ],
+   "bestCp": 485,
+   "secondCp": 214,
+   "depth": 18
+  },
+  {
+   "id": "p050",
+   "game": "wcc-2006-tiebreak-4",
+   "ply": 81,
+   "fen": "8/r1k2ppp/P3p1b1/RRP5/8/5P2/6PP/2r2BK1 w - - 3 41",
+   "prev": "c3c1",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "b5b3"
+   ],
+   "san": [
+    "Rb3"
+   ],
+   "bestCp": 279,
+   "secondCp": 0,
+   "depth": 18
+  },
+  {
+   "id": "p051",
+   "game": "wcc-2008-game-6",
+   "ply": 87,
+   "fen": "2r3k1/6Pp/1n5B/4n3/p3N3/P2R3P/8/4K3 w - - 0 44",
+   "prev": "c4e5",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4f6"
+   ],
+   "san": [
+    "Nf6+"
+   ],
+   "bestCp": 642,
+   "secondCp": 293,
+   "depth": 18
+  },
+  {
+   "id": "p052",
+   "game": "wcc-2010-game-12",
+   "ply": 64,
+   "fen": "b2r2k1/p1r1q1p1/7p/2p2P2/2N1P3/R5P1/PP3RKP/2Q5 b - - 0 32",
+   "prev": "f3e4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e7e4"
+   ],
+   "san": [
+    "Qxe4+"
+   ],
+   "bestCp": 581,
+   "secondCp": 44,
+   "depth": 18
+  },
+  {
+   "id": "p053",
+   "game": "wcc-2010-game-12",
+   "ply": 84,
+   "fen": "b4R2/p3r2k/6q1/2p2N1p/6r1/6RK/PP5P/5Q2 b - - 7 42",
+   "prev": "a3g3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "g4g3",
+    "h2g3",
+    "g6g4"
+   ],
+   "san": [
+    "Rxg3+",
+    "hxg3",
+    "Qg4+"
+   ],
+   "bestCp": 676,
+   "secondCp": 0,
+   "depth": 18
+  },
+  {
+   "id": "p057",
+   "game": "wcc-2013-game-6",
+   "ply": 122,
+   "fen": "8/8/7p/8/R4p2/2P1k1rP/1P5K/8 b - - 0 61",
+   "prev": "g2h3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "g3g6"
+   ],
+   "san": [
+    "Rg6"
+   ],
+   "bestCp": 466,
+   "secondCp": 148,
+   "depth": 18
+  },
+  {
+   "id": "p058",
+   "game": "wcc-2013-game-9",
+   "ply": 56,
+   "fen": "2bqnrk1/5p1p/5PpQ/3pP1P1/2pP1R2/2P5/6BP/1q3NK1 b - - 1 28",
+   "prev": "g3f1",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "b1e1"
+   ],
+   "san": [
+    "Qe1"
+   ],
+   "bestCp": 684,
+   "secondCp": 0,
+   "depth": 18
+  },
+  {
+   "id": "p063",
+   "game": "wcc-2018-tiebreak-3",
+   "ply": 87,
+   "fen": "8/6pk/p1P1nq1p/5p2/1P6/4Q2P/P5B1/7K w - - 1 44",
+   "prev": "g5e6",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "a2a4"
+   ],
+   "san": [
+    "a4"
+   ],
+   "bestCp": 321,
+   "secondCp": 105,
+   "depth": 18
+  },
+  {
+   "id": "p065",
+   "game": "wcc-2023-game-4",
+   "ply": 57,
+   "fen": "4r1k1/p1p1r1pp/1p2Pp1q/2pP4/2PnRp2/5Q1P/P2N1PP1/4R1K1 w - - 4 29",
+   "prev": "f5d4",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4d4"
+   ],
+   "san": [
+    "Rxd4"
+   ],
+   "bestCp": 274,
+   "secondCp": 70,
+   "depth": 18
+  },
+  {
+   "id": "p067",
+   "game": "wcc-2023-tiebreak-4",
+   "ply": 104,
+   "fen": "2Q5/6pk/5rqp/p7/1b5P/2p1B1P1/5P2/3R2K1 b - - 3 52",
+   "prev": "g4c8",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f6c6"
+   ],
+   "san": [
+    "Rc6"
+   ],
+   "bestCp": 510,
+   "secondCp": 317,
+   "depth": 18
+  },
+  {
+   "id": "p069",
+   "game": "wcc-2024-game-11",
+   "ply": 57,
+   "fen": "1rq3k1/1p2rp2/2n1p1pb/pRN4p/P1PpQ3/3P2PP/5PB1/1R4K1 w - - 4 29",
+   "prev": "c7c8",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e4c6"
+   ],
+   "san": [
+    "Qxc6"
+   ],
+   "bestCp": 675,
+   "secondCp": 308,
+   "depth": 18
+  },
+  {
+   "id": "p071",
+   "game": "deep-blue-kasparov-1996-game-1",
+   "ply": 65,
+   "fen": "4r2k/1NR2p1p/5q2/3Q4/3p4/PP1n1pPP/5P2/6K1 w - - 3 33",
+   "prev": "g8e8",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "b7d6"
+   ],
+   "san": [
+    "Nd6"
+   ],
+   "bestCp": 589,
+   "secondCp": 10,
+   "depth": 18
+  },
+  {
+   "id": "p072",
+   "game": "kasparov-deep-blue-1996-game-2",
+   "ply": 121,
+   "fen": "5k2/2Q5/5q2/5p2/2Bp3P/2b2pP1/4P3/5K2 w - - 0 61",
+   "prev": "e4f3",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "e2f3"
+   ],
+   "san": [
+    "exf3"
+   ],
+   "bestCp": 514,
+   "secondCp": 268,
+   "depth": 18
+  },
+  {
+   "id": "p073",
+   "game": "kasparov-deep-blue-1996-game-2",
+   "ply": 143,
+   "fen": "8/1k1q4/8/5B2/3p1P1P/4b1P1/8/5K2 w - - 0 72",
+   "prev": "c6d7",
+   "goal": {
+    "type": "best"
+   },
+   "solution": [
+    "f5d7"
+   ],
+   "san": [
+    "Bxd7"
+   ],
+   "bestCp": 634,
+   "secondCp": -843,
+   "depth": 18
+  }
+ ]
+}

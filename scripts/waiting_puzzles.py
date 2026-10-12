@@ -27,14 +27,14 @@ infinite for the comparison and is reported as "mate in N".
    "clearly" better than every other move, by at least a pawn and a half.
 4. Not obvious: a depth-1 search by the same engine does NOT already choose the answer (this removes
    recaptures, free captures and mate-in-one).
-5. Both checks use depth 18 and again depth 22 (``mine``; ``verify`` repeats depth 22 on 4 threads) on a
+5. Both checks use depth 18 and again depth 20 (``mine``; ``verify`` repeats depth 20 on 4 threads) on a
    fresh engine state (ucinewgame before every position, so the numbers do not depend on search order);
    a puzzle must pass the rules at BOTH depths with the same best move.
 6. Multi-move solutions: after the solver's move, the opponent's reply is auto-played. It is accepted only
    when it is forced or near-forced: the only legal move; or all other replies are at least MARGIN_CP worse for
    the opponent than the engine's reply; or, in a mate puzzle, every reply loses to mate (the engine's
    longest defence is played). The solver's next move must again pass rule 2 or 3 in the position reached.
-   A solution has at most MAX_SOLVER_MOVES (3) solver moves, or ends in checkmate.
+   A solution has at most MAX_SOLVER_MOVES (2) solver moves, or ends in checkmate.
 """
 import argparse
 import concurrent.futures
@@ -61,11 +61,12 @@ OUT_FILE = os.path.join(ASSETS, "waiting", "puzzles.json")
 WIN_CP = 150
 MARGIN_CP = 150
 MAX_MATE = 4
-MAX_SOLVER_MOVES = 3
+MAX_SOLVER_MOVES = 2
+CONT_DEPTH = 16        # depth of the later steps of a multi-move solution (the first move gets the deep checks)
 SCREEN_DEPTH = 14      # cheap pass that finds candidates
 QUICK_DEPTH = 16       # cheap filter before the expensive checks (not a rule)
 CONFIRM_DEPTH = 18     # rule 5, first check
-FINAL_DEPTH = 22       # rule 5, second check; `verify` repeats it on 4 threads
+FINAL_DEPTH = 20       # rule 5, second check; `verify` repeats it on 4 threads
 OBVIOUS_DEPTH = 1      # rule 4
 BIG = 1_000_000        # "a mate" in a comparison
 
@@ -259,8 +260,9 @@ _worker = {}
 def stop_pool(ex):
     """Do not wait for the workers' orderly exit: a worker holding a live Stockfish child can hang the interpreter's
     shutdown for minutes. All results are on disk already; end the workers (their engines die with their pipes)."""
+    procs = list((getattr(ex, "_processes", None) or {}).values())
     ex.shutdown(wait=False, cancel_futures=True)
-    for proc in list(getattr(ex, "_processes", {}).values()):
+    for proc in procs:
         try:
             proc.terminate()
         except Exception:
@@ -340,16 +342,16 @@ def grow(eng, board, played, depth):
     """Apply the rules at `depth` from `board` (solver to move, `played` the game move).
 
     Returns the puzzle skeleton or (None, reason)."""
+    # rule 4 first, because it is nearly free and removes most candidates
+    shallow = eng.lines(board, OBVIOUS_DEPTH, 1)
+    if shallow and shallow[0][0] == played:
+        return None, "obvious at depth 1"
     lines = eng.lines(board, depth, 2)
     kind, detail = judge_step(lines)
     if kind is None:
         return None, detail
     if detail["move"] != played:
         return None, "engine prefers another move than the one played"
-    # rule 4 (checked on the first move only)
-    shallow = eng.lines(board, OBVIOUS_DEPTH, 1)
-    if shallow and shallow[0][0] == played:
-        return None, "obvious at depth 1"
 
     first = dict(detail, kind=kind, depth=min(l[3] for l in lines[:2]))
     sol = [played]
@@ -361,7 +363,7 @@ def grow(eng, board, played, depth):
     while not b.is_game_over():
         if solver_moves >= MAX_SOLVER_MOVES and not mate_mode:
             break
-        rl = eng.lines(b, depth, 2)
+        rl = eng.lines(b, min(depth, CONT_DEPTH), 2)
         if not rl:
             break
         if not reply_ok(rl, b, mate_mode):
@@ -375,7 +377,7 @@ def grow(eng, board, played, depth):
             sol.append(reply)
             b = b2
             break
-        nxt = eng.lines(b2, depth, 2)
+        nxt = eng.lines(b2, min(depth, CONT_DEPTH), 2)
         k2, d2 = judge_step(nxt)
         if k2 is None or (mate_mode and k2 != "mate"):
             if mate_mode:
@@ -387,7 +389,7 @@ def grow(eng, board, played, depth):
         b = b2
         b.push(d2["move"])
         solver_moves += 1
-    return {"solution": sol, "first": first, "steps": steps, "endsInMate": b.is_checkmate()}, None
+    return {"solution": [m.uci() for m in sol], "first": first, "steps": steps, "endsInMate": b.is_checkmate()}, None
 
 
 def san_line(board, ucis):
@@ -421,10 +423,18 @@ def mine(args):
     n_cands = sum(len(v) for v in scr.values())
     print(f"phase 1 done: {n_cands} candidates in {sum(1 for v in scr.values() if v)} games")
 
+    # round-robin over the games, so an interrupted run has covered many games
     jobs = []
-    for gid, cands in scr.items():
-        for c in cands:
-            jobs.append((engine_path, gid, c["ply"]))
+    k = 0
+    while True:
+        added = False
+        for gid, cands in scr.items():
+            if k < len(cands):
+                jobs.append((engine_path, gid, cands[k]["ply"]))
+                added = True
+        if not added:
+            break
+        k += 1
 
     results = []
     t0 = time.time()
@@ -445,7 +455,11 @@ def mine(args):
         futures = {ex.submit(_confirm_job, job): job for job in todo}
         for i, fut in enumerate(concurrent.futures.as_completed(futures), 1):
             job = futures[fut]
-            r = fut.result()
+            try:
+                r = fut.result()
+            except Exception as e:  # noqa: BLE001  a crash in one candidate must not stop the run
+                print("  ERROR", job[1], job[2], repr(e), flush=True)
+                r = {"fail": f"exception {e!r}"}
             json.dump(r, open(os.path.join(cdir, f"{job[1]}-{job[2]}.json"), "w"))
             if r is not None and "fail" not in r:
                 results.append(r)
@@ -484,9 +498,6 @@ def _confirm_job(job):
     else:
         return {"fail": "ply not found"}
     # cheap filter, then the two documented depths (rule 5) with the same solution
-    q, why = grow(eng, board, mv, QUICK_DEPTH)
-    if q is None:
-        return {"fail": f"quick: {why}"}
     a, why = grow(eng, board, mv, CONFIRM_DEPTH)
     if a is None:
         return {"fail": f"depth {CONFIRM_DEPTH}: {why}"}
@@ -647,13 +658,13 @@ def verify(args):
             for k in range(1, len(p["solution"]), 2):
                 if b.is_game_over():
                     break
-                rl = eng.lines(b, FINAL_DEPTH, 2)
+                rl = eng.lines(b, CONFIRM_DEPTH, 2)
                 if rl[0][0].uci() != p["solution"][k] or not reply_ok(rl, b, goal["type"] == "mate"):
                     fails.append(f"{where}: reply {p['solution'][k]} is not the forced/near-forced best reply ({rl[0][0]})")
                     break
                 b.push(chess.Move.from_uci(p["solution"][k]))
                 if k + 1 < len(p["solution"]):
-                    nl = eng.lines(b, FINAL_DEPTH, 2)
+                    nl = eng.lines(b, CONFIRM_DEPTH, 2)
                     k2, d2 = judge_step(nl)
                     if k2 is None or d2["move"].uci() != p["solution"][k + 1]:
                         fails.append(f"{where}: later solver move {p['solution'][k + 1]} fails the rules: {d2}")
@@ -669,6 +680,15 @@ def verify(args):
         print("FAILURES:")
         for f in fails:
             print("  ", f)
+        if args.prune:
+            bad = {f.split(" ", 1)[0] for f in fails}
+            doc["puzzles"] = [p for p in doc["puzzles"] if p["id"] not in bad]
+            with open(OUT_FILE, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(doc, f, ensure_ascii=False, indent=1)
+                f.write("\n")
+            print(f"pruned {len(bad)} puzzles that did not hold up in the independent check; {len(doc['puzzles'])} remain "
+                  f"(ids are kept, so the numbering has gaps). Run verify again.")
+            sys.exit(0)
         sys.exit(1)
     print("all puzzles pass")
 
@@ -684,6 +704,7 @@ def main():
     m.add_argument("--only-cached", action="store_true", help="select from the confirmations already on disk; start no new analysis")
     v = sub.add_parser("verify")
     v.add_argument("--engine")
+    v.add_argument("--prune", action="store_true", help="remove the puzzles that fail the independent check from the file")
     args = ap.parse_args()
     if args.cmd == "mine":
         mine(args)

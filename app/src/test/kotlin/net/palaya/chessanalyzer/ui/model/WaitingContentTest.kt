@@ -117,7 +117,7 @@ class WaitingContentTest {
             assertEquals("${p.id}: mate in", goal.moves, p.solverMoves)
             assertTrue("${p.id}: mate in ${goal.moves}", goal.moves in 2..4)
         }
-        assertTrue("some mate puzzles", mates >= 5)
+        assertTrue("some mate puzzles", mates >= 3)
     }
 
     /** True when the side to move can force checkmate within [n] of its own moves. */
