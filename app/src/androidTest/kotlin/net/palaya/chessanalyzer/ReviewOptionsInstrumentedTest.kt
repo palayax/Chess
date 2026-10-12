@@ -102,6 +102,7 @@ class ReviewOptionsInstrumentedTest {
 
         // Pre-filled from Settings: Standard, "Prepare the video now" on, the famous game's "Not me".
         waitForText(app.getString(R.string.review_options_title))
+        waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
         compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOn()
         compose.onNode(hasText(app.getString(R.string.summary_side_neither)) and isSelected()).assertExists()
@@ -170,6 +171,7 @@ class ReviewOptionsInstrumentedTest {
         compose.onNodeWithText(app.getString(R.string.library_reanalyse)).performClick()
 
         waitForText(app.getString(R.string.review_options_title))
+        waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
         compose.onNode(hasText(app.getString(R.string.settings_depth_deep)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.side_black)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOff()

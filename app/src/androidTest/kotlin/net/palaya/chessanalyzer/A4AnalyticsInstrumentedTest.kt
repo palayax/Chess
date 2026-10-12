@@ -203,6 +203,7 @@ class A4AnalyticsInstrumentedTest {
         summaryItem(app.getString(R.string.reanalyse_button)).performClick()
         // RF: the game's Review options screen (not a dialog), pre-filled with the game's own strength.
         waitForText(app.getString(R.string.review_options_title))
+        waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
         stage("review_options")
         compose.onNode(hasText(app.getString(R.string.settings_depth_quick)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and hasClickAction()).performClick()

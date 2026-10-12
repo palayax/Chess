@@ -132,6 +132,9 @@ class FamousGamesInstrumentedTest {
 
         // RF: the Review options screen, pre-filled for a famous game ("Not me"), then Start review.
         waitForText(app.getString(R.string.review_options_title))
+        waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
+        // The title shows while the options still load; the side chips only once they are Ready.
+        waitForText(app.getString(R.string.summary_side_neither))
         compose.onNodeWithText(app.getString(R.string.summary_side_neither)).assertIsSelected()
         compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
         waitForText(app.getString(R.string.progress_title))

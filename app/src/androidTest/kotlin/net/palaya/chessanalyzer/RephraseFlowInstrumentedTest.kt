@@ -144,6 +144,7 @@ class RephraseFlowInstrumentedTest {
 
         // The Review options screen: Natural wording is offered (a model is behind the interface) and on by default.
         waitForText(app.getString(R.string.review_options_title))
+        waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
         compose.onNode(hasText(app.getString(R.string.settings_rephrase_title)) and isToggleable()).assertIsOn()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOn()
         compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
