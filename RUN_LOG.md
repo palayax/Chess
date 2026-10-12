@@ -4957,3 +4957,25 @@ the best move here. Try another, or show the solution.").
   scrolled, and the panel's arrows then sit below the board. It scrolls, so nothing is lost, but the board is cut on first sight.
 - The panel's arrows move with the card height (y 1100 for a fact, 1700 for a famous game), so a tap on a fixed spot can land on the
   puzzle board; not wrong, only awkward.
+
+---
+
+## Integration (2026-10-12): RF + Auto-depth + While you wait on main
+
+Merged on main: `reviewflow` (fast-forward), `autodepth` (e927dba; conflicts resolved: StoredGame keeps RF's options and
+the Auto flag, `ReviewDefaults`/`StoredReviewOptions` carry `autoDepth`, `strengthForDepth` never maps a depth to Auto, one
+`pendingLevelByGameId`, the A4 dialog stays removed, `onPositionEvaluated = ::recordPositionEval` wired, the engine stage
+row shows Auto's second pass), `waiting` (99fd1fd; `ProcessingWhileYouWait` fills the processing screen's slot from
+`processingGame` + `evalsSoFar`), `devicepass` (fast-forward; RUN_LOG "RF/AD device pass"). After the device pass the
+panel's card arrows moved into its header (c480901), so they stay put whatever the card's height (the device pass saw
+them move with the card and slip behind the Cancel bar on a puzzle).
+
+Gates on c480901: `:core:test` 612 / 0 / 0, `:app:testDebugUnitTest` 740 / 0 / 0 (`--rerun-tasks --no-build-cache`),
+`:app:lintDebug` 0 errors; `WhileYouWaitPanelInstrumentedTest` 8 / 0 / 0 on chess36 after the arrow move (the full
+suites, 210 / 0 / 0 on both AVDs, ran on ba2406e). Release build (R8) on chess36, net pushed with `adb root`: share a
+PGN, Review options, Auto, Start, the processing screen with the panel, the Summary, Watch the video (the player at once,
+device voice because no voice was installed): no crash in the crash buffer. A first run showed one "FATAL EXCEPTION" in
+the main log that the emulator's shutdown lost before it was read; two repeats of the same flow had none.
+
+APKs: `dist/PalayaChess-1.1-arm64-c480901.apk` (40,098,245 B) and `-universal-c480901.apk`, release cert SHA-256
+ca4f7b42….
