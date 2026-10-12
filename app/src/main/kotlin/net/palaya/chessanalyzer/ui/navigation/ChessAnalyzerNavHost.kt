@@ -774,8 +774,15 @@ private fun ProcessingWhileYouWait(viewModel: AnalysisViewModel) {
     val context = LocalContext.current
     val game by viewModel.processingGame.collectAsState()
     val evalList by viewModel.evalsSoFar.collectAsState()
-    val content by produceState(WaitingContent.EMPTY) { value = WaitingContentStore.load(context) }
-    val book by produceState<OpeningBook?>(null) { value = WaitingContentStore.openingBook(context) }
+    // Published on the main thread (a no-op in the app; a Compose test's effect scope resumes on the IO thread).
+    val content by produceState(WaitingContent.EMPTY) {
+        val loaded = WaitingContentStore.load(context)
+        withContext(Dispatchers.Main.immediate) { value = loaded }
+    }
+    val book by produceState<OpeningBook?>(null) {
+        val loaded = WaitingContentStore.openingBook(context)
+        withContext(Dispatchers.Main.immediate) { value = loaded }
+    }
     val sans = game?.sanMoves.orEmpty()
     val userColor = game?.userSide?.color?.toCoreColor()
     val engine = remember(sans, book) { LiveInsightEngine(sans, book) }
