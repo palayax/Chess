@@ -4929,7 +4929,7 @@ First device run of RF and Auto-depth, on chess36 (API 36, `-gpu swangle_indirec
    DESTROYED"), which also hid the real test failure. The navigations after a suspend call now run in `withContext(Main.immediate)`
    (no-op in the app). Later, same family (996dda1, 9278005): the `produceState` loaders (Famous games, Review options, the While you
    wait content) publish their value on the main thread; without it a composition touched from two threads failed the draw
-   ("multithreaded access to SnapshotStateObserver") in about one full run in two, and the aborted test left a pending analysis
+   ("multithreaded access to SnapshotStateObserver") in about one full run in two, and (probably) the aborted test left a pending analysis
    that broke the next tests' Home.
 2. **Test, AutoDepth** (d4220bd): a 7-position game has a cap of floor(7 x 0.25) = 1 deepened position, so only the mate's position
    is searched again (spec 8.5.1); the test expected the blunder's two positions as well.
