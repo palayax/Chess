@@ -132,7 +132,8 @@ class UpdateCheckUpstreamTest {
         waitForText(app.getString(R.string.home_title))
         compose.onNodeWithContentDescription(app.getString(R.string.nav_settings)).performClick()
         val rowTitle = app.getString(R.string.update_row_title)
-        waitForText(app.getString(R.string.settings_about_open))
+        // RF added sections above "About": it is a LazyColumn item that is not composed yet. The title says Settings is open.
+        compose.waitUntil(30_000) { compose.onAllNodesWithText(app.getString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(rowTitle))
         compose.waitUntil(30_000) { compose.onAllNodesWithText(rowTitle).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(rowTitle).performClick()
@@ -161,7 +162,8 @@ class UpdateCheckUpstreamTest {
         waitForText(app.getString(R.string.home_title))
         compose.onNodeWithContentDescription(app.getString(R.string.nav_settings)).performClick()
         val rowTitle = app.getString(R.string.update_row_title)
-        waitForText(app.getString(R.string.settings_about_open))
+        // RF added sections above "About": it is a LazyColumn item that is not composed yet. The title says Settings is open.
+        compose.waitUntil(30_000) { compose.onAllNodesWithText(app.getString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(rowTitle))
         compose.waitUntil(30_000) { compose.onAllNodesWithText(rowTitle).fetchSemanticsNodes().isNotEmpty() }
         Thread.sleep(3_000)
