@@ -4907,3 +4907,53 @@ user who wants Deep's look at the critical moves at 34-64% of Deep's cost. A sha
    in the session scratchpad, not committed.
 3. `TYPICAL_DEEPENED_NODES` (6 M) and `EXPECTED_DEEP_FRACTION` (0.24) are host means; the time-left rule that lets the
    number rise covers a heavier game.
+
+## RF/AD device pass (2026-10-12, branch devicepass from e927dba, then main 99fd1fd merged)
+
+First device run of RF and Auto-depth, on chess36 (API 36, `-gpu swangle_indirect`) and chess34 (API 34).
+
+### Counts (from the result XML, skipped must be 0)
+| Run | Device | tests | failures | skipped |
+|---|---|---|---|---|
+| `:app` on e927dba + fixes (before the merge) | chess36 | 202 | 0 | 0 |
+| `:engine` | chess36 | 20 | 0 | 0 |
+| `:app` on e927dba + fixes (before the merge) | chess34 | 202 | 0 | 0 |
+| `:engine` | chess34 | 20 | 0 | 0 |
+| `:app` with main 99fd1fd merged (adds 8 `WhileYouWaitPanelInstrumentedTest`) | chess36 | 210 | 0 | 0 |
+| `:app` with main 99fd1fd merged | chess34 | 210 | 0 | 0 |
+
+### What the first runs found and what was done
+1. **Product, `ChessAnalyzerNavHost.openReview`** (3ba4e06): it called `NavController.navigate` after the suspend DataStore read, i.e. on
+   whatever thread the read resumed on. The Compose test scope is not main-confined, so the navigate ran on a worker, left a
+   half-added `analysis_progress` entry and crashed the Activity on destroy ("State must be at least CREATED to move to
+   DESTROYED"), which also hid the real test failure. The navigations after a suspend call now run in `withContext(Main.immediate)`
+   (no-op in the app). Later, same family (996dda1, 9278005): the `produceState` loaders (Famous games, Review options, the While you
+   wait content) publish their value on the main thread; without it a composition touched from two threads failed the draw
+   ("multithreaded access to SnapshotStateObserver") in about one full run in two, and the aborted test left a pending analysis
+   that broke the next tests' Home.
+2. **Test, AutoDepth** (d4220bd): a 7-position game has a cap of floor(7 x 0.25) = 1 deepened position, so only the mate's position
+   is searched again (spec 8.5.1); the test expected the blunder's two positions as well.
+3. **Test, FamousGames** (d4220bd): Start review moves the "Not me" answer into the game's pending options on purpose
+   (`startReview` drops `pendingSideByGameId`), so the request no longer carries `initialSide`; the test reads the pending options.
+4. **Test, UpdateCheck x2 classes (4 tests)** (ee0e2ac): they waited for the "About Palaya Chess" row, which sits below the new Reviews
+   and Video sections and is a LazyColumn item that is not composed until scrolled to; they wait for the Settings title now.
+5. **Test, Review options readiness** (472c80d): the screen's title is also drawn while the options load; tests that assert on the
+   chips right after waiting for the title now wait for the Start button too (A4, FamousGames, RephraseFlow, ReviewOptions).
+`CappedSearchInstrumentedTest` timed out once (180 s) on a just-booted, loaded emulator and passed in every later full run.
+
+### Manual smoke check (chess36, models installed over `scripts/model_test_server.py` + adb reverse)
+Screenshots in `docs/screenshots/rf/` (10). Paste a PGN, Review options (Standard default, then Auto), Start with "Prepare the video now" on:
+the checklist (Analysing moves, Writing the video narration, Recording the narration voice; no wording stage because the model is
+unavailable here), the overall bar, "This step: about N min left", "Taking a deeper look at the critical moves: 2 of 3" in Auto's second
+pass; Summary; "Watch the video" goes straight to the player (no polishing screen) and a 24 kHz MediaPlayer plays the recorded Kokoro
+WAVs; changing the voice to Adam in the sheet shows "Preparing the narration in Adam . American, male... 0 of 6" and then plays new WAVs;
+Home row menu has "Re-analyse with different settings..." and "Delete"; Delete asks, then the game and its row are gone. The While you
+wait panel: the game insights (counts grow with the analysis), a famous game, a fact, a player, a puzzle (a wrong move says "That isn't
+the best move here. Try another, or show the solution.").
+
+### Not fixed, looks wrong or unsure
+- The processing screen is slow on the emulator: recording the narration of a 13-ply game took over 5 minutes ("1 of 10" at 5:14).
+- The puzzle card is taller than the area under the checklist: the board's 8th rank is behind the Cancel bar until the panel is
+  scrolled, and the panel's arrows then sit below the board. It scrolls, so nothing is lost, but the board is cut on first sight.
+- The panel's arrows move with the card height (y 1100 for a fact, 1700 for a famous game), so a tap on a fixed spot can land on the
+  puzzle board; not wrong, only awkward.
