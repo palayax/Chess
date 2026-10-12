@@ -1,5 +1,15 @@
 package net.palaya.chessanalyzer.ui.navigation
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import net.palaya.chessanalyzer.core.analysis.OpeningBook
+import net.palaya.chessanalyzer.data.WaitingContentStore
+import net.palaya.chessanalyzer.data.mapper.toCoreColor
+import net.palaya.chessanalyzer.ui.components.WhileYouWaitPanel
+import net.palaya.chessanalyzer.ui.model.LiveInsightEngine
+import net.palaya.chessanalyzer.ui.model.WaitingContent
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -391,9 +401,9 @@ fun ChessAnalyzerNavHost(
                 onBack = leave,
                 onShareDetails = { shareDiagnosticLog() },
                 onSkipStage = { viewModel.skipStage(it) }, // RF: Skip on stages 2 to 4
-                // RF: the "while you wait" panel (game insights, fun facts, a puzzle) plugs in here. Its data:
-                // viewModel.processingGame (id, SAN moves, the user's side) and viewModel.evalsSoFar.
-                whileYouWait = {},
+                // The "while you wait" panel: live game insights from the evaluations so far, fun facts, players,
+                // famous games and puzzles (docs/WAITING_CONTENT.md).
+                whileYouWait = { ProcessingWhileYouWait(viewModel) },
                 // D2c: the game already waits on disk (AnalysisViewModel moved it there); Setup replaces this screen.
                 onSetUp = {
                     viewModel.clearError()
@@ -751,6 +761,30 @@ fun ChessAnalyzerNavHost(
         composable(Destination.About.route) {
             AboutScreen(onBack = { navController.popBackStack() })
         }
+    }
+}
+
+/**
+ * The "while you wait" panel under the processing screen's progress: [liveInsights] over the game being processed and
+ * the evaluations the engine has produced so far ([AnalysisViewModel.evalsSoFar], updated per position), plus the
+ * bundled content. The panel has its natural height, so it scrolls inside the slot.
+ */
+@Composable
+private fun ProcessingWhileYouWait(viewModel: AnalysisViewModel) {
+    val context = LocalContext.current
+    val game by viewModel.processingGame.collectAsState()
+    val evalList by viewModel.evalsSoFar.collectAsState()
+    val content by produceState(WaitingContent.EMPTY) { value = WaitingContentStore.load(context) }
+    val book by produceState<OpeningBook?>(null) { value = WaitingContentStore.openingBook(context) }
+    val sans = game?.sanMoves.orEmpty()
+    val userColor = game?.userSide?.color?.toCoreColor()
+    val engine = remember(sans, book) { LiveInsightEngine(sans, book) }
+    val insights = remember(engine, evalList, userColor) {
+        val evals = buildMap { evalList.forEachIndexed { i, e -> if (e != null) put(i, e) } }
+        if (sans.isEmpty()) emptyList() else engine.insights(evals, userColor)
+    }
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        WhileYouWaitPanel(insights = insights, content = content, modifier = Modifier.fillMaxWidth())
     }
 }
 
