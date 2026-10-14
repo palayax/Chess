@@ -4,6 +4,7 @@ import java.io.File
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import net.palaya.chessanalyzer.core.narration.VideoScript
+import net.palaya.chessanalyzer.ui.model.missingNarrationCount
 
 /**
  * Records a script's narration in one voice into [store] (RF, the owner's item 3: "Change voice for analyzed games
@@ -20,13 +21,26 @@ class NarrationPreparer(
     private val workDir: File,
 ) {
 
-    /** Segments of [script] with narration but no recording in [provider]'s voice (cheap: file checks only). */
-    fun missingSegments(script: VideoScript, provider: NarrationVoiceProvider): Int {
+    /** The narration-store key of each spoken segment of [script] in [provider]'s voice. */
+    fun segmentKeys(script: VideoScript, provider: NarrationVoiceProvider): List<String> {
         val fingerprint = provider.narrationCacheFingerprint()
-        return script.segments.count { segment ->
-            segment.narration.isNotBlank() &&
-                store.get(store.keyFor(segment.narration, provider.displayName, fingerprint)) == null
-        }
+        return script.segments.filter { it.narration.isNotBlank() }
+            .map { store.keyFor(it.narration, provider.displayName, fingerprint) }
+    }
+
+    /**
+     * Segments of [script] with narration but no recording in [provider]'s voice (cheap: file checks only), not counting
+     * the keys in [ignoring] (segments that already fell back to the device voice for this voice identity).
+     */
+    fun missingSegments(script: VideoScript, provider: NarrationVoiceProvider, ignoring: Set<String> = emptySet()): Int =
+        missingNarrationCount(segmentKeys(script, provider), ignoring) { store.get(it) != null }
+
+    /** The store keys of the segments [outcome] says fell back to the device voice. */
+    fun fallbackKeys(script: VideoScript, provider: NarrationVoiceProvider, outcome: NarrationCoordinator.Outcome): Set<String> {
+        val fingerprint = provider.narrationCacheFingerprint()
+        val indexes = outcome.fallbackSegmentIndexes.toSet()
+        return script.segments.filter { it.index in indexes && it.narration.isNotBlank() }
+            .map { store.keyFor(it.narration, provider.displayName, fingerprint) }.toSet()
     }
 
     /**

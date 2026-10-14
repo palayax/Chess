@@ -792,7 +792,8 @@
 
     <!-- RF: the Video screen prepares missing narration inline. %1$s = the voice, e.g. "Bella · American, female". -->
     <string name="video_preparing_narration">Preparing the narration in %1$s…</string>
-    <string name="video_preparing_cancel">Cancel</string>
+    <!-- Stops the recording; the parts not recorded yet are read by the phone's voice (the player already does that). -->
+    <string name="video_preparing_cancel">Watch now</string>
     <string name="video_narration_incomplete">Part of the narration isn\'t recorded in %1$s yet, so the phone\'s voice reads those parts.</string>
     <string name="video_narration_prepare">Prepare the narration</string>
 

@@ -127,6 +127,20 @@ class LlamaRephraserTest {
     }
 
     @Test
+    fun aRetiredRephraserNeverLoadsTheModelAgain() = runBlocking {
+        val native = FakeNative()
+        val r = LlamaRephraser(model(), "m", native = native)
+        r.rephrase(RephraseRequest(RephraseSurface.CARD, text))
+        r.retire()
+        assertEquals(1, native.frees)
+        assertFalse(r.isLoaded)
+        // A job that still holds the instance gets "no result" and does not pull 1.1 GB back in.
+        assertTrue(r.rephrase(RephraseRequest(RephraseSurface.CARD, text)) is RephraseResult.Unavailable)
+        assertEquals(1, native.loads)
+        assertFalse(r.isLoaded)
+    }
+
+    @Test
     fun cancellingTheCallerCancelsTheNativeGeneration() = runBlocking {
         val native = FakeNative().apply { block = CountDownLatch(1) }
         val r = LlamaRephraser(model(), "m", native = native)

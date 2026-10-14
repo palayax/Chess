@@ -471,6 +471,9 @@ fun ChessAnalyzerNavHost(
             // "Which side were you?" (the answer swaps the stored report for a re-mapped one).
             val sideKey = viewModel.reports[gameId]?.let { it.userColor to it.notMe }
             val report = remember(gameId, thresholdCp, sideKey) { viewModel.uiReportFor(gameId, thresholdCp) }
+            // RF: a reopened game (library row, restart) whose narration is not recorded in its voice: record it from
+            // here, in the background, instead of when the Video screen opens (a no-op when nothing is missing).
+            LaunchedEffect(gameId, report != null) { if (report != null) viewModel.prepareNarrationInBackground(gameId) }
             if (report != null) {
                 // The practice row and the "Try it" buttons. Both read snapshot state (the report's
                 // side, the solved map), so they follow the side chooser and a finished Practise.

@@ -17,7 +17,8 @@ import java.io.File
 /**
  * The one llama.cpp model of the process (docs/LLM_REPHRASE_DESIGN.md §2.2: "one model per process", like the
  * engine). Hands out the [LlamaRephraser] for the installed, verified model, loads it lazily, and frees it on memory
- * pressure ([release]) and a minute after the last job ([scheduleIdleRelease]). An update's trial goes through
+ * pressure ([release]) and a minute after the last job ([scheduleIdleRelease]). A released instance is retired
+ * ([LlamaRephraser.retire]): a holder that still has it gets "no result", never a silent reload; the next [get] makes a new one. An update's trial goes through
  * [trial], which frees the model in use first.
  */
 class RephraseBackend(
@@ -43,21 +44,22 @@ class RephraseBackend(
         val pins = store.activePins()
         val file = withContext(Dispatchers.IO) { store.verifiedFileOrNull() }
         if (file == null) {
-            current?.release()
+            current?.retire()
             current = null
             log("rephrase: no verified wording model")
             return@withLock null
         }
         val c = current
         if (c != null && c.id == "${pins.id}@p${RephrasePrompt.VERSION}") return@withLock c
-        c?.release()
+        c?.retire()
         LlamaRephraser(file, pins.id, LlamaRephraser.familyOf(pins.id), threads(), journal = store).also { current = it }
     }
 
     /** Frees the model (onTrimMemory, idle, before an update's trial). The next [get] loads it again. */
     suspend fun release() = mutex.withLock {
         current?.let {
-            it.release()
+            // Retired, not just released: a job still holding it must not load the model again (CLAUDE.md, RF).
+            it.retire()
             log("rephrase: model released")
         }
         current = null
@@ -76,7 +78,7 @@ class RephraseBackend(
      * result must pass the checker (accepted or unchanged).
      */
     suspend fun trial(model: File, modelId: String): VoiceTrialResult = mutex.withLock {
-        current?.release()
+        current?.retire()
         current = null
         val r = LlamaRephraser(model, modelId, LlamaRephraser.familyOf(modelId), threads())
         try {
