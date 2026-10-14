@@ -65,7 +65,9 @@ class PacingTiersTest {
     fun `a seventeen-move game lands between three and six minutes, not eleven`() {
         val (_, s) = script(RealGameFixture.chesscom)
         val minutes = s.totalEstimatedMs / 60_000.0
-        assertTrue("17-move game ran $minutes min, ${s.segments.size} beats", s.totalEstimatedMs in 180_000..360_000)
+        // NC (ANALYSIS_SPEC 9.10): the calmer delivery lengthens the speech by about 5 %, so the ceiling of the total
+        // (story plus pace time) is 6.25 min; the story itself is held to the 9.7 budget by the tests next to this one.
+        assertTrue("17-move game ran $minutes min, ${s.segments.size} beats", s.totalEstimatedMs in 180_000..375_000)
         assertTrue("was 70 beats before the rework; got ${s.segments.size}", s.segments.size <= 40)
     }
 

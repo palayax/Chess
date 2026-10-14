@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.palaya.chessanalyzer.core.narration.Delivery
 import net.palaya.chessanalyzer.ui.model.NeuralVoiceTier
 
 /**
@@ -128,15 +129,18 @@ class NeuralTtsProvider(
      * given [SpokenRespelling.apply] of it, so a term espeak-ng reads wrongly is said right ("zwischenzug",
      * "en prise"). [synthesizeAs] takes its text as given.
      */
-    override suspend fun synthesize(text: String, outFile: File): SynthesisResult =
-        synthesizeAs(speakerId, SpokenRespelling.apply(text), outFile)
+    override suspend fun synthesize(text: String, outFile: File): SynthesisResult = synthesize(text, outFile, 1f)
+
+    /** NC: [speed] goes to the engine's per-call speed (effective length = lengthScale / speed), no reload. */
+    override suspend fun synthesize(text: String, outFile: File, speed: Float): SynthesisResult =
+        synthesizeAs(speakerId, SpokenRespelling.apply(text), outFile, speed)
 
     /**
      * [synthesize] with another of the loaded model's speakers. The model holds all eleven, so the voice
      * picker's "Play sample" (V1, [VoiceSamplePlayer]) loads Kokoro once and renders any speaker with it.
      * A sid outside the loaded model fails instead of returning sherpa-onnx's silence.
      */
-    suspend fun synthesizeAs(sid: Int, text: String, outFile: File): SynthesisResult = withContext(Dispatchers.IO) {
+    suspend fun synthesizeAs(sid: Int, text: String, outFile: File, speed: Float = 1f): SynthesisResult = withContext(Dispatchers.IO) {
         lastEngineText = text
         if (text.isBlank()) return@withContext SynthesisResult.Failure("empty narration")
         val engine = tts ?: return@withContext SynthesisResult.Failure("neural voice model not loaded")
@@ -144,10 +148,11 @@ class NeuralTtsProvider(
             return@withContext SynthesisResult.Failure("speaker $sid is not in the loaded model")
         }
         try {
-            // speed is left at 1.0: pacing is controlled by the model config's length_scale (see
-            // [NeuralVoiceTier.lengthScale]) so it is part of the loaded config — and therefore
-            // part of [cacheFingerprint] — rather than a per-call argument the cache cannot see.
-            val audio = lock.withLock { engine.generate(text = text, sid = sid, speed = 1.0f) }
+            // The base pacing is the model config's length_scale (see [NeuralVoiceTier.lengthScale]), part of
+            // [cacheFingerprint]. The per-beat delivery (NC) is the per-call speed; the fingerprint cannot see it,
+            // so [NarrationKeys] puts it into every key it builds (a neutral 1.0 adds nothing).
+            val callSpeed = speed.coerceIn(Delivery.MIN_SPEED, Delivery.MAX_SPEED)
+            val audio = lock.withLock { engine.generate(text = text, sid = sid, speed = callSpeed) }
             if (audio.samples.isEmpty() || audio.sampleRate <= 0) {
                 return@withContext SynthesisResult.Failure("sherpa-onnx returned no audio")
             }

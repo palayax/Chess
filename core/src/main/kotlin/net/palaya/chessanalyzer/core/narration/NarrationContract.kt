@@ -116,6 +116,7 @@ enum class SegmentKind {
  *   the game moves the story skipped are played first, then the position before the move is held
  *   still with the moving piece's square and its destination lit, and only then does the move (and
  *   the narration) start. Null for every other beat. See [SegmentLeadIn].
+ * @param delivery how the narration is spoken: speed and sentence gaps (ANALYSIS_SPEC 9.10, [Delivery]).
  * @param bestLine on a key moment whose narration names the better move (ANALYSIS_SPEC 9.8, V2 + V4): the
  *   engine's line that the segments right after this one play, one [SegmentKind.BEST_LINE] segment per
  *   move (each speaks its move), then one "back to the game" segment. A record of what follows, for the
@@ -159,7 +160,13 @@ data class ScriptSegment(
      */
     val classification: MoveClassification? = null,
     val leadIn: SegmentLeadIn? = null,
-    val bestLine: SegmentBestLine? = null
+    val bestLine: SegmentBestLine? = null,
+    /**
+     * How the narration is spoken (ANALYSIS_SPEC 9.10, NC): the voice's speed and the breath between its sentences,
+     * set by [DeliveryPlan] from the beat's kind. The default is today's delivery. It is part of the narration
+     * cache key (when not neutral) and scales [estimatedSpeechMs].
+     */
+    val delivery: Delivery = Delivery.NEUTRAL
 ) {
     /** How long the silent lead-in lasts before the speech (and the segment's own board) starts; 0 for none. */
     val leadInMs: Long get() = leadIn?.durationMs ?: 0L

@@ -97,13 +97,15 @@ class VideoScriptGenerator(
          * Word-count based speech estimate, plus a per-sentence pause allowance — TTS engines
          * breathe at full stops and the layout has to budget for it.
          */
-        fun estimateSpeechMs(text: String, wpm: Int): Long {
+        fun estimateSpeechMs(text: String, wpm: Int, delivery: Delivery = Delivery.NEUTRAL): Long {
             val words = text.split(WHITESPACE).count { it.isNotBlank() }
             if (words == 0) return 0L
             val effectiveWpm = wpm.coerceIn(60, 400)
             val speaking = words * 60_000L / effectiveWpm
             val sentences = max(1, text.count { it == '.' || it == '!' || it == '?' })
-            return speaking + sentences * SENTENCE_PAUSE_MS
+            // ANALYSIS_SPEC 9.10: a slower voice takes 1/speed as long, and the pauses scale with the gap.
+            if (delivery.isNeutral) return speaking + sentences * SENTENCE_PAUSE_MS
+            return Math.round(speaking / delivery.speed.toDouble() + sentences * SENTENCE_PAUSE_MS * delivery.gapScale.toDouble())
         }
 
         private const val SENTENCE_PAUSE_MS = 240L
@@ -270,12 +272,14 @@ private class ScriptBuilder(
         outroLessons()
 
         val header = header()
+        // ANALYSIS_SPEC 9.10: the delivery of every beat is decided on the finished story, before the budget measures it.
+        val spoken = DeliveryPlan.apply(segments, options.speechWpm)
         return VideoScript(
             title = videoTitle(),
             subtitle = videoSubtitle(),
-            segments = segments,
+            segments = spoken,
             chapters = chapters,
-            totalEstimatedMs = segments.sumOf { it.estimatedSpeechMs + it.holdAfterMs },
+            totalEstimatedMs = spoken.sumOf { it.estimatedSpeechMs + it.holdAfterMs },
             userColor = userColor,
             header = header,
             whiteAccuracy = report.white.accuracy,
@@ -745,7 +749,7 @@ private class ScriptBuilder(
     private fun lineCostMs(line: SegmentBestLine, plies: Int, pace: PaceTimes): Long {
         var total = 0L
         for (k in 0 until minOf(plies, line.uci.size)) {
-            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm)
+            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm, Delivery.BRISK)
             total += speech + lineMoveHold(speech, pace)
         }
         return total + pace.lineFinalHoldMs + VideoScriptGenerator.estimateSpeechMs(line.backToGame, options.speechWpm)
@@ -883,7 +887,7 @@ private class ScriptBuilder(
         var pos = safeFen(line.fen)
         for (k in line.uci.indices) {
             val move = SpokenChess.moveOrNull(pos, line.uci[k]) ?: break
-            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm)
+            val speech = VideoScriptGenerator.estimateSpeechMs(line.spoken[k], options.speechWpm, Delivery.BRISK)
             val last = k == line.uci.lastIndex
             out.add(
                 ScriptSegment(
@@ -897,7 +901,8 @@ private class ScriptBuilder(
                     holdAfterMs = lineMoveHold(speech, pace) + if (last) pace.lineFinalHoldMs else 0L,
                     speakerColor = move.color,
                     eval = s.eval,
-                    moveNumber = s.moveNumber
+                    moveNumber = s.moveNumber,
+                    delivery = Delivery.BRISK
                 )
             )
             pos = pos.makeMove(move)

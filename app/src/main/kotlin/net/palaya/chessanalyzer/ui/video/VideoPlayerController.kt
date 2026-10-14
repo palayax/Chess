@@ -18,6 +18,7 @@ import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.ui.board.BoardOrientation
 import net.palaya.chessanalyzer.video.DeviceTtsProvider
+import net.palaya.chessanalyzer.video.NarrationKeys
 import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.NarrationSynthesizer
 import net.palaya.chessanalyzer.video.NarrationVoiceProvider
@@ -346,7 +347,7 @@ class VideoPlayerController(
 
     private fun cachedFileFor(segment: ScriptSegment): File? {
         if (segment.narration.isBlank()) return null
-        val key = store.keyFor(segment.narration, identityProvider.displayName, identityProvider.narrationCacheFingerprint())
+        val key = NarrationKeys.segmentKey(segment, identityProvider.displayName, identityProvider.narrationCacheFingerprint())
         return store.get(key)
     }
 

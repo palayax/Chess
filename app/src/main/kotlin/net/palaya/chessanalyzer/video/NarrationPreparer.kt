@@ -25,7 +25,7 @@ class NarrationPreparer(
         val fingerprint = provider.narrationCacheFingerprint()
         return script.segments.count { segment ->
             segment.narration.isNotBlank() &&
-                store.get(store.keyFor(segment.narration, provider.displayName, fingerprint)) == null
+                store.get(NarrationKeys.segmentKey(segment, provider.displayName, fingerprint)) == null
         }
     }
 

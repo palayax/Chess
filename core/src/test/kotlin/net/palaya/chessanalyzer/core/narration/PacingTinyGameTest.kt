@@ -86,7 +86,9 @@ class PacingTinyGameTest {
             minutes[moves] = s.totalEstimatedMs / 60_000.0
         }
         // 17 moves about five minutes, the Immortal Game seven to eight, forty moves at most about twelve.
-        assertTrue("17 moves: ${minutes[17]} min", minutes.getValue(17) in 4.0..6.0)
+        // NC (ANALYSIS_SPEC 9.10): the calmer delivery lengthens the speech by about 5 % (6.01 min measured);
+        // the story stays inside its budget (asserted above), so only the total with the pace time moved.
+        assertTrue("17 moves: ${minutes[17]} min", minutes.getValue(17) in 4.0..6.25)
         assertTrue("23 moves: ${minutes[23]} min", minutes.getValue(23) in 7.0..8.0)
         assertTrue("40 moves: ${minutes[40]} min", minutes.getValue(40) <= 12.0)
         assertTrue("8 moves: ${minutes[8]} min", minutes.getValue(8) < 152 / 60.0)
