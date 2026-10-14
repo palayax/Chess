@@ -57,6 +57,9 @@ class LlamaRephraser(
     private val mutex = Mutex()
     @Volatile private var handle = 0L
     @Volatile private var journalOpen = false
+
+    /** Set by [retire]: an instance the backend gave up never loads the model again (see [retire]). */
+    @Volatile private var retired = false
     private var loadMs = 0L
 
     @Volatile
@@ -72,6 +75,7 @@ class LlamaRephraser(
 
     override suspend fun rephrase(request: RephraseRequest): RephraseResult = mutex.withLock {
         withContext(Dispatchers.Default) {
+            if (retired) return@withContext RephraseResult.Unavailable("the wording model was released")
             val h = ensureLoaded() ?: return@withContext RephraseResult.Unavailable("the wording model could not be loaded")
             val tokens = native.tokenCount(h, ClaimChecker.normalize(request.text))
             if (tokens < 0) return@withContext RephraseResult.Unavailable("tokenizer failed")
@@ -132,6 +136,17 @@ class LlamaRephraser(
             handle = 0L
             native.free(h)
         }
+    }
+
+    /**
+     * [release] for good: a caller still holding this instance (a background job that fetched it before the backend
+     * released it) gets "no result" from [rephrase] instead of silently loading the 1.1 GB model again behind the
+     * backend's back, which would compete with the narration voice for the CPU. The backend hands out a fresh
+     * instance on its next `get()`. Takes effect for queued requests at once; a completion already running ends first.
+     */
+    suspend fun retire() {
+        retired = true
+        release()
     }
 
     /** Stops a running completion at its next token (the Skip button); the caller's coroutine sees Unavailable/cancel. */

@@ -230,7 +230,9 @@ conflict.
   n_ctx 2048 (about 57 MB of f16 KV on the 1.5B). It is freed on `onTrimMemory(RUNNING_LOW+)` and a minute after a
   job. A load is journaled (`rephrase/loading.json`): found at start, the file is re-hashed before its next use; two
   deaths in a row turn the feature off (the low-memory killer is a likelier cause than a bad file, so one crash does
-  not delete 1.1 GB).
+  not delete 1.1 GB). `RephraseBackend.release()` *retires* the instance (`LlamaRephraser.retire()`): a job still holding it gets
+  "no result" and never reloads the model behind the backend's back; the next `get()` makes a new one. The background card wording
+  (`startBackgroundWording`) is cancelled for every recording (`recordNarration`) and started again after it.
 - **The GGUF is checked in Kotlin before llama.cpp sees it** (`GgufHeader`: magic, version 3, counts, known tensor
   types, every tensor inside the file, `general.architecture`) on install, on update activation and once per
   process with the full SHA-256. llama.cpp b11190 refused a truncated and a corrupted file cleanly on the emulator
@@ -240,6 +242,11 @@ conflict.
   `release.tag`). Downloading it at setup switches the feature on (owner decision §12.3). The cache lives in
   `filesDir/rephrase/cache/<model>/` (NOT `rephrase/<model>/`: `rephrase/models/` holds the GGUF and a model switch
   purges every other cache folder). `rephrase/` is excluded from backup in all three rule sets.
+- **Recording narration is one path, one at a time** (`AnalysisViewModel.recordNarration`: mutex, stops the background wording, releases
+  the wording model, `NarrationPreparer`). The Summary starts it in the background (`prepareNarrationInBackground`) after a side answer
+  (the sentences changed) and after a plain reopen with `prepareVideo` on, with the Video screen's state; `PreparedNarrationStore`
+  (`review/prepared_narration.json`) remembers per voice identity which segments fell back to the device voice, so a restart does not retry
+  them. Kokoro threads come from `kokoroThreads` (fast cores, 2..4). `runAnalysis` does not report completion while its own stages run.
 - **The narration post-pass runs inside the review's processing run (RF), never at watch time.** The stage "Writing the
   video narration" (only when the game's "Prepare the video now" is on) builds the paced script and, with the GAME's
   Natural wording on, rewords its beats (`polishNarration`). The Video route only reads `finishedVideoScriptFor(gameId)`
@@ -323,6 +330,8 @@ conflict.
   adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   adb shell am instrument -w -r -e class '<fqcn>#<method>'     net.palaya.chessanalyzer.test/androidx.test.runner.AndroidJUnitRunner
   ```
+- **"Watch now"** (the player area's button while the narration is recorded) is `cancelNarrationPreparation`: what is recorded stays, the
+  rest is read by the device voice (state Incomplete). It is the same as the old Cancel; there is no streaming player.
 - **The player (`VideoPlayerController`) never synthesizes**: it plays WAVs already in `files/narration/` for its
   voice's identity and speaks any other segment with the live device voice. Since RF the narration is RECORDED on
   purpose by `NarrationPreparer` (through `NarrationCoordinator`, the export's path): the processing run's "Recording

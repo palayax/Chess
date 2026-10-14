@@ -49,6 +49,11 @@ class NeuralTtsProvider(
      * another after an update. Null (tests, a directory that is not the installed voice) reads "unknown".
      */
     private val voiceVersionId: String? = null,
+    /**
+     * onnxruntime threads (CPU only, not part of the cache key: the audio does not depend on it). The app passes
+     * `kokoroThreads(...)` (the fast cores, 2 to 4); [DEFAULT_THREADS] for tests and the update trial.
+     */
+    private val numThreads: Int = DEFAULT_THREADS,
 ) : NarrationVoiceProvider {
 
     override val displayName: String = "Natural voice (${tier.label})"
@@ -91,7 +96,7 @@ class NeuralTtsProvider(
                 return@withLock false
             }
             try {
-                val engine = OfflineTts(assetManager = null, config = buildConfig(tier, modelDir, lengthScale))
+                val engine = OfflineTts(assetManager = null, config = buildConfig(tier, modelDir, lengthScale, numThreads))
                 if (speakerId !in 0 until engine.numSpeakers().coerceAtLeast(1)) {
                     // A speaker id the model does not have is a configuration bug, and sherpa-onnx
                     // answers it with silence rather than an error — exactly the valid-but-silent
@@ -196,6 +201,9 @@ class NeuralTtsProvider(
     companion object {
         private const val TAG = "NeuralTtsProvider"
 
+        /** The thread count before the fast-core heuristic (V-era value); tests and the update trial keep it. */
+        const val DEFAULT_THREADS = 4
+
         /** Phonemizer data directory, present in the upstream archive under this name. */
         const val ESPEAK_DATA_DIR = "espeak-ng-data"
 
@@ -207,7 +215,7 @@ class NeuralTtsProvider(
          * this exact model, which passes only `--kokoro-model/-voices/-tokens/-data-dir`. The
          * `lexicon`/`lang` fields exist for the multi-lingual `kokoro-multi-lang-v1_*` models.
          */
-        private fun buildConfig(tier: NeuralVoiceTier, modelDir: File, lengthScale: Float): OfflineTtsConfig {
+        private fun buildConfig(tier: NeuralVoiceTier, modelDir: File, lengthScale: Float, numThreads: Int): OfflineTtsConfig {
             val dir = modelDir.absolutePath
             val dataDir = "$dir/$ESPEAK_DATA_DIR"
             return when (tier) {
@@ -220,7 +228,7 @@ class NeuralTtsProvider(
                             dataDir = dataDir,
                             lengthScale = lengthScale,
                         ),
-                        numThreads = 4,
+                        numThreads = numThreads,
                         debug = false,
                         provider = "cpu",
                     ),

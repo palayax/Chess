@@ -4979,3 +4979,26 @@ the main log that the emulator's shutdown lost before it was read; two repeats o
 
 APKs: `dist/PalayaChess-1.1-arm64-c480901.apk` (40,098,245 B) and `-universal-c480901.apk`, release cert SHA-256
 ca4f7b42….
+
+---
+
+## Narration recording at watch time (2026-10-14, branch worktree-agent-a399cba328c2a4b0d) — NOT device-verified
+
+Owner's report: "after the analysis finished, watching the video review does an additional process that takes forever".
+Causes found by reading the code, fixed in this branch (no Gradle/Android SDK in the container: nothing here was compiled or run):
+
+1. The background card wording kept running during a recording and its `LlamaRephraser` reloaded the 1.1 GB model after a release.
+   Now every recording (`AnalysisViewModel.recordNarration`) cancels and joins the background wording first, releases the wording model,
+   and the wording starts again afterwards; `RephraseBackend.release()` retires the instance (`LlamaRephraser.retire`), so a holder gets "no result".
+2. Answering "Which side were you?" rewrote the sentences, and the whole narration was recorded when Video opened. The Summary now starts that
+   recording at once in the background (`prepareNarrationInBackground`), also after a plain reopen with `prepareVideo` on and the voice installed;
+   it uses `ensureNarrationPrepared` and its state, so the Video screen shows it; a running recording of the same game and voice is not restarted.
+3. Segments that fell back to the device voice are remembered per voice identity on disk (`review/prepared_narration.json`,
+   `PreparedNarrationStore`, `PreparedNarrationLedger`), and no longer count as missing for it; "Prepare the narration" (force) retries.
+4. Kokoro's threads: `kokoroThreads` = the wording model's fast-core heuristic held to 2..4 (was a fixed 4 on all cores).
+5. `runAnalysis` no longer reports completion while its own stages still run (`runRequestAction`).
+6. The Cancel button of the recording is now labelled "Watch now" (it already was exactly that: Incomplete, the device voice reads the rest).
+
+Host tests added (not run): `NarrationPrepLogicTest`, `PreparedNarrationStoreTest`, `NarrationFallbackIndexesTest`, `LlamaRephraserTest.aRetiredRephraser...`.
+To verify on a phone: a Pixel 8 timing of review + video; side answer then Video (should be recording already or done); restart then Video
+(no new Kokoro load when only fallbacks are missing); the LLM not loading during a recording (log "rephrase: model released", no new load).

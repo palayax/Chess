@@ -60,6 +60,12 @@ class NarrationCoordinator(
         val sentenceSynthesisCalls: Int,
         /** A single non-blocking, user-facing summary of what happened — null if nothing to report. */
         val notice: String?,
+        /**
+         * [ScriptSegment.index] of every segment that was read by the fallback voice (or stayed silent) because [primary]
+         * could not record it. Segments not reached because of a cancel are not in it. The caller remembers them, so a
+         * restart does not load the primary voice again for the same failure (RF).
+         */
+        val fallbackSegmentIndexes: List<Int> = emptyList(),
     ) {
         /** 0..100, or null if no sentence was ever attempted through [primary] at all. */
         val sentenceCacheHitRatePercent: Double?
@@ -89,6 +95,7 @@ class NarrationCoordinator(
 
         val results = ArrayList<NarrationSynthesizer.Result>(script.segments.size)
         var fallbackCount = 0
+        val fallbackIndexes = ArrayList<Int>()
         var primaryUsedCount = 0
         var segmentCacheHits = 0
         var sentenceCacheHits = 0
@@ -146,6 +153,7 @@ class NarrationCoordinator(
                     SynthesisResult.Failure("device TTS unavailable")
                 }
                 fallbackCount++
+                fallbackIndexes.add(segment.index)
                 when (fallbackResult) {
                     is SynthesisResult.Success ->
                         results.add(NarrationSynthesizer.Result.Synthesized(segment.index, fallbackResult.file, fallbackResult.durationMs))
@@ -176,7 +184,7 @@ class NarrationCoordinator(
                     (failureReasons.firstOrNull()?.let { " ($it)" } ?: "")
         }
 
-        Outcome(results, fallbackCount, primaryUsedCount, segmentCacheHits, sentenceCacheHits, sentenceMisses, notice)
+        Outcome(results, fallbackCount, primaryUsedCount, segmentCacheHits, sentenceCacheHits, sentenceMisses, notice, fallbackIndexes)
     }
 
     private data class SentenceAssembly(
