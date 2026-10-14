@@ -1090,6 +1090,7 @@ this order and the first that matches wins:
 | a found tactic with `confidence >= 0.95` (`FOUND_TACTIC_CONFIDENCE`; the §9.6 gate already requires it) | **DWELL** |
 | significant (§9.2: swing `>= significanceThresholdCp`, or a member of a §9.3 sequence — the plies where the plan changes) but none of the above | **BRIEF** |
 | anything else: routine best/excellent/good moves with a small swing | **SKIP** |
+| a phase boundary (§9.9), whatever the rows above said (not in `MISTAKES_ONLY`, and not inside the opening book) | **BRIEF** at least; the length budget never takes it to SKIP |
 
 A missed tactic **wins material or mates** when its own `materialSwing >= 150`
 (`PUZZLE_MIN_SWING_CP`), or it is a mating motif (`BACK_RANK_MATE`, `SMOTHERED_MATE`, `MATE_NET`,
@@ -1101,11 +1102,15 @@ worth nothing by itself while the line it opens wins a rook).
 
 - **SKIP** — no beat of its own. A run of **three or more** consecutive skipped plies becomes one
   "skip ahead" connective; one or two get a lead-in ("two moves on") on the next beat.
-- **BRIEF** — one or two sentences, and the second one has to *say* something: an inaccuracy gets
-  the better move; any other move gets the tactic it carries, or what it did to the evaluation
-  ("White has gone from clearly better to winning", or "The evaluation moves in White's favour").
-  Never a pleasantry such as "Top of the engine's list" or "No complaints": those survive only in
-  `EVERY_MOVE`, the complete walkthrough, which is never budget-demoted. No excursion.
+- **BRIEF** — the move, and a second sentence only when it *says* something: an inaccuracy gets
+  the better move; any other move gets the tactic it carries, or the phase boundary it caused (§9.9), or a
+  short remark on the evaluation when the move changed the mover's win-percent by at least
+  `REMARK_MIN_SWING` (4) points ("That helps White", "It costs Black a little"; before NS: "The evaluation moves
+  against White", and "That's losing turning into decisively lost" for a move that crossed a band by a hair).
+  A move that did less than that is the move alone (a swing of 50 cp in a position already decided still earns its
+  beat, §9.2). Never a pleasantry such as "Top of the engine's list" or
+  "No complaints": those survive only in `EVERY_MOVE`, the complete walkthrough, which is never budget-demoted.
+  No excursion.
 - **DWELL** — the fuller explanation (the error beat, the found-tactic beat, the threat beat). A
   missed tactic still gets its reveal and a variation, but **at most 4 plies**
   (`DWELL_EXCURSION_PLIES`) and **no puzzle pause**.
@@ -1169,14 +1174,16 @@ re-measuring until it fits:
 4. only then **the turning point itself**: FULL to DWELL, then DWELL to BRIEF (one beat, no puzzle, no
    walk, no separate "turning point" segment). A protected move and the checkmate stay at DWELL;
 5. only then **the structure around the story**, one level per round (`ScriptBuilder.trim`):
-   1. all lessons but the first, and no textbook offer after it;
-   2. the rating and error-count sentences of the summary, and the caveat about the ratings;
+   1. the textbook offer after the takeaway (since NS there is one takeaway, §9.9);
+   2. the outro's sentence about the decisive moment;
    3. the opening summary;
    4. the intro's hook sentence;
-   5. the last lesson.
-   The result and the players in the intro, the accuracy line and the mating beat are never trimmed.
+   5. the takeaway.
+   The players in the intro, the stakes and the ending sentences, the outro's "how it ended" sentence and the
+   mating beat are never trimmed. (Before NS level 1 dropped all lessons but the first and level 2 the rating and
+   error-count sentences of the summary and the caveat about the ratings; the summary no longer speaks them, §9.9.)
 
-The checkmate and every protected beat are never demoted below DWELL, and at least one body beat always
+The checkmate, every protected beat and every phase boundary's beat (BRIEF) are never demoted further, and at least one body beat always
 survives. Because protected beats are exempt, a game rich in brilliant and great moves may
 legitimately **overrun the budget** by the cost of those beats; the budget is not raised for that, and
 nothing is added to fill the space either. The lesson lead counts its lessons truthfully ("Three
@@ -1411,6 +1418,114 @@ appearing only with the move, the hold on the result, and a steady per-move rate
 skipped replies. Our own timing values and words; no assets.
 
 ---
+
+### 9.9 The story of the game (NS, owner's phone test 2026-10-13)
+
+The owner: "The narration voice is great but the script is pretty terrible: it's not clear what is going on
+during the game, everything is read with the same intonation." The script told every move with the same shape
+("White plays X. One clause."), never said who was better or why, and read statistics. NS (narration story +
+rhythm) gives it an arc and a cadence. **Every sentence it adds is a verified claim**: the generator says a thing
+only when the engine's recorded numbers or the board prove it, `scripts/audit_commentary.py story` re-derives each
+one with python-chess and the recorded engine data (a second implementation of the phases and the arc below), and
+`mutate-story` breaks one claim of one sentence at a time and shows every break flagged.
+
+**Phases (`core.analysis.GamePhases`, pure and deterministic).** A phase is a stretch of the game in which the same
+side holds the same standing. The input is the White win-percent of every position (`GameReport.evalGraph`, position
+`k` = the board after ply `k`). Seven standings from White's point of view, by the cut-offs of the spoken evaluation
+bands (§9.3a) folded to three levels: *edge* 57, *clear* 68, *decisive* 82 win-percent for the side that is ahead
+(mirrored for Black; "decisively winning" is folded into "winning"), else *balanced*. Then:
+
+1. **Hysteresis.** The standing changes only when the win-percent has gone `MARGIN` = 3 points past the edge of the
+   band the game is in, so a position sitting on a cut-off does not flicker.
+2. **Runs.** A run of positions in one standing is a phase.
+3. **Merging.** A phase shorter than `MIN_LENGTH` = 4 positions is not one (the last phase: `MIN_LAST_LENGTH` = 2, so a
+   game that ends in a swing can say so). The shortest is merged first, the earlier on a tie: a dip between two equal
+   standings joins both; a short stretch on the way from one standing to another (a transit) joins the standing it leads
+   to, so the boundary stays on the move that caused it; the first phase joins the second.
+
+A **phase shift** is the boundary between two phases; it is *at* ply `p` when position `p` is the first of the new phase.
+A shift is told at its ply: the beat of that ply carries one sentence (`PhaseTurn`: "White built a clear edge",
+"Black fought back to level", "The game turned: Black was winning now", "White's grip loosened: only clearly better
+now"), or, when the ply's own beat tells the standing in its own words (an error beat does), nothing more is said. A
+shift the plan had made a SKIP is promoted to BRIEF, the budget never takes it away, and a shift inside the opening
+book is not told (the opening summary says where the book left the game). It replaces the "The evaluation moves
+against X" line, which was said about fifteen times in game01.
+
+**The cause of a shift**, said only when the boards prove it, in this order, over the shift's ply and the one before:
+the side that lost ground played a MISTAKE, MISS or BLUNDER (", after Black's blunder on move 11"; the largest loss
+wins); the side that gained ground started a forced mate (the engine's distance, ", with a forced mate in three"); the
+side that gained ground came out ahead on material across those two moves, settled by the opponent's best take-back and
+named by the 40 cp rule or as "the exchange" (§6.1, ", after winning a knight"). Otherwise the sentence states the new
+standing and no reason.
+
+**The arc (`core.narration.StoryArc`).** The cold open's one sentence about the stakes, read off the phases and the result,
+for a game of at least 16 plies, and only when one of these holds (in this order):
+
+| Kind | Condition | Said |
+|---|---|---|
+| comeback | the loser held a clear standing (level 2 or more) for at least 6 moves in a row, consecutive phases counted together, N = positions / 2 | "Black won, but for 16 moves this was White's game." |
+| took over | the loser never led; the winner led in every phase from some phase to the end, over at least 8 positions; M = the move the first of them began at | "White was on top from the opening and never let go." (M <= 6) / "It was level until move 11, and then White took over for good." |
+| tight draw | a draw in which no phase is above an edge | "Neither side ever got more than a slight edge." |
+| wasted lead | a draw in which a side was clearly better for at least 6 moves in a row | "White was clearly better for 12 moves, but it ended in a draw." |
+
+Any other game keeps the plain result sentence. The ending follows ("It ended in mate on move 33." / "It lasted 40
+moves." / the draw sentence), then the hook; the hook says only that the largest swing is at move N
+("swings the whole game" from a loss of 30, "matters more than any other" from 12, "The biggest slip is small" below):
+the old "closer than the result makes it look" claimed something the data did not hold and is gone. The opening
+summary ends with where the book left the game: "Theory runs out around move 4, and the position is about level."
+(the band of the board after the last book move).
+
+**An error is told as cause and consequence** (`errorBeat`, and the beat that resumes the game after a detour): the
+opener, the move, what it let in, how the standing changed (the mover's own bands, §9.3a), the better move and what it did.
+*What it let in* is stated only as one of: the engine's forced mate for the opponent after the move ("That allows a forced
+mate in four."), or the engine's best answer to it when that answer is a capture the static exchange nets at least a pawn
+by and is not the other half of a trade ("Black takes the bishop on b five with the pawn, and now White has queen takes
+the rook on a one, with check, winning a rook."). *What the better move did*: it started a forced mate for the mover
+(the engine's distance, ", forcing mate in three"), or along the first 4 plies of the engine's line it nets at least a pawn
+settled (", winning a rook"), else the move alone. "Which gives nothing away" is gone: it was a claim about the engine's
+evaluation of a position that is rarely level. A missed tactic that gets no pause asks its question once ("Can you see
+what White missed?"), after a short rewind cue; the viewer's pause is still the puzzle prompt of a FULL moment. The
+excursion's moves are said bare unless a move has a reason of its own (a capture, a check answered, the line first
+being up material, the tactic's own move); the standing at the end of a line that wins nothing is the engine's
+evaluation of the best play ("The line ends there, with Black clearly worse"). The turning point says that it was
+(a loss of 12 or more: "the turning point", else "the biggest slip"), that no other move cost as much, and what the
+phases prove followed: "From there, White never gave the lead back." (every phase from the move's is led by the
+other side) or "It wasn't over: Black was back to level by move 31."
+
+**A mating sequence is announced once.** The first told move of a side that has a forced mate says it with the
+engine's own distance, counting that move ("This is a forced mate in three."); the moves after it, while the same side
+keeps its mate and at most one move apart, are said bare ("Queen to f six, with check."); the checkmate ends it ("... and
+that is checkmate. Game over. White wins!"). The old script said "forced mate" three times.
+
+**A skipped stretch** is described only by what the board proves: no capture and no check and no ply that moved the White
+win-percent by more than 5 ("A few quiet moves follow, no captures and no checks, and we pick it up at move 14."), a
+capture by each side ("There are trades along the way"), or just the jump. "Development and shuffling" and "Nothing
+breaks" are gone.
+
+**The finish.** The outro says how the game ended ("Black won by checkmate on move 33.") and, when the largest swing
+lost 12 or more and changed the mover's band, which move decided it ("The decisive moment was White's blunder on move 28,
+which took White from about level to losing."); otherwise "There was no single decisive mistake." No accuracy, no rating
+estimate and no error count is spoken: they stay on the final-numbers card and the Summary screen. There is **one
+takeaway**, tied to the viewer's worst error (else the error of the largest swing): a missed tactic ("At move 28, White
+missed an x-ray. Rook to e one was the move." and the habit for that motif), a move that let something in ("Move 28 let
+Black in. It allowed a forced mate in three." and "Before you commit, ask one question: what does this let them do
+next?"), or what the move gave up with the habit for the standing it was played from; "White got mated at the end, but
+the mate wasn't the mistake. Move 28 was." when that is the case.
+
+**Rhythm.** The sentences differ in length on purpose: bare moves of two to four words (a mating step, an excursion move
+with no reason of its own, a mating move), comma-linked cause and effect where the data gives one, and an inaccuracy told
+in two shapes that alternate ("White plays X, a small slip. Instead, Y." / "White plays X. Y was the move."). A question is
+asked only where it is true that something was missed (above). An exclamation mark is used for exactly two things, the
+checkmate ("Game over. White wins!") and a Brilliant move ("A brilliant move! ..."). A lead-in is never glued to an
+interjection ("Two moves on, Stop."): the pivot beats take none. Phrasings still rotate through `PhrasePicker`, a pure
+function of the report; `thinned` says a remark on every second occurrence only ("No material changes hands yet, but the
+pressure is on."). Nothing here changes the §9.7 budget or the §9.8 pace.
+
+**Measured (Stockfish 19, MultiPV 3, recordings of `core/src/test/resources/pacing`, NORMAL pace, no side).** Story time
+against the old script: the Immortal Game 396 s (463 s), Byrne-Fischer 437 s (576 s), game01 597 s (616 s), the Opera
+Game 253 s (342 s), the scholar's mate 50 s (54 s). Everything told is shorter, so fewer beats are demoted by the budget
+and the key-move lead-ins of §9.8 are more of the total; one consequence is that game01 has no key moment left that
+only names the better move, so it plays no best line (`BestLineVideoTest`).
 
 ## 10. Tactic reference library
 

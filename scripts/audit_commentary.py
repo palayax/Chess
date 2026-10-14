@@ -4,6 +4,8 @@
     python scripts/audit_commentary.py after  core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
     python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
+    python scripts/audit_commentary.py story  core/build/commentary_audit/story.jsonl            (NS)
+    python scripts/audit_commentary.py mutate-story core/build/commentary_audit/story.jsonl      (NS)
     python scripts/audit_commentary.py mutate core/build/commentary_audit/after.jsonl
     python scripts/audit_commentary.py rephrase core/build/rephrase/mutations.jsonl          (C2)
     python scripts/audit_commentary.py rephrase core/build/rephrase/measure_<model>.jsonl    (C2)
@@ -45,6 +47,19 @@ line has reached, and "Back to the game now." must follow a simulated line (a be
 from ``video_returns.jsonl`` next to the dump) and stand on the game's own position. ``mutate`` also breaks
 the spoken line (a wrong square or piece, a capture said as a quiet move, a check left out, the return over the
 wrong board) and every break must be flagged.
+
+``story`` (NS, ANALYSIS_SPEC 9.9) audits the sentences the narrated video says about the STORY of the game, for the Immortal
+Game, the Opera Game, game01 and Byrne-Fischer, each for no side, White and Black (written by core's test
+``CommentaryAuditDumpTest.dumpStory``): the cold open's stakes ("Black won, but for 16 moves this was White's game"), how it
+ended, the hook, where the opening left the game, every phase boundary and its cause, the skipped stretches, the remarks on
+a quiet move, the error beats (what the move let in, the better move and what it did), the mating sequence (announced
+once, then bare), the consequence in bands, the turning point and what followed it, the outro and the one takeaway. Every
+sentence must match the template of its kind (an unrecognised sentence is WRONG) and every claim in it is re-derived from
+the recorded engine numbers and python-chess: the phases from the White win-percent series (a second implementation of
+core's GamePhases and StoryArc), the standing words from the win-percent bands, a mate from the engine's own distance, the
+better move's result from the first plies of the engine's line, what a move lets in from the engine's best reply and static
+exchange, the skipped stretch from the board. ``mutate-story`` (also part of ``mutate``) breaks one claim of one sentence at
+a time and every break must be flagged.
 
 The recordings (core/src/test/resources/pacing/*.analysis.json) are the engine data. ``before`` reads the
 text dump of the generator as it was before R1b, kept in docs/audit/ so the "before" table can be
@@ -1627,7 +1642,1254 @@ def main_mutate(path):
     lines_path = os.path.join(os.path.dirname(path), "best_lines.jsonl")
     if os.path.exists(lines_path):
         missed += main_mutate_lines(lines_path)
+    story_path = os.path.join(os.path.dirname(path), "story.jsonl")
+    if os.path.exists(story_path):
+        missed += main_mutate_story(story_path)
     return 1 if missed else 0
+
+
+# ---------------------------------------------------------------------------------------------
+# NS: the narrated story (ANALYSIS_SPEC 9.9). `story` re-derives every claim of the story sentences
+# ---------------------------------------------------------------------------------------------
+#
+# Core's test ``CommentaryAuditDumpTest.dumpStory`` writes ``core/build/commentary_audit/story.jsonl``: per game and
+# side a `game` record (each ply's move, class and missed motif - what the generator took from its annotations) and a
+# `part` record for every sentence of the told story that makes a claim of its own (its kind, its words, the plies it is
+# about). Each sentence must match the template of its kind (an unrecognised sentence is WRONG) and every claim in it is
+# re-derived here from the recorded engine numbers and python-chess: the phases of the game from the White win-percent
+# series (a second implementation of core's GamePhases and StoryArc), the standing words from the win-percent bands, a mate
+# from the engine's distance, the better move's result from the first plies of the engine's line, what a move lets in from
+# the engine's best reply and static exchange, the skipped stretch from the board.
+
+STORY_GAMES = dict(GAME_FILES, byrne_fischer=ROOT + "/core/src/test/resources/pacing/byrne_fischer.analysis.json")
+NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+NUM = r"(\d+|no|one|two|three|four|five|six|seven|eight|nine|ten)"
+BAND = r"(decisively winning|winning|clearly better|slightly better|about level|slightly worse|clearly worse|losing|decisively lost)"
+WB = r"(White|Black)"
+SEVERITY = {50: "the whole game", 30: "most of the advantage", 18: "a big chunk of the position", 10: "real ground"}
+TACTIC_NAMES = {
+    "FORK": "fork", "PAWN_FORK": "pawn fork", "DOUBLE_ATTACK": "double attack", "PIN_ABSOLUTE": "absolute pin",
+    "PIN_RELATIVE": "relative pin", "SKEWER": "skewer", "DISCOVERED_ATTACK": "discovered attack",
+    "DISCOVERED_CHECK": "discovered check", "DOUBLE_CHECK": "double check", "HANGING_PIECE": "hanging piece",
+    "TRAPPED_PIECE": "trapped piece", "DEFLECTION": "deflection", "DECOY": "decoy", "OVERLOADED_PIECE": "overloaded piece",
+    "INTERFERENCE": "interference", "CLEARANCE": "clearance", "ZWISCHENZUG": "in-between move", "BACK_RANK_MATE": "back-rank mate",
+    "SMOTHERED_MATE": "smothered mate", "GREEK_GIFT": "greek gift sacrifice", "WINDMILL": "windmill", "X_RAY": "x-ray",
+    "PROMOTION_TACTIC": "promotion", "UNDERPROMOTION": "underpromotion", "PASSED_PAWN_BREAKTHROUGH": "passed pawn breakthrough",
+    "REMOVING_THE_DEFENDER": "removing the defender", "MATE_NET": "mating net", "PERPETUAL_CHECK": "perpetual check",
+    "STALEMATE_TRICK": "stalemate trick", "DESPERADO": "desperado", "BATTERY": "battery", "FORTRESS": "fortress",
+}
+ERROR_NOUN = {"BLUNDER": "blunder", "MISTAKE": "mistake", "MISS": "missed win"}
+PHASE_ERRORS = ("BLUNDER", "MISTAKE", "MISS")
+MISTAKE_CLASSES = ("INACCURACY", "MISTAKE", "MISS", "BLUNDER")
+
+
+def st_num(token):
+    return NUMBER_WORDS.index(token) if token in NUMBER_WORDS else int(token)
+
+
+def st_number_word(n):
+    return NUMBER_WORDS[n] if 0 <= n <= 10 else str(n)
+
+
+# --- the series, the phases (a second implementation of core's GamePhases), the arc -----------------------------------
+
+def st_white_wp(ev):
+    line = min(ev["lines"], key=lambda l: l["multiPv"]) if ev["lines"] else None
+    if line is None:
+        return 50.0
+    stm_white = ev["fen"].split()[1] == "w"
+    w = line_wp(line)
+    return w if stm_white else 100.0 - w
+
+
+def st_signed(w):
+    ahead = w if w >= 50.0 else 100.0 - w
+    level = 3 if ahead >= 82.0 else 2 if ahead >= 68.0 else 1 if ahead >= 57.0 else 0
+    return level if w >= 50.0 else -level
+
+
+ST_LOW = {-3: 0.0, -2: 18.0, -1: 32.0, 0: 43.0, 1: 57.0, 2: 68.0, 3: 82.0}
+ST_HIGH = {-3: 18.0, -2: 32.0, -1: 43.0, 0: 57.0, 1: 68.0, 2: 82.0, 3: 100.0 + 1e-9}
+ST_MARGIN, ST_MIN_LEN, ST_MIN_LAST = 3.0, 4, 2
+
+
+def st_phases(series):
+    """[(signed standing, start, end)]: hysteresis, runs, then the shortest short phase joined, one at a time."""
+    if not series:
+        return []
+    cur = st_signed(series[0])
+    states = [cur]
+    for x in series[1:]:
+        fresh = st_signed(x)
+        if fresh != cur and (x < ST_LOW[cur] - ST_MARGIN or x >= ST_HIGH[cur] + ST_MARGIN):
+            cur = fresh
+        states.append(cur)
+    phases, start = [], 0
+    for i in range(1, len(states) + 1):
+        if i == len(states) or states[i] != states[start]:
+            phases.append([states[start], start, i - 1])
+            start = i
+    while len(phases) >= 2:
+        best = None
+        for i, p in enumerate(phases):
+            minimum = ST_MIN_LAST if i == len(phases) - 1 else ST_MIN_LEN
+            if p[2] - p[1] + 1 >= minimum:
+                continue
+            if best is None or p[2] - p[1] < phases[best][2] - phases[best][1]:
+                best = i
+        if best is None:
+            break
+        i, p = best, phases[best]
+        prev = phases[i - 1] if i > 0 else None
+        nxt = phases[i + 1] if i + 1 < len(phases) else None
+        if nxt is None and prev is not None:
+            prev[2] = p[2]
+        elif prev is None and nxt is not None:
+            nxt[1] = p[1]
+        elif prev is not None and nxt is not None and prev[0] == nxt[0]:
+            prev[2] = nxt[2]
+            del phases[i + 1]
+        elif nxt is not None:
+            nxt[1] = p[1]
+        del phases[i]
+        merged = []
+        for q in phases:
+            if merged and merged[-1][0] == q[0]:
+                merged[-1][2] = q[2]
+            else:
+                merged.append(q)
+        phases = merged
+    return [tuple(p) for p in phases]
+
+
+def st_leader(signed):
+    return None if signed == 0 else (chess.WHITE if signed > 0 else chess.BLACK)
+
+
+def st_longest_clear(phases, color):
+    best = run = 0
+    for s, a, b in phases:
+        if st_leader(s) == color and abs(s) >= 2:
+            run += b - a + 1
+            best = max(best, run)
+        else:
+            run = 0
+    return best
+
+
+def st_arc(phases, result, plies):
+    """core's StoryArc.of: ('comeback', winner, moves) | ('tookover', winner, move, early) | ('tightdraw',) | ('wasted', leader, moves) | None."""
+    if plies < 16 or not phases:
+        return None
+    if result in ("1-0", "0-1"):
+        winner = chess.WHITE if result == "1-0" else chess.BLACK
+        loser = not winner
+        run = st_longest_clear(phases, loser)
+        if run // 2 >= 6:
+            return ("comeback", winner, run // 2)
+        if any(st_leader(s) == loser for s, _, _ in phases):
+            return None
+        first = next((i for i, (s, _, _) in enumerate(phases) if st_leader(s) == winner), None)
+        if first is None or any(st_leader(s) != winner for s, _, _ in phases[first:]):
+            return None
+        if sum(b - a + 1 for _, a, b in phases[first:]) < 8:
+            return None
+        move = max(1, (phases[first][1] + 1) // 2)
+        return ("tookover", winner, move, move <= 6)
+    if result == "1/2-1/2":
+        for color in (chess.WHITE, chess.BLACK):
+            run = st_longest_clear(phases, color)
+            if run // 2 >= 6:
+                return ("wasted", color, run // 2)
+        return ("tightdraw",) if all(abs(s) <= 1 for s, _, _ in phases) else None
+    return None
+
+
+def st_aftermath(phases, ply, mover):
+    opp = not mover
+    idx = next((i for i, (_, a, b) in enumerate(phases) if a <= ply <= b), None)
+    if idx is None:
+        return None
+    after = phases[idx:]
+    if st_leader(after[0][0]) != opp or abs(after[0][0]) < 1:
+        return None
+    if all(st_leader(s) == opp for s, _, _ in after):
+        return ("neverback", opp)
+    back = next((p for p in after if st_leader(p[0]) != opp), None)
+    return ("foughtback", mover, (back[1] + 1) // 2, back[0])
+
+
+def st_band(wp):
+    return standing_words(wp)
+
+
+def st_phase_words(signed):
+    return {1: "slightly better", 2: "clearly better", 3: "winning"}.get(abs(signed), "about level")
+
+
+def st_side_name(color):
+    return "White" if color == chess.WHITE else "Black"
+
+
+def st_color_of(name):
+    return chess.WHITE if name == "White" else chess.BLACK
+
+
+# --- a game and a side ----------------------------------------------------------------------------------------------
+
+class StoryGame:
+    def __init__(self, rec):
+        self.name = rec["game"]
+        self.side = rec["side"]
+        self.result = rec["result"]
+        self.plies = rec["plies"]
+        self.n = len(self.plies)
+        # a game cut short has the first positions of the recording
+        self.evals = analysis_story(rec.get("base", self.name))[: self.n + 1]
+        self.series = [st_white_wp(ev) for ev in self.evals]
+        self.phases = st_phases(self.series)
+        self.user = None if self.side is None else (chess.WHITE if self.side == "WHITE" else chess.BLACK)
+        self._boards = {}
+
+    def color(self, ply):
+        return chess.WHITE if self.plies[ply - 1]["color"] == "WHITE" else chess.BLACK
+
+    def before(self, ply):
+        return chess.Board(self.evals[ply - 1]["fen"])
+
+    def after(self, ply):
+        return chess.Board(self.evals[ply]["fen"])
+
+    def move(self, ply):
+        return chess.Move.from_uci(self.plies[ply - 1]["uci"])
+
+    def wp(self, ply, which, color):
+        """Win-percent for [color] in the position before ([which] 0) or after ([which] 1) ply [ply]."""
+        w = self.series[ply - 1 + which]
+        return w if color == chess.WHITE else 100.0 - w
+
+    def loss(self, ply):
+        c = self.color(ply)
+        return max(0.0, self.wp(ply, 0, c) - self.wp(ply, 1, c))
+
+    def cls(self, ply):
+        return self.plies[ply - 1]["cls"]
+
+    def book_end(self):
+        return max((p["ply"] for p in self.plies if p["cls"] == "BOOK"), default=0)
+
+    def turning(self):
+        """core's turningPoint: the largest loss above 0.5 that is neither BOOK nor FORCED, the earlier on a tie."""
+        best = None
+        for p in self.plies:
+            loss = self.loss(p["ply"])
+            if loss > 0.5 and p["cls"] not in ("BOOK", "FORCED") and (best is None or loss > best[0] + 1e-12):
+                best = (loss, p["ply"])
+        return None if best is None else best[1]
+
+    def who(self, color):
+        """The narration's subject for [color]: 'you' for the viewer, else the colour."""
+        return "you" if self.user is not None and color == self.user else st_side_name(color)
+
+    def mover_mate_before(self, ply):
+        line = min(self.evals[ply - 1]["lines"], key=lambda l: l["multiPv"]) if self.evals[ply - 1]["lines"] else None
+        if line is None or line.get("mateIn") is None or line["mateIn"] <= 0:
+            return None
+        return line["mateIn"] if line["mateIn"] <= 8 else None
+
+    def opponent_mate_after(self, ply):
+        if ply >= len(self.evals):
+            return None
+        line = min(self.evals[ply]["lines"], key=lambda l: l["multiPv"]) if self.evals[ply]["lines"] else None
+        if line is None or line.get("mateIn") is None or line["mateIn"] <= 0:
+            return None
+        return line["mateIn"] if line["mateIn"] <= 8 else None
+
+    def best_pv(self, ply):
+        lines = self.evals[ply - 1]["lines"]
+        return min(lines, key=lambda l: l["multiPv"])["pvUci"] if lines else []
+
+
+_story_analysis = {}
+
+
+def analysis_story(game):
+    if game not in _story_analysis:
+        _story_analysis[game] = json.load(open(STORY_GAMES[game], encoding="utf-8"))["evals"]
+    return _story_analysis[game]
+
+
+# --- spoken forms -----------------------------------------------------------------------------------------------------
+
+def st_phrase(board, move):
+    """A move as a noun phrase after a verb ('knight takes the pawn on f seven, with check'), from the board alone."""
+    e = expected_line_move(board, move)
+    return e[0].lower() + e[1:-1]
+
+
+def st_cap(text):
+    return text[0].upper() + text[1:] if text else text
+
+
+def st_clause(board, move, you, color, recapture=False):
+    """core's Played / moveClause for a PLAY verb: 'White plays knight to f three', 'you take the pawn on e five with the knight'."""
+    who = "you" if you else st_side_name(color)
+    third = not you
+    after = board.copy()
+    after.push(move)
+    suffix = ", and that is checkmate" if after.is_checkmate() else (", with check" if after.is_check() else "")
+    if board.is_castling(move):
+        return "%s %s %s%s" % (who, "castles" if third else "castle", "kingside" if board.is_kingside_castling(move) else "queenside", suffix)
+    if board.is_capture(move):
+        mover = board.piece_at(move.from_square)
+        name = PIECE_WORDS[mover.piece_type]
+        twin = any(m.to_square == move.to_square and m.from_square != move.from_square
+                   and board.piece_at(m.from_square).piece_type == mover.piece_type for m in board.legal_moves)
+        with_part = "with the %s on %s" % (name, square_words(move.from_square)) if twin else "with the %s" % name
+        verb = ("takes" if third else "take") + (" back" if recapture else "")
+        to = square_words(move.to_square)
+        if recapture:
+            obj = "on %s" % to
+        elif board.is_en_passant(move):
+            obj = "on %s, en passant," % to
+        else:
+            obj = "the %s on %s" % (PIECE_WORDS[board.piece_at(move.to_square).piece_type], to)
+        promo = ", promoting to a %s" % PIECE_WORDS[move.promotion] if move.promotion else ""
+        return "%s %s %s %s%s%s" % (who, verb, obj, with_part, promo, suffix)
+    return "%s %s %s" % (who, "plays" if third else "play", st_phrase(board, move))
+
+
+def st_recapture(g, ply):
+    if ply < 2:
+        return False
+    move, previous = g.move(ply), g.move(ply - 1)
+    return g.before(ply).is_capture(move) and g.before(ply - 1).is_capture(previous) and previous.to_square == move.to_square
+
+
+def st_exchange_band(cp):
+    """core's materialGain 40 cp rule on a gain: 'a queen' ... or None."""
+    return gain_words(cp)
+
+
+def st_severity(loss):
+    for limit, words in SEVERITY.items():
+        if loss >= limit:
+            return words
+    return "a little something"
+
+
+# --- the verdict of one part -----------------------------------------------------------------------------------------
+
+def st_verify(g, part, parts_before):
+    """[(verdict, note)] for one story sentence: S supported, W wrong (a template that does not match is wrong too)."""
+    pid, text, plies = part["id"], part["text"], part["plies"]
+    fn = ST_VERIFIERS.get(pid)
+    if fn is None:
+        return [("W", "no verifier for the sentence kind %s" % pid)]
+    if part["segment"] < 0:
+        return [("W", "the sentence is not in the script")]
+    try:
+        return [fn(g, text, plies, parts_before)]
+    except AssertionError as e:
+        return [("W", str(e))]
+
+
+def st_expect(cond, note):
+    if not cond:
+        raise AssertionError(note)
+
+
+def st_match(patterns, text):
+    for p in patterns:
+        m = re.match(p, text)
+        if m:
+            return m
+    raise AssertionError("not a template of its kind: %r" % text)
+
+
+def v_stakes(g, text, plies, before):
+    arc = st_arc(g.phases, g.result, g.n)
+    st_expect(arc is not None, "the graph proves no story for this game")
+    if text.startswith(("White won", "Black won", "For ")):
+        m = st_match([r"^%s won, but for %s moves this was %s's game\.$" % (WB, NUM, WB),
+                      r"^%s won it, though for %s moves %s was clearly ahead\.$" % (WB, NUM, WB),
+                      r"^For %s moves %s was clearly better, and %s still won\.$" % (NUM, WB, WB)], text)
+        sides = [x for x in m.groups() if x in ("White", "Black")]
+        n = st_num(next(x for x in m.groups() if x not in ("White", "Black")))
+        if text.startswith("For "):
+            loser, winner = st_color_of(sides[0]), st_color_of(sides[1])
+        else:
+            winner, loser = st_color_of(sides[0]), st_color_of(sides[1])
+        st_expect(winner != loser, "the winner and the other side are the same")
+        st_expect(arc[0] == "comeback" and arc[1] == winner, "the arc is %r" % (arc,))
+        st_expect(arc[2] == n, "the other side was clearly better for %d moves, not %d" % (arc[2], n))
+        return ("S", "the other side held a clear standing for %d moves in a row, and lost" % n)
+    if text.startswith(("It was level until move", "Nothing separated them")) or "on top from the opening" in text or "got ahead early" in text:
+        m = st_match([r"^%s was on top from the opening and never let go\.$" % WB, r"^%s got ahead early and stayed there\.$" % WB,
+                      r"^It was level until move (\d+), and then %s took over for good\.$" % WB,
+                      r"^Nothing separated them until move (\d+), when %s took over for good\.$" % WB], text)
+        winner = st_color_of([x for x in m.groups() if x in ("White", "Black")][0])
+        early = text.startswith(("White was on", "Black was on", "White got", "Black got"))
+        st_expect(arc[0] == "tookover" and arc[1] == winner and arc[3] == early, "the arc is %r" % (arc,))
+        if not early:
+            st_expect(int(m.group(1)) == arc[2], "the lead began at move %d, not %s" % (arc[2], m.group(1)))
+        return ("S", "the other side never led; the winner led from move %d" % arc[2])
+    if text.startswith(("Neither side", "It was close all the way")):
+        st_match([r"^Neither side ever got more than a slight edge\.$", r"^It was close all the way: neither side was ever more than slightly better\.$"], text)
+        st_expect(arc[0] == "tightdraw", "the arc is %r" % (arc,))
+        return ("S", "a draw and no phase above an edge")
+    m = st_match([r"^%s was clearly better for %s moves, but it ended in a draw\.$" % (WB, NUM),
+                  r"^%s held the upper hand for %s moves and still could not win\.$" % (WB, NUM)], text)
+    leader, n = st_color_of(m.group(1)), st_num(m.group(2))
+    st_expect(arc[0] == "wasted" and arc[1] == leader and arc[2] == n, "the arc is %r" % (arc,))
+    return ("S", "a draw in which %s was clearly better for %d moves" % (m.group(1), n))
+
+
+def v_result_mate(g, text, plies, before):
+    m = st_match([r"^It ended in mate on move (\d+)\.$", r"^The finish was a checkmate on move (\d+)\.$"], text)
+    st_expect(g.result in ("1-0", "0-1") and g.after(g.n).is_checkmate(), "the game did not end in a checkmate")
+    st_expect(int(m.group(1)) == (g.n + 1) // 2, "the game has %d moves" % ((g.n + 1) // 2))
+    return ("S", "checkmate on the board after move %d" % int(m.group(1)))
+
+
+def v_result_lasted(g, text, plies, before):
+    m = st_match([r"^It lasted %s moves?\.$" % NUM, r"^All over after %s moves?\.$" % NUM], text)
+    st_expect(not g.after(g.n).is_checkmate() or g.result not in ("1-0", "0-1"), "the game ended in a checkmate")
+    st_expect(st_num(m.group(1)) == (g.n + 1) // 2, "the game has %d moves" % ((g.n + 1) // 2))
+    return ("S", "the game's length, no mate")
+
+
+def st_hook_check(g, plies, lo, hi):
+    tp = g.turning()
+    st_expect(tp is not None and plies and plies[0] == tp, "the largest swing is at ply %s" % tp)
+    loss = g.loss(tp)
+    st_expect(lo <= loss < hi, "the largest swing lost %.1f win-percent" % loss)
+    return tp, loss
+
+
+def v_hook_big(g, text, plies, before):
+    m = st_match([r"^One move, around move (\d+), swings the whole game, and it's easy to walk past\.$",
+                  r"^Everything here turns on a single move, around move (\d+)\.$",
+                  r"^There's one move in here, around move (\d+), that changes everything\. Let's find it\.$"], text)
+    tp, loss = st_hook_check(g, plies, 30.0, 1e9)
+    st_expect(int(m.group(1)) == g.plies[tp - 1]["moveNumber"], "the swing is at move %d" % g.plies[tp - 1]["moveNumber"])
+    return ("S", "the largest swing lost %.1f win-percent at move %s" % (loss, m.group(1)))
+
+
+def v_hook_close(g, text, plies, before):
+    m = st_match([r"^One moment, around move (\d+), matters more than any other\.$", r"^The key moment comes around move (\d+)\.$"], text)
+    tp, loss = st_hook_check(g, plies, 12.0, 30.0)
+    st_expect(int(m.group(1)) == g.plies[tp - 1]["moveNumber"], "the swing is at move %d" % g.plies[tp - 1]["moveNumber"])
+    return ("S", "the largest swing lost %.1f win-percent at move %s" % (loss, m.group(1)))
+
+
+def v_hook_clean(g, text, plies, before):
+    st_match([r"^This one is clean from both sides\. The biggest slip is small, but it is worth a look\.$"], text)
+    tp, loss = st_hook_check(g, plies, 0.5, 12.0)
+    return ("S", "the largest swing lost only %.1f win-percent" % loss)
+
+
+def st_clause_standing(text_clause):
+    if text_clause == "the position is about level":
+        return 0
+    m = re.match(r"^(White|Black) is (slightly better|clearly better|winning)$", text_clause)
+    st_expect(m is not None, "not a standing clause: %r" % text_clause)
+    level = {"slightly better": 1, "clearly better": 2, "winning": 3}[m.group(2)]
+    return level if m.group(1) == "White" else -level
+
+
+def v_theory_ends(g, text, plies, before):
+    m = st_match([r"^Theory runs out around move (\d+), and (.+)\.$", r"^By move (\d+) the book is spent, and (.+)\.$"], text)
+    book = g.book_end()
+    st_expect(book >= 4 and int(m.group(1)) == (book + 1) // 2, "the last book move is ply %d" % book)
+    st_expect(plies == [book], "the standing is read after ply %d" % book)
+    st_expect(st_clause_standing(m.group(2)) == st_signed(g.series[book]), "the board after ply %d stands at %d" % (book, st_signed(g.series[book])))
+    return ("S", "the win-percent after the last book move puts the game at %s" % m.group(2))
+
+
+def v_opening_verdict(g, text, plies, before):
+    m = st_match([r"^Out of the opening, (.+)\.$", r"^Coming out of the opening, (.+)\.$"], text)
+    st_expect(plies and st_clause_standing(m.group(1)) == st_signed(g.series[plies[0]]), "the board after ply %s stands at %d" % (plies, st_signed(g.series[plies[0]])))
+    st_expect(not (g.book_end() >= 4), "the opening has a last book move to name")
+    return ("S", "the win-percent after ply %d puts the game at %s" % (plies[0], m.group(1)))
+
+
+CAUSE_ERR = re.compile(r", after (White|Black)'s (blunder|mistake|missed win|slip) on move (\d+)")
+CAUSE_MAT = re.compile(r", after winning (a queen|a rook|the exchange|a piece|a pawn|material)")
+CAUSE_MATE = re.compile(r", with a forced mate in %s" % NUM)
+PHASE_WORDS = r"(slightly better|clearly better|winning)"
+PHASE_FORMS = [
+    ("level_error", r"^%s gave up the advantage with a (blunder|mistake|missed win|slip) on move (\d+), and it was level again\.$" % WB),
+    ("level_neutral", r"^It was level again\.$"),
+    ("level_fought", r"^%s fought back to level\.$" % WB),
+    ("cross_a", r"^The game turned: %s was %s now\.$" % (WB, PHASE_WORDS)),
+    ("cross_b", r"^%s took over, and was %s\.$" % (WB, PHASE_WORDS)),
+    ("grow1", r"^%s edged ahead\.$" % WB), ("grow1", r"^%s got a small edge\.$" % WB),
+    ("grow2", r"^%s built a clear edge\.$" % WB), ("grow2", r"^%s took control\.$" % WB),
+    ("grow3", r"^%s was winning now\.$" % WB), ("grow3", r"^%s's edge became a winning one\.$" % WB),
+    ("shrink", r"^%s's grip loosened: only %s now\.$" % (WB, PHASE_WORDS)),
+    ("shrink", r"^%s gave some ground, and was only %s now\.$" % (WB, PHASE_WORDS)),
+]
+
+
+def st_phase_cause(g, shift_ply, gainer):
+    """The reason core states for a boundary: the loser's error in the two moves up to it, the gainer's mate, the gainer's material."""
+    loser = not gainer
+    window = [p for p in (shift_ply, shift_ply - 1) if 1 <= p <= g.n]
+    errs = [p for p in window if g.color(p) == loser and g.cls(p) in PHASE_ERRORS]
+    if errs:
+        best = max(errs, key=lambda p: (g.loss(p), -p))
+        return ("error", loser, ERROR_NOUN[g.cls(best)], g.plies[best - 1]["moveNumber"])
+    for p in window:
+        if g.color(p) == gainer and g.mover_mate_before(p) is not None:
+            return ("mate", g.mover_mate_before(p))
+    first = max(0, shift_ply - 2)
+    start = g.before(1) if first == 0 else g.after(first)
+    end = g.after(shift_ply)
+    settled = settled_gain(start, end, gainer)
+    if settled >= 100:
+        word = gain_words(settled)
+        # "the exchange" is counted on the settled board: the opponent's best take-back played first
+        board = end.copy()
+        if board.turn != gainer:
+            takes = [m for m in board.legal_moves if board.is_capture(m)]
+            if takes:
+                top = max(takes, key=lambda m: see(board, m))
+                if see(board, top) > 0:
+                    board.push(top)
+        if wins_the_exchange(start, board, gainer) and EXCHANGE_MIN <= settled <= EXCHANGE_MAX:
+            word = "the exchange"
+        return ("material", word or "material")
+    return None
+
+
+def v_phase_turn(g, text, plies, before):
+    st_expect(len(plies) == 1, "a phase boundary names its ply")
+    ply = plies[0]
+    shifts = {b[1]: (a[0], b[0]) for a, b in zip(g.phases, g.phases[1:])}
+    st_expect(ply in shifts, "the phases of the game have no boundary at ply %d" % ply)
+    frm, to = shifts[ply]
+    gainer = chess.WHITE if to > frm else chess.BLACK
+    cause = st_phase_cause(g, ply, gainer)
+    # the cause clause is read out of the sentence first, then the rest must be one of the forms
+    cause_in_text, body = None, text
+    for rx, build in ((CAUSE_ERR, lambda m: ("error", st_color_of(m.group(1)), m.group(2), int(m.group(3)))),
+                      (CAUSE_MAT, lambda m: ("material", m.group(1))), (CAUSE_MATE, lambda m: ("mate", st_num(m.group(1))))):
+        m = rx.search(body)
+        if m:
+            cause_in_text = build(m)
+            body = body.replace(m.group(0), "", 1)
+            break
+    found = None
+    for key, pat in PHASE_FORMS:
+        m = re.match(pat, body)
+        if m:
+            found = (key, pat, m)
+            break
+    st_expect(found is not None, "not a template of its kind: %r" % text)
+    key, pat, m = found
+    if key == "level_error":
+        # this form carries its cause in its own words: "White gave up the advantage with a blunder on move 11, ..."
+        cause_in_text = ("error", st_color_of(m.group(1)), m.group(2), int(m.group(3)))
+    st_expect(cause_in_text == cause, "the boards give the cause %r, the sentence says %r" % (cause, cause_in_text))
+    lead, old = st_leader(to), st_leader(frm)
+    groups = m.groups()
+    if key.startswith("level"):
+        st_expect(to == 0 and old is not None, "the boundary is not a return to level")
+        by_old_error = cause is not None and cause[0] == "error" and cause[1] == old
+        if key == "level_error":
+            st_expect(st_color_of(groups[0]) == old and by_old_error, "the side that was ahead did not err")
+        elif key == "level_fought":
+            st_expect(st_color_of(groups[0]) == (not old) and not by_old_error, "the side that was behind did not fight back")
+    elif key.startswith("cross"):
+        who = st_color_of(groups[0])
+        st_expect(old is not None and lead is not None and lead != old and who == lead, "the lead did not change hands to that side")
+        st_expect(groups[1] == st_phase_words(to), "the new standing is %s" % st_phase_words(to))
+    elif key.startswith("grow"):
+        who = st_color_of(groups[0])
+        st_expect(lead == who and abs(to) == int(key[4]) and (old is None or (old == who and abs(frm) < abs(to))), "not a growing lead for %s to level %s" % (groups[0], key[4]))
+    else:
+        who = st_color_of(groups[0])
+        st_expect(lead == who and old == who and 0 < abs(to) < abs(frm), "not a shrinking lead for %s" % groups[0])
+        st_expect(groups[1] == st_phase_words(to), "the new standing is %s" % st_phase_words(to))
+    return ("S", "the win-percent series changes phase %+d -> %+d at ply %d; cause %r" % (frm, to, ply, cause))
+
+
+def v_skip(g, text, plies, before):
+    st_expect(len(plies) == 2, "a skip names both ends")
+    a, b = plies
+    skipped = list(range(a + 1, b))
+    cw = cb = checks = 0
+    swing = 0.0
+    for k in skipped:
+        board = g.before(k)
+        mv = g.move(k)
+        if board.is_capture(mv):
+            if g.color(k) == chess.WHITE:
+                cw += 1
+            else:
+                cb += 1
+        after = g.after(k)
+        if after.is_check():
+            checks += 1
+        swing = max(swing, abs(g.series[k] - g.series[k - 1]))
+    if cw == 0 and cb == 0 and checks == 0 and swing <= 5.0:
+        kind = "QUIET"
+    elif cw >= 1 and cb >= 1:
+        kind = "TRADES"
+    else:
+        kind = "PLAIN"
+    target = g.plies[b - 1]["moveNumber"]
+    forms = {
+        "QUIET": [r"^A few quiet moves follow, no captures and no checks, and we pick it up at move (\d+)\.$",
+                  r"^Nothing is taken and nobody gives check for a while, so on to move (\d+)\.$",
+                  r"^Quiet moves, no captures, no checks\. We rejoin at move (\d+)\.$"],
+        "TRADES": [r"^There are trades along the way, and we pick it up at move (\d+)\.$", r"^Some pieces come off, and then we're at move (\d+)\.$",
+                   r"^A few trades later, it's move (\d+)\.$"],
+        "PLAIN": [r"^Let's jump to move (\d+)\.$", r"^Skipping ahead to move (\d+)\.$", r"^On to move (\d+)\.$"],
+    }
+    m = st_match(forms[kind], text)
+    st_expect(int(m.group(1)) == target, "the next told move is move %d" % target)
+    return ("S", "plies %d..%d hold %d+%d captures, %d checks, a swing of %.1f: %s" % (a + 1, b - 1, cw, cb, checks, swing, kind))
+
+
+def st_poss(g, color):
+    return "your" if g.user is not None and color == g.user else "%s's" % st_side_name(color)
+
+
+def v_small_swing(g, text, plies, before):
+    st_expect(len(plies) == 1, "one ply")
+    ply = plies[0]
+    c = g.color(ply)
+    delta = g.wp(ply, 1, c) - g.wp(ply, 0, c)
+    who, poss = g.who(c), st_poss(g, c)
+    favours = [r"^That helps %s\.$" % who, r"^It nudges the game %s way\.$" % poss.replace("'s", "'s"), r"^%s position improves\.$" % st_cap(poss)]
+    against = [r"^That gives a little back\.$", r"^It costs %s a little\.$" % who, r"^%s position slips a little\.$" % st_cap(poss)]
+    st_expect(abs(delta) >= 4.0, "the move changed the mover's win-percent by only %.1f" % delta)
+    m = st_match(favours if delta >= 0 else against, text)
+    return ("S", "the mover's win-percent went %s by %.1f" % ("up" if delta >= 0 else "down", abs(delta)))
+
+
+def v_played_slip(g, text, plies, before):
+    ply = plies[0]
+    c = g.color(ply)
+    clause = st_clause(g.before(ply), g.move(ply), g.user == c, c, st_recapture(g, ply))
+    st_match([r"^%s, a small slip\.$" % re.escape(clause), r"^%s, which is slightly off\.$" % re.escape(clause),
+              r"^%s, but not the most precise\.$" % re.escape(clause)], st_cap(text) if False else text)
+    st_expect(g.cls(ply) == "INACCURACY", "the move is a %s, not an inaccuracy" % g.cls(ply))
+    return ("S", "an inaccuracy, said as played")
+
+
+def st_best_replay(g, ply, plies_limit=4):
+    """The mover's best net material along the first plies of the engine's best line, settled, and whether it mates."""
+    board = g.before(ply)
+    start = board.copy()
+    mover = board.turn
+    best = 0
+    for u in g.best_pv(ply)[:plies_limit]:
+        mv = chess.Move.from_uci(u)
+        if mv not in board.legal_moves:
+            break
+        board.push(mv)
+        best = max(best, settled_gain(start, board, mover))
+        if board.is_checkmate():
+            break
+    return best
+
+
+def v_better(g, text, plies, before):
+    ply = plies[0]
+    board = g.before(ply)
+    pv = g.best_pv(ply)
+    st_expect(pv and pv[0] != g.plies[ply - 1]["uci"], "the engine's first move is the move played")
+    move = chess.Move.from_uci(pv[0])
+    phrase = st_phrase(board, move)
+    cap = st_cap(phrase)
+    mate = g.mover_mate_before(ply)
+    gain = st_best_replay(g, ply)
+    kind = "mates" if mate is not None else ("wins" if gain >= 100 else "plain")
+    forms = {
+        "plain": [r"^%s was the move\.$" % re.escape(cap), r"^The move was %s\.$" % re.escape(phrase), r"^Instead, %s\.$" % re.escape(phrase)],
+        "mates": [r"^%s was the move: mate in %s\.$" % (re.escape(cap), NUM), r"^The move was %s, forcing mate in %s\.$" % (re.escape(phrase), NUM),
+                  r"^Instead, %s, and it is mate in %s\.$" % (re.escape(phrase), NUM)],
+        "wins": [r"^%s was the move, winning (.+)\.$" % re.escape(cap), r"^The move was %s, which wins (.+)\.$" % re.escape(phrase),
+                 r"^Instead, %s wins (.+)\.$" % re.escape(phrase)],
+    }
+    m = st_match(forms[kind], text)
+    if kind == "mates":
+        st_expect(st_num(m.group(1)) == mate, "the engine's mate is in %d" % mate)
+    if kind == "wins":
+        st_expect(m.group(1) == (gain_words(gain) or "material"), "the line nets %d cp: %s" % (gain, gain_words(gain) or "material"))
+    return ("S", "the engine's first move, result %s (mate %s, line nets %d cp)" % (kind, mate, gain))
+
+
+def v_allows_mate(g, text, plies, before):
+    ply = plies[0]
+    m = st_match([r"^That allows a forced mate in %s\.$" % NUM, r"^It walks into a forced mate in %s\.$" % NUM,
+                  r"^After that, there is a forced mate in %s\.$" % NUM], text)
+    mate = g.opponent_mate_after(ply)
+    st_expect(mate is not None and st_num(m.group(1)) == mate, "the engine's mate for the opponent after the move is %s" % mate)
+    return ("S", "engine: mate in %d for the opponent after the move" % mate)
+
+
+def st_allowed_reply(g, ply):
+    """core's allowsOf for a reply: the engine's best answer to the move, a capture that nets at least a pawn by static exchange."""
+    if ply >= len(g.evals):
+        return None
+    lines = g.evals[ply]["lines"]
+    pv = min(lines, key=lambda l: l["multiPv"])["pvUci"] if lines else []
+    if not pv:
+        return None
+    after = g.after(ply)
+    mv = chess.Move.from_uci(pv[0])
+    if mv not in after.legal_moves or not after.is_capture(mv):
+        return None
+    played = g.move(ply)
+    if g.before(ply).is_capture(played) and played.to_square == mv.to_square:
+        return None
+    gain = see(after, mv)
+    if gain < 100:
+        return None
+    return mv, gain
+
+
+def v_played_lets_in(g, text, plies, before):
+    ply = plies[0]
+    c = g.color(ply)
+    clause = st_clause(g.before(ply), g.move(ply), g.user == c, c, st_recapture(g, ply))
+    r = st_allowed_reply(g, ply)
+    st_expect(r is not None, "the engine's best answer is not a capture that nets a pawn or more")
+    mv, gain = r
+    after = g.after(ply)
+    phrase = st_phrase(after, mv)
+    wins = (", winning %s" % gain_words(gain)) if gain_words(gain) else ""
+    opp = st_side_name(not c)
+    expected = ["%s, and now %s has %s%s." % (clause, opp, phrase, wins), "%s, but %s has the reply %s%s." % (clause, opp, phrase, wins),
+                "%s, and %s can answer with %s%s." % (clause, opp, phrase, wins)]
+    st_expect(st_cap(text) in [st_cap(e) for e in expected] or text in expected, "the sentence is not what the boards say: %r" % expected[0])
+    return ("S", "the engine's best answer %s nets %d cp by static exchange" % (phrase, gain))
+
+
+def v_mate_announce(g, text, plies, before):
+    ply = plies[0]
+    m = st_match([r"^This is a forced mate in %s\.$" % NUM, r"^From here it is mate in %s, by force\.$" % NUM, r"^Mate in %s, and nothing can stop it\.$" % NUM], text)
+    mate = g.mover_mate_before(ply)
+    st_expect(mate is not None and st_num(m.group(1)) == mate, "the engine's mate for the mover is %s" % mate)
+    return ("S", "engine: mate in %d for the mover, counting this move" % mate)
+
+
+def v_mate_step(g, text, plies, before):
+    ply = plies[0]
+    phrase = st_phrase(g.before(ply), g.move(ply))
+    st_match([r"^%s\.$" % re.escape(st_cap(phrase)), r"^Then %s\.$" % re.escape(phrase)], text)
+    st_expect(g.mover_mate_before(ply) is not None, "the mover has no forced mate here")
+    c = g.color(ply)
+    # a sequence is under way when the aim was announced, or a step said, by this side, or the move before it let this side's mate in
+    prior = [b for b in before if b["plies"] and 0 < ply - b["plies"][0] <= 2 and
+             ((b["id"] in ("MateAnnounce", "MateStep") and g.color(b["plies"][0]) == c) or (b["id"] == "AllowsMate" and g.color(b["plies"][0]) != c))]
+    st_expect(prior, "no mating sequence of this side was under way")
+    return ("S", "the played move, in a mating sequence")
+
+
+def v_mate_finish(g, text, plies, before):
+    ply = plies[0]
+    c = g.color(ply)
+    st_expect(g.after(ply).is_checkmate(), "the move is not checkmate")
+    if g.user is not None and c == g.user:
+        st_match([r"^You win it!$", r"^Game over, and you win!$"], text)
+    else:
+        m = st_match([r"^Game over\. %s wins!$" % WB, r"^And that's the game: %s wins!$" % WB, r"^%s wins it!$" % WB], text)
+        st_expect(st_color_of(m.group(1)) == c, "the mate was delivered by %s" % st_side_name(c))
+    st_expect((g.result == "1-0") == (c == chess.WHITE) and g.result in ("1-0", "0-1"), "the result is %s" % g.result)
+    return ("S", "checkmate on the board; the result agrees")
+
+
+def st_band_before(g, ply, color):
+    return st_band(g.wp(ply, 0, color))
+
+
+def st_band_after(g, ply, color):
+    return st_band(g.wp(ply, 1, color))
+
+
+def v_consequence(g, text, plies, before):
+    ply = plies[0]
+    c = g.color(ply)
+    who, cwho = g.who(c), st_cap(g.who(c))
+    be, was, have = ("are", "were", "have") if who == "you" else ("is", "was", "has")
+    b0, b1 = st_band_before(g, ply, c), st_band_after(g, ply, c)
+    if b0 == b1:
+        m = st_match([r"^%s %s still %s, but that gave away (.+)\.$" % (cwho, be, BAND)], text)
+        st_expect(m.group(1) == b1, "the mover is %s after the move" % b1)
+        st_expect(m.group(2) == st_severity(g.loss(ply)), "the move lost %.1f win-percent: %s" % (g.loss(ply), st_severity(g.loss(ply))))
+        return ("S", "the band stayed %s; the loss was %.1f" % (b1, g.loss(ply)))
+    m = st_match([r"^%s %s %s\. Now %s %s %s\.$" % (cwho, was, BAND, who, be, BAND), r"^That takes %s from %s to %s\.$" % (re.escape(who), BAND, BAND),
+                  r"^%s %s slipped from %s to %s\.$" % (cwho, have, BAND, BAND)], text)
+    words = [x for x in m.groups() if x in dict.fromkeys(["decisively winning", "winning", "clearly better", "slightly better", "about level",
+                                                         "slightly worse", "clearly worse", "losing", "decisively lost"])]
+    st_expect(words == [b0, b1], "the mover went from %s to %s, not %s" % (b0, b1, words))
+    return ("S", "the mover's win-percent bands: %s -> %s" % (b0, b1))
+
+
+def v_turning_lead(g, text, plies, before):
+    ply = plies[0]
+    tp = g.turning()
+    st_expect(tp == ply, "the largest swing is at ply %s" % tp)
+    if g.loss(ply) >= 12.0:
+        st_match([r"^That was the turning point\.$", r"^That's where the game turned\.$", r"^And that was the turning point\.$"], text)
+    else:
+        st_match([r"^That was the biggest slip of the game\.$", r"^If there is a turning point, that is it\.$"], text)
+    return ("S", "the largest swing lost %.1f win-percent" % g.loss(ply))
+
+
+def v_turning_swing(g, text, plies, before):
+    ply = plies[0]
+    st_expect(g.turning() == ply, "the largest swing is at ply %s" % g.turning())
+    m = st_match([r"^No other move in this game cost as much\.$", r"^Nothing else in this game swings the evaluation like move (\d+)\.$"], text)
+    if m.re.groups and m.group(1):
+        st_expect(int(m.group(1)) == g.plies[ply - 1]["moveNumber"], "the swing is at move %d" % g.plies[ply - 1]["moveNumber"])
+    return ("S", "no other move lost as much")
+
+
+def v_turning_after(g, text, plies, before):
+    ply = plies[0]
+    after = st_aftermath(g.phases, ply, g.color(ply))
+    st_expect(after is not None, "the phases prove nothing about what followed")
+    if after[0] == "neverback":
+        m = st_match([r"^From there, %s never gave the lead back\.$" % WB, r"^From then on, %s stayed ahead\.$" % WB], text)
+        st_expect(st_color_of(m.group(1)) == after[1], "the side ahead is %s" % st_side_name(after[1]))
+        return ("S", "every phase from the move on is led by %s" % st_side_name(after[1]))
+    m = st_match([r"^It wasn't over: %s was (ahead again|back to level) by move (\d+)\.$" % WB], text)
+    st_expect(st_color_of(m.group(1)) == after[1] and int(m.group(3)) == after[2], "the phases say %r" % (after,))
+    st_expect((m.group(2) == "ahead again") == (st_leader(after[3]) == after[1]), "the standing then was %d" % after[3])
+    return ("S", "the phases return to %d by move %d" % (after[3], after[2]))
+
+
+def v_payoff_standing(g, text, plies, before):
+    ply = plies[0]
+    c = g.color(ply)
+    who = g.who(c)
+    be = "are" if who == "you" else "is"
+    m = st_match([r"^The line ends there, with %s %s\.$" % (re.escape(who), BAND), r"^That is as far as it goes, and %s %s %s\.$" % (re.escape(who), be, BAND)], text)
+    st_expect(m.groups()[-1] == st_band_before(g, ply, c), "the engine's evaluation of best play is %s" % st_band_before(g, ply, c))
+    return ("S", "the engine's evaluation of best play from the position before the move")
+
+
+def v_pivot_question(g, text, plies, before):
+    ply = plies[0]
+    m = st_match([r"^Hold on, back up\. Can you see what %s missed\?$" % WB, r"^Let's rewind\. Do you see what %s missed here\?$" % WB,
+                  r"^Freeze it there\. Can you see what %s missed\?$" % WB], text)
+    st_expect(st_color_of(m.group(1)) == g.color(ply), "the move was played by %s" % st_side_name(g.color(ply)))
+    st_expect(g.plies[ply - 1]["missed"] is not None, "no missed motif is recorded for this move")
+    pv = g.best_pv(ply)
+    st_expect(pv and pv[0] != g.plies[ply - 1]["uci"], "the engine's first move is the move played")
+    return ("S", "the engine preferred another move that carried a %s" % g.plies[ply - 1]["missed"])
+
+
+def st_ending_words(g, winner):
+    return None
+
+
+def v_outro_ending(g, text, plies, before):
+    full = (g.n + 1) // 2
+    mated = g.after(g.n).is_checkmate()
+    count = r"(\d+ moves|one move)"
+    m = st_match([r"^%s won by checkmate on move (\d+)\.$" % WB, r"^It ended in checkmate: %s wins on move (\d+)\.$" % WB,
+                  r"^%s won after %s\.$" % (WB, count), r"^%s took the win after %s\.$" % (WB, count),
+                  r"^It ended in a draw after %s\.$" % count, r"^The game was drawn after %s\.$" % count, r"^The game stops after %s\.$" % count], text)
+    if "checkmate" in text:
+        st_expect(mated and g.result in ("1-0", "0-1"), "the game did not end in checkmate")
+        st_expect(int(m.group(2)) == full, "the game has %d moves" % full)
+        st_expect(st_color_of(m.group(1)) == (chess.WHITE if g.result == "1-0" else chess.BLACK), "the winner is not that side")
+    elif "won after" in text or "took the win" in text:
+        st_expect(g.result in ("1-0", "0-1") and not mated, "the result is %s" % g.result)
+        st_expect(st_color_of(m.group(1)) == (chess.WHITE if g.result == "1-0" else chess.BLACK), "the winner is not that side")
+        st_expect(m.group(2) in ("%d moves" % full, "one move"), "the game has %d moves" % full)
+    elif "draw" in text:
+        st_expect(g.result == "1/2-1/2", "the result is %s" % g.result)
+        st_expect(m.group(1) in ("%d moves" % full, "one move"), "the game has %d moves" % full)
+    else:
+        st_expect(g.result not in ("1-0", "0-1", "1/2-1/2"), "the game has a result: %s" % g.result)
+        st_expect(m.group(1) in ("%d moves" % full, "one move"), "the game has %d moves" % full)
+    return ("S", "the result tag %s and the last move" % g.result)
+
+
+def v_outro_decider(g, text, plies, before):
+    tp = g.turning()
+    st_expect(tp is not None and g.loss(tp) >= 12.0, "no move lost 12 win-percent")
+    c = g.color(tp)
+    b0, b1 = st_band_before(g, tp, c), st_band_after(g, tp, c)
+    st_expect(b0 != b1, "the bands before and after are the same")
+    noun = {"BLUNDER": "blunder", "MISTAKE": "mistake", "MISS": "missed win"}.get(g.cls(tp), "slip")
+    poss, who = st_poss(g, c), g.who(c)
+    m = st_match([r"^The decisive moment was %s %s on move (\d+), which took %s from %s to %s\.$" % (re.escape(poss), noun, re.escape(who), BAND, BAND),
+                  r"^It all came down to %s %s on move (\d+): %s went from %s to %s\.$" % (re.escape(poss), noun, re.escape(st_cap(who)), BAND, BAND)], text)
+    st_expect(int(m.group(1)) == g.plies[tp - 1]["moveNumber"], "the largest swing is at move %d" % g.plies[tp - 1]["moveNumber"])
+    st_expect([m.group(2), m.group(3)] == [b0, b1], "the mover went from %s to %s" % (b0, b1))
+    return ("S", "the largest swing: %s -> %s, lost %.1f" % (b0, b1, g.loss(tp)))
+
+
+def v_outro_no_decider(g, text, plies, before):
+    st_match([r"^There was no single decisive mistake\.$", r"^Neither side made one decisive mistake\.$"], text)
+    tp = g.turning()
+    if tp is not None:
+        c = g.color(tp)
+        st_expect(g.loss(tp) < 12.0 or st_band_before(g, tp, c) == st_band_after(g, tp, c), "the largest swing lost %.1f and changed the band" % g.loss(tp))
+    return ("S", "no move lost 12 win-percent and changed a band")
+
+
+def st_lesson_focus(g):
+    if g.user is not None:
+        return g.user
+    tp = g.turning()
+    return g.color(tp) if tp is not None else chess.WHITE
+
+
+def st_worst(g, focus):
+    cands = [p for p in g.plies if (chess.WHITE if p["color"] == "WHITE" else chess.BLACK) == focus and p["cls"] in MISTAKE_CLASSES
+             and (g.loss(p["ply"]) >= 10.0 or p["missed"] is not None)]
+    if not cands:
+        return None
+    return max(cands, key=lambda p: (g.loss(p["ply"]), -p["ply"]))["ply"]
+
+
+def v_takeaway_missed(g, text, plies, before):
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    p = g.plies[worst - 1]
+    st_expect(p["missed"] is not None, "no missed motif is recorded for this move")
+    who = g.who(g.color(worst))
+    name = TACTIC_NAMES[p["missed"]]
+    article = "an" if name[0] in "aeiou" or name.startswith("x-") else "a"
+    best = st_phrase(g.before(worst), chess.Move.from_uci(p["best"])) if p["best"] else None
+    pv = g.best_pv(worst)
+    st_expect(pv and p["best"] == pv[0] and pv[0] != p["uci"], "the engine's first move is the move played")
+    tail = (" %s was the move." % st_cap(best)) if best else ""
+    first = "%s missed %s %s" % (who, article, name)
+    expected = ["At move %d, %s.%s" % (p["moveNumber"], first, tail), "Look at move %d. %s.%s" % (p["moveNumber"], st_cap(first), tail)]
+    st_expect(text in expected, "expected one of %r" % expected)
+    return ("S", "the worst error of the focus side, with its missed %s" % name)
+
+
+def v_takeaway_allowed(g, text, plies, before):
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    p = g.plies[worst - 1]
+    st_expect(p["missed"] is None, "the move missed a motif, which the lesson would name first")
+    c = g.color(worst)
+    opp = st_side_name(not c)
+    mate = g.opponent_mate_after(worst)
+    reply = None if mate is not None else st_allowed_reply(g, worst)
+    st_expect(mate is not None or reply is not None, "the move let nothing in")
+    tail = ""
+    if mate is not None:
+        tail = " It allowed a forced mate in %s." % st_number_word(mate)
+    else:
+        tail = " %s could answer with %s." % (opp, st_phrase(g.after(worst), reply[0]))
+    expected = ["Move %d let %s in.%s" % (p["moveNumber"], opp, tail), "At move %d, the door opened for %s.%s" % (p["moveNumber"], opp, tail)]
+    st_expect(text in expected, "expected one of %r" % expected)
+    return ("S", "the worst error of the focus side, and what it let in")
+
+
+def v_takeaway_costly(g, text, plies, before):
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    p = g.plies[worst - 1]
+    c = g.color(worst)
+    st_expect(p["missed"] is None and g.opponent_mate_after(worst) is None and st_allowed_reply(g, worst) is None, "the move missed a motif or let something in, which the lesson would name first")
+    b0, b1 = st_band_before(g, worst, c), st_band_after(g, worst, c)
+    bands = ", from %s to %s" % (b0, b1) if b0 != b1 else ""
+    sev = st_severity(g.loss(worst))
+    expected = ["Move %d gave up %s%s." % (p["moveNumber"], sev, bands), "At move %d, %s gave up %s%s." % (p["moveNumber"], g.who(c), sev, bands)]
+    st_expect(text in expected, "expected one of %r" % expected)
+    return ("S", "the worst error of the focus side: %s%s" % (sev, bands))
+
+
+def v_takeaway_clean(g, text, plies, before):
+    st_match([r"^Neither side made a decisive mistake, so the habit to keep is simple: check what every move allows\.$"], text)
+    st_expect(st_worst(g, st_lesson_focus(g)) is None, "the focus player made a mistake worth a lesson")
+    return ("S", "no error of 10 win-percent or with a missed motif")
+
+
+def v_habit_allowed(g, text, plies, before):
+    st_match([r"^Before you commit, ask one question: what does this let them do next\?$"], text)
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    st_expect(g.opponent_mate_after(worst) is not None or st_allowed_reply(g, worst) is not None, "the move let nothing in")
+    return ("S", "the lesson's first sentence was about what the move let in")
+
+
+def v_habit_standing(g, text, plies, before):
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    c = g.color(worst)
+    b0 = st_band_before(g, worst, c)
+    if b0 in ("decisively winning", "winning", "clearly better"):
+        want = "When you're ahead, slow down. Check every capture and every check before you move."
+    elif b0 in ("slightly better", "about level"):
+        want = "In a level position, every move counts. Check every capture and every check before you move."
+    else:
+        want = "Even when you're worse, don't rush. Check every capture and every check before you move."
+    st_expect(text == want, "the focus player stood %s before the move: %r" % (b0, want))
+    return ("S", "the habit fits the standing before the move: %s" % b0)
+
+
+def v_lesson_mated(g, text, plies, before):
+    worst = st_worst(g, st_lesson_focus(g))
+    st_expect(worst is not None and plies == [worst], "the focus player's worst error is at ply %s" % worst)
+    c = g.color(worst)
+    st_expect(g.after(g.n).is_checkmate() and g.color(g.n) != c, "the focus side was not mated at the end")
+    st_expect(worst == g.turning(), "the worst error is not the largest swing")
+    move = g.plies[worst - 1]["moveNumber"]
+    who = st_cap(g.who(c))
+    want = "%s got mated at the end, but the mate wasn't the mistake. Move %d was. Fix it and the mate never happens." % (who, move)
+    st_expect(text == want, "expected %r" % want)
+    return ("S", "mated at the end after the game's largest swing")
+
+
+ST_VERIFIERS = {
+    "StakesComeback": v_stakes, "StakesTookOver": v_stakes, "StakesTightDraw": v_stakes, "StakesWastedLead": v_stakes,
+    "ResultEndsInMate": v_result_mate, "ResultLasted": v_result_lasted,
+    "HookBigTurn": v_hook_big, "HookClose": v_hook_close, "HookClean": v_hook_clean,
+    "TheoryEnds": v_theory_ends, "OpeningVerdict": v_opening_verdict, "PhaseTurn": v_phase_turn, "SkipAhead": v_skip,
+    "SmallSwing": v_small_swing, "PlayedSlip": v_played_slip, "BetterHere": v_better, "AllowsMate": v_allows_mate,
+    "PlayedThenReply": v_played_lets_in, "MateAnnounce": v_mate_announce, "MateStep": v_mate_step, "MateFinish": v_mate_finish,
+    "ConsequenceChanged": v_consequence, "ConsequenceUnchanged": v_consequence,
+    "TurningPointLead": v_turning_lead, "TurningPointSwing": v_turning_swing, "TurningAftermath": v_turning_after,
+    "PayoffStanding": v_payoff_standing, "PivotQuestion": v_pivot_question,
+    "OutroEnding": v_outro_ending, "OutroDecider": v_outro_decider, "OutroNoDecider": v_outro_no_decider,
+    "TakeawayMissed": v_takeaway_missed, "TakeawayAllowed": v_takeaway_allowed, "TakeawayCostly": v_takeaway_costly,
+    "TakeawayClean": v_takeaway_clean, "TakeawayHabitAllowed": v_habit_allowed, "TakeawayHabitStanding": v_habit_standing,
+    "LessonMatedButNotTheMistake": v_lesson_mated,
+}
+
+
+def story_load(path):
+    games, parts = {}, defaultdict(list)
+    for line in open(path, encoding="utf-8"):
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        key = (rec["game"], rec["side"])
+        if rec["rec"] == "game":
+            games[key] = StoryGame(rec)
+        else:
+            parts[key].append(rec)
+    return games, parts
+
+
+def story_audit(games, parts):
+    """[(game, side, part, verdict, note)] for every part of every game and side."""
+    rows = []
+    for key, plist in parts.items():
+        g = games[key]
+        for i, part in enumerate(plist):
+            verdict, note = st_verify(g, part, plist[:i])[0]
+            rows.append((key, part, verdict, note))
+    return rows
+
+
+def main_story(path):
+    games, parts = story_load(path)
+    rows = story_audit(games, parts)
+    counts = Counter(v for _, _, v, _ in rows)
+    per_id = defaultdict(Counter)
+    for _, part, v, _ in rows:
+        per_id[part["id"]][v] += 1
+    print("### The narrated story (ANALYSIS_SPEC 9.9)\n")
+    print("%d story sentences in %d scripts (the four recorded games and shortened or re-resulted variants of them, each for no side, White and Black): %d supported, %d WRONG.\n" % (len(rows), len(games), counts["S"], counts["W"]))
+    print("| Sentence kind | Sentences | Supported | WRONG |")
+    print("|---|---|---|---|")
+    for pid, c in sorted(per_id.items()):
+        print("| %s | %d | %d | %d |" % (pid, sum(c.values()), c["S"], c["W"]))
+    print("\n### Every WRONG claim\n")
+    wrong = [r for r in rows if r[2] == "W"]
+    for (game, side), part, _, note in wrong:
+        print("- %s (%s) %s plies %s: \"%s\" - %s" % (game, side, part["id"], part["plies"], part["text"], note))
+    if not wrong:
+        print("(none)")
+    missing = sorted(set(ST_VERIFIERS) - set(per_id))
+    print("\nSentence kinds with a verifier that no recorded script used: %s" % (", ".join(missing) or "(none)"))
+    return 1 if wrong else 0
+
+
+# --- negative controls: break one claim of one sentence at a time -----------------------------------------------------
+
+def _p(part, **changes):
+    out = dict(part)
+    out.update(changes)
+    return out
+
+
+def _swap_sides(text):
+    if not re.search(r"White|Black", text):
+        return None
+    return re.sub(r"White|Black", lambda m: "Black" if m.group(0) == "White" else "White", text)
+
+
+def _num_up(text, by=1):
+    m = re.search(r"\b(\d+)\b", text)
+    return text[:m.start()] + str(int(m.group(1)) + by) + text[m.end():] if m else None
+
+
+def _word_up(token):
+    if token in NUMBER_WORDS:
+        return NUMBER_WORDS[min(NUMBER_WORDS.index(token) + 1, 10)] if token != "ten" else "11"
+    return str(int(token) + 1)
+
+
+def _mate_up(text):
+    m = re.search(r"(mate in )(\w+)", text, flags=re.I)
+    return text[:m.start(2)] + _word_up(m.group(2).lower()) + text[m.end(2):] if m else None
+
+
+def _swap_two_bands(text):
+    spans = [m.span() for m in re.finditer(BAND, text)]
+    if len(spans) < 2:
+        return None
+    (a0, a1), (b0, b1) = spans[0], spans[1]
+    first, second = text[a0:a1], text[b0:b1]
+    if first == second:
+        return None
+    return text[:a0] + second + text[a1:b0] + first + text[b1:]
+
+
+def _first_band_to(text, band):
+    m = re.search(BAND, text)
+    return text[:m.start()] + band + text[m.end():] if m and m.group(0) != band else None
+
+
+def _ply_of_class(g, classes, missed=None):
+    for q in g.plies:
+        if q["cls"] in classes and q["ply"] > 1 and (missed is None or (q["missed"] is None) == missed):
+            return q["ply"]
+    return None
+
+
+def _when(cond, part, **changes):
+    return _p(part, **changes) if cond else None
+
+
+STORY_MUTATIONS = [
+    # (name, the sentence kinds it applies to, how the part is broken: part, game -> part or None)
+    ("the stakes: the other side was clearly better for more moves than it was", ("StakesComeback",),
+     lambda p, g: _p(p, text=_num_up(p["text"], 4))),
+    ("the stakes: the winner and the other side swapped", ("StakesComeback", "StakesTookOver"),
+     lambda p, g: _when(_swap_sides(p["text"]), p, text=_swap_sides(p["text"]))),
+    ("the stakes: 'level until move N' at the wrong move", ("StakesTookOver",),
+     lambda p, g: _when("until move" in p["text"], p, text=_num_up(p["text"], 2))),
+    ("the stakes: a draw story told of a decisive game", ("StakesComeback", "StakesTookOver"),
+     lambda p, g: _p(p, id="StakesTightDraw", text="Neither side ever got more than a slight edge.")),
+    ("the result: 'ended in mate' said of a game that did not", ("ResultLasted",),
+     lambda p, g: _p(p, id="ResultEndsInMate", text="It ended in mate on move %d." % ((g.n + 1) // 2))),
+    ("the result: a mate on the wrong move", ("ResultEndsInMate",), lambda p, g: _p(p, text=_num_up(p["text"], 1))),
+    ("the hook: the largest swing at the wrong move", ("HookBigTurn", "HookClose"), lambda p, g: _p(p, text=_num_up(p["text"], 2))),
+    ("the hook: 'swings the whole game' said of a swing that lost under 30", ("HookClose",),
+     lambda p, g: _p(p, id="HookBigTurn", text="Everything here turns on a single move, around move %s." % re.search(r"(\d+)", p["text"]).group(1))),
+    ("the opening: the book left the game winning for Black", ("TheoryEnds", "OpeningVerdict"),
+     lambda p, g: _when("Black is winning" not in p["text"], p, text=re.sub(r"the position is about level|(White|Black) is (slightly better|clearly better|winning)", "Black is winning", p["text"], count=1))),
+    ("the opening: theory ending at the wrong move", ("TheoryEnds",), lambda p, g: _p(p, text=_num_up(p["text"], 1))),
+    ("a phase turn told with the wrong standing", ("PhaseTurn",),
+     lambda p, g: _when(re.search(r"built a clear edge|took control|edged ahead|got a small edge", p["text"]), p,
+                        text=re.sub(r"built a clear edge|took control|edged ahead|got a small edge", "was winning now", p["text"], count=1))),
+    ("a phase turn credited to the other side", ("PhaseTurn",), lambda p, g: _when(_swap_sides(p["text"]), p, text=_swap_sides(p["text"]))),
+    ("a phase turn with an error blamed on the other side", ("PhaseTurn",),
+     lambda p, g: _when(re.search(r"after (White|Black)'s", p["text"]), p,
+                        text=re.sub(r"after (White|Black)'s", lambda m: "after %s's" % ("Black" if m.group(1) == "White" else "White"), p["text"], count=1))),
+    ("a phase turn with an error on the wrong move", ("PhaseTurn",),
+     lambda p, g: _when("on move" in p["text"], p, text=re.sub(r"on move (\d+)", lambda m: "on move %d" % (int(m.group(1)) + 1), p["text"], count=1))),
+    ("a phase turn told at a move where the game did not change phase", ("PhaseTurn",), lambda p, g: _p(p, plies=[p["plies"][0] + 1])),
+    ("a phase turn that invents a forced mate as its cause", ("PhaseTurn",),
+     lambda p, g: _when(" after " not in p["text"] and " with a forced" not in p["text"], p, text=p["text"].replace(".", ", with a forced mate in three.", 1))),
+    ("a skipped stretch called quiet that holds captures", ("SkipAhead",),
+     lambda p, g: _when("quiet" not in p["text"].lower() and "no captures" not in p["text"], p,
+                        text="A few quiet moves follow, no captures and no checks, and we pick it up at move %s." % re.search(r"(\d+)", p["text"]).group(1))),
+    ("a skipped stretch called trades that holds none", ("SkipAhead",),
+     lambda p, g: _when("trades" not in p["text"] and "pieces come off" not in p["text"], p,
+                        text="There are trades along the way, and we pick it up at move %s." % re.search(r"(\d+)", p["text"]).group(1))),
+    ("a skip ahead to the wrong move", ("SkipAhead",), lambda p, g: _p(p, text=_num_up(p["text"], 1))),
+    ("a small swing in the wrong direction", ("SmallSwing",),
+     lambda p, g: _p(p, text="That gives a little back." if re.search(r"helps|nudges|improves", p["text"]) else "That helps %s." % g.who(g.color(p["plies"][0])))),
+    ("an inaccuracy verdict on a move that was not one", ("PlayedSlip",), lambda p, g: _p(p, plies=[_ply_of_class(g, ("BEST", "GOOD", "EXCELLENT"))])),
+    ("a better move that is the wrong move", ("BetterHere",),
+     lambda p, g: _when(re.search(r" to ([a-h]) (one|two|three|four|five|six|seven|eight)", p["text"]), p,
+                        text=re.sub(r" to ([a-h]) (one|two|three|four|five|six|seven|eight)", lambda m: " to %s %s" % ("a" if m.group(1) != "a" else "h", m.group(2)), p["text"], count=1))),
+    ("a better move said to win material it does not win", ("BetterHere",),
+     lambda p, g: _when(p["text"].endswith(" was the move."), p, text=p["text"].replace(" was the move.", " was the move, winning a rook."))),
+    ("a better move said to mate one move too late", ("BetterHere",), lambda p, g: _when("mate in" in p["text"], p, text=_mate_up(p["text"]))),
+    ("a mate said to be allowed that the engine does not see", ("AllowsMate",), lambda p, g: _p(p, plies=[1])),
+    ("a mate allowed one move too late", ("AllowsMate",), lambda p, g: _p(p, text=_mate_up(p["text"]))),
+    ("a reply that is not the engine's best answer", ("PlayedThenReply",),
+     lambda p, g: _when(re.search(r"on ([a-h]) (one|two|three|four|five|six|seven|eight)", p["text"]), p,
+                        text=re.sub(r"on ([a-h]) (one|two|three|four|five|six|seven|eight)", lambda m: "on %s %s" % ("h" if m.group(1) != "h" else "a", m.group(2)), p["text"], count=1))),
+    ("a reply said to win a queen when it wins less", ("PlayedThenReply",),
+     lambda p, g: _when("winning" in p["text"] and "winning a queen" not in p["text"], p,
+                        text=re.sub(r"winning (a \w+|the exchange|material)", "winning a queen", p["text"], count=1))),
+    ("a forced mate announced one move too long", ("MateAnnounce",), lambda p, g: _p(p, text=_mate_up(p["text"]))),
+    ("a mating step that is not part of a sequence", ("MateStep",), lambda p, g: _p(p, plies=[2])),
+    ("the finish said of a move that is not mate", ("MateFinish",), lambda p, g: _p(p, plies=[p["plies"][0] - 2])),
+    ("the finish credited to the other side", ("MateFinish",), lambda p, g: _when(_swap_sides(p["text"]), p, text=_swap_sides(p["text"]))),
+    ("a band change told backwards", ("ConsequenceChanged",), lambda p, g: _when(_swap_two_bands(p["text"]), p, text=_swap_two_bands(p["text"]))),
+    ("'still' said of a side that changed band", ("ConsequenceUnchanged",), lambda p, g: _p(p, plies=[p["plies"][0] + 1])),
+    ("a payoff standing in the wrong band", ("PayoffStanding",), lambda p, g: _p(p, text=_first_band_to(p["text"], "decisively lost"))),
+    ("the turning point on the wrong move", ("TurningPointLead", "TurningPointSwing", "TurningAftermath"), lambda p, g: _p(p, plies=[p["plies"][0] + 1])),
+    ("the turning point called significant when it was a small slip", ("TurningPointLead",),
+     lambda p, g: _when("slip" in p["text"] or "If there is" in p["text"], p, text="That was the turning point.")),
+    ("what followed the turning point given to the wrong side", ("TurningAftermath",), lambda p, g: _when(_swap_sides(p["text"]), p, text=_swap_sides(p["text"]))),
+    ("a pivot question about a move that missed nothing", ("PivotQuestion",), lambda p, g: _p(p, plies=[_ply_of_class(g, ("BEST", "GOOD", "EXCELLENT"), missed=True)])),
+    ("the ending with the wrong move count", ("OutroEnding",), lambda p, g: _p(p, text=_num_up(p["text"], 1))),
+    ("the ending crediting the wrong side", ("OutroEnding",), lambda p, g: _when(_swap_sides(p["text"]), p, text=_swap_sides(p["text"]))),
+    ("the decisive moment at the wrong move", ("OutroDecider",),
+     lambda p, g: _p(p, text=re.sub(r"on move (\d+)", lambda m: "on move %d" % (int(m.group(1)) + 1), p["text"], count=1))),
+    ("the decisive moment with the wrong bands", ("OutroDecider",), lambda p, g: _when(_swap_two_bands(p["text"]), p, text=_swap_two_bands(p["text"]))),
+    ("'no decisive mistake' said of a game with one", ("OutroDecider",), lambda p, g: _p(p, id="OutroNoDecider", text="There was no single decisive mistake.")),
+    ("the takeaway about the wrong move", ("TakeawayMissed", "TakeawayAllowed", "TakeawayCostly"),
+     lambda p, g: _p(p, text=re.sub(r"[Mm]ove (\d+)", lambda m: "%s %d" % (m.group(0).split()[0], int(m.group(1)) + 1), p["text"], count=1))),
+    ("the takeaway naming a motif that was not missed", ("TakeawayMissed",),
+     lambda p, g: _when("a fork" not in p["text"], p, text=re.sub(r"missed an? [\w-]+( [\w-]+)?", "missed a fork", p["text"], count=1))),
+    ("the habit for the wrong standing", ("TakeawayHabitStanding",),
+     lambda p, g: _p(p, text="When you're ahead, slow down. Check every capture and every check before you move." if "ahead" not in p["text"]
+                     else "Even when you're worse, don't rush. Check every capture and every check before you move.")),
+    ("a sentence no template knows", ("PhaseTurn", "BetterHere", "OutroEnding", "TheoryEnds", "SkipAhead"),
+     lambda p, g: _p(p, text="The position is extremely sharp and anything can happen.")),
+]
+
+
+def main_mutate_story(path):
+    games, parts = story_load(path)
+    print("\n### Negative controls: the story sentences (NS)\n")
+    print("| Mutation | Sentence | Flagged |")
+    print("|---|---|---|")
+    missed = 0
+    for name, kinds, mutate in STORY_MUTATIONS:
+        done = False
+        for key in sorted(parts, key=lambda k: (k[1] is not None, str(k))):
+            g, plist = games[key], parts[key]
+            for i, part in enumerate(plist):
+                if part["id"] not in kinds or st_verify(g, part, plist[:i])[0][0] != "S":
+                    continue
+                try:
+                    broken = mutate(part, g)
+                except (StopIteration, AttributeError, IndexError, TypeError):
+                    broken = None
+                if broken is None or broken.get("text") is None or broken["plies"] == [None]:
+                    continue
+                if broken["text"] == part["text"] and broken["plies"] == part["plies"] and broken["id"] == part["id"]:
+                    continue
+                verdict, note = st_verify(g, broken, plist[:i])[0]
+                flagged = verdict == "W"
+                shown = broken["text"].replace("|", "\\|")
+                print("| %s | %s %s ply %s: %s | %s |" % (name, key[0], key[1], broken["plies"], shown,
+                                                        ("WRONG: " + note.replace("|", "\\|")) if flagged else "**NOT FLAGGED**"))
+                missed += 0 if flagged else 1
+                done = True
+                break
+            if done:
+                break
+        if not done:
+            print("| %s | (no sentence to apply it to) | n/a |" % name)
+    print("\n%d story mutations not flagged." % missed)
+    return missed
 
 
 def _rephrase_check():
@@ -1649,6 +2911,11 @@ def main():
         return _rephrase_check().main([mode, path])
     if mode == "lines":
         return main_lines(path)
+    if mode == "story":
+        # NS (ANALYSIS_SPEC 9.9): the sentences of the narrated story, claim by claim.
+        return main_story(path)
+    if mode == "mutate-story":
+        return 1 if main_mutate_story(path) else 0
     if mode == "mutate":
         return main_mutate(path)
     if mode == "after":

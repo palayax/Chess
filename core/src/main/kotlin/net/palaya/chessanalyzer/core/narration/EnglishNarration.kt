@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.core.narration
 
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
+import net.palaya.chessanalyzer.core.analysis.PhaseStanding
 import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.PieceType
@@ -86,14 +87,54 @@ object EnglishNarration : NarrationStrings {
             is Sentence.ResultDraw -> one("It ended in a draw after ${moveCount(sentence.fullMoves)}.")
             is Sentence.ResultUnfinished -> one("The game runs ${moveCount(sentence.fullMoves)} and stops there.")
             is Sentence.IntroYouWere -> one("You were ${side(sentence.subject.color)} here, so that's the side we're watching.")
+            is Sentence.StakesComeback -> {
+                val w = side(sentence.winner)
+                val l = side(sentence.winner.opposite())
+                val n = number(sentence.moves)
+                listOf(
+                    "$w won, but for $n moves this was $l's game.",
+                    "$w won it, though for $n moves $l was clearly ahead.",
+                    "For $n moves $l was clearly better, and $w still won."
+                )
+            }
+            is Sentence.StakesTookOver -> {
+                val w = side(sentence.winner)
+                if (sentence.fromTheStart) listOf(
+                    "$w was on top from the opening and never let go.",
+                    "$w got ahead early and stayed there."
+                ) else listOf(
+                    "It was level until move ${sentence.moveNumber}, and then $w took over for good.",
+                    "Nothing separated them until move ${sentence.moveNumber}, when $w took over for good."
+                )
+            }
+            Sentence.StakesTightDraw -> listOf(
+                "Neither side ever got more than a slight edge.",
+                "It was close all the way: neither side was ever more than slightly better."
+            )
+            is Sentence.StakesWastedLead -> {
+                val l = side(sentence.leader)
+                val n = number(sentence.moves)
+                listOf(
+                    "$l was clearly better for $n moves, but it ended in a draw.",
+                    "$l held the upper hand for $n moves and still could not win."
+                )
+            }
+            is Sentence.ResultEndsInMate -> listOf(
+                "It ended in mate on move ${sentence.fullMoves}.",
+                "The finish was a checkmate on move ${sentence.fullMoves}."
+            )
+            is Sentence.ResultLasted -> listOf("It lasted ${moveCount(sentence.fullMoves)}.", "All over after ${moveCount(sentence.fullMoves)}.")
             Sentence.HookMissedMate -> one("And somewhere in here there's a forced mate that never got played. We'll get to it.")
             is Sentence.HookBigTurn -> listOf(
-                "But this whole game turns on one move, around move ${sentence.moveNumber}, and I'd bet most people watching walk straight past it.",
-                "The result is not the story. One move, around move ${sentence.moveNumber}, decides everything, and it is not the obvious one.",
-                "There's a single move in here, at move ${sentence.moveNumber}, that flips the entire game. Let's go find it."
+                "One move, around move ${sentence.moveNumber}, swings the whole game, and it's easy to walk past.",
+                "Everything here turns on a single move, around move ${sentence.moveNumber}.",
+                "There's one move in here, around move ${sentence.moveNumber}, that changes everything. Let's find it."
             )
-            is Sentence.HookClose -> one("It's closer than the result makes it look. One moment, around move ${sentence.moveNumber}, decides it.")
-            Sentence.HookClean -> one("This one is clean from both sides, but there's still a crack in it, and we're going to find it.")
+            is Sentence.HookClose -> listOf(
+                "One moment, around move ${sentence.moveNumber}, matters more than any other.",
+                "The key moment comes around move ${sentence.moveNumber}."
+            )
+            Sentence.HookClean -> one("This one is clean from both sides. The biggest slip is small, but it is worth a look.")
             Sentence.HookNoMistakes -> one("Not a mistake in sight from either player. So let's talk about what they both got right.")
 
             // -- opening ---------------------------------------------------------------
@@ -106,16 +147,36 @@ object EnglishNarration : NarrationStrings {
             )
             Sentence.OpeningGenericNoMoves -> one("Both sides go for the centre and the faster development.")
             Sentence.OpeningBothDeveloped -> one("Both sides just developed.")
-            is Sentence.TheoryRunsOut -> one("Theory runs out around move ${sentence.moveNumber}.")
+            is Sentence.TheoryEnds -> listOf(
+                "Theory runs out around move ${sentence.moveNumber}, and ${phaseClause(sentence.standing)}.",
+                "By move ${sentence.moveNumber} the book is spent, and ${phaseClause(sentence.standing)}."
+            )
+            is Sentence.OpeningVerdict -> listOf(
+                "Out of the opening, ${phaseClause(sentence.standing)}.",
+                "Coming out of the opening, ${phaseClause(sentence.standing)}."
+            )
+            is Sentence.PhaseTurn -> phaseTurn(sentence)
 
             // -- connectives ----------------------------------------------------------------
-            is Sentence.SkipAhead -> listOf(
-                "The next few moves are just development and shuffling. Nothing breaks, so let's jump to move ${sentence.moveNumber}.",
-                "I'm skipping ahead here. A handful of quiet moves go by with nobody blinking, and we pick it up at move ${sentence.moveNumber}.",
-                "Nothing happens for a while. Both sides finish developing, and then we're at move ${sentence.moveNumber}, which is where it gets interesting."
-            )
+            is Sentence.SkipAhead -> when (sentence.kind) {
+                SkipKind.QUIET -> listOf(
+                    "A few quiet moves follow, no captures and no checks, and we pick it up at move ${sentence.moveNumber}.",
+                    "Nothing is taken and nobody gives check for a while, so on to move ${sentence.moveNumber}.",
+                    "Quiet moves, no captures, no checks. We rejoin at move ${sentence.moveNumber}."
+                )
+                SkipKind.TRADES -> listOf(
+                    "There are trades along the way, and we pick it up at move ${sentence.moveNumber}.",
+                    "Some pieces come off, and then we're at move ${sentence.moveNumber}.",
+                    "A few trades later, it's move ${sentence.moveNumber}."
+                )
+                SkipKind.PLAIN -> listOf(
+                    "Let's jump to move ${sentence.moveNumber}.",
+                    "Skipping ahead to move ${sentence.moveNumber}.",
+                    "On to move ${sentence.moveNumber}."
+                )
+            }
             is Sentence.JumpTo -> listOf("Forward to move ${sentence.moveNumber}. ", "Next stop, move ${sentence.moveNumber}. ", "Jumping to move ${sentence.moveNumber}. ")
-            Sentence.ALittleLater -> listOf("A couple of moves later, ", "Two moves on, ", "Shortly after that, ")
+            Sentence.ALittleLater -> listOf("A little later, ", "After that, ", "Shortly after that, ")
 
             // -- the played move ---------------------------------------------------------
             is Sentence.Played -> one(moveClause(sentence.subject, sentence.verb, sentence.move, sentence.recapture))
@@ -125,15 +186,37 @@ object EnglishNarration : NarrationStrings {
             Sentence.StillTheory -> listOf("Still theory.", "All book so far.", "Nothing new yet.")
             Sentence.OnlyLegalMove -> one("That was the only legal move, so there's no decision to make.")
             Sentence.KingTuckedAway -> listOf("King's tucked away.", "Safety first.", "Good, the king's off the middle.")
-            Sentence.BrilliantFlavour -> one("And that is a brilliant move. It gives material away and the engine loves it anyway.")
-            Sentence.GreatFlavour -> one("That was the only move that held, and it got found.")
+            Sentence.BrilliantFlavour -> listOf(
+                "A brilliant move! It gives material away, and the engine loves it anyway.",
+                "That's brilliant! The material goes, and the engine still approves."
+            )
+            Sentence.GreatFlavour -> listOf(
+                "That was the only move that held, and it got found.",
+                "The only move that held, and it was found.",
+                "Only move. And it was found."
+            )
             Sentence.BestFlavour -> listOf("Top of the engine's list.", "Best move on the board.", "The engine agrees.")
             Sentence.CheckForcesReply -> one("Check, so the reply is forced.")
             Sentence.Filler -> listOf("Sensible.", "No complaints.", "Fine.", "")
 
             // -- mate --------------------------------------------------------------------
-            Sentence.MateClosing -> listOf("And that's the game.", "That's it. Game over.", "And there it is.")
-            is Sentence.MateFinish -> one(if (sentence.subject.person == Person.SECOND) "You finish it off." else "${side(sentence.subject.color)} wins.")
+            is Sentence.MateAnnounce -> {
+                val n = number(sentence.mateIn)
+                listOf(
+                    "This is a forced mate in $n.",
+                    "From here it is mate in $n, by force.",
+                    "Mate in $n, and nothing can stop it."
+                )
+            }
+            is Sentence.MateStep -> {
+                val phrase = Vocabulary.movePhrase(sentence.move)
+                listOf("${cap(phrase)}.", "Then $phrase.")
+            }
+            is Sentence.MateFinish -> if (sentence.subject.person == Person.SECOND) listOf("You win it!", "Game over, and you win!")
+            else {
+                val w = side(sentence.subject.color)
+                listOf("Game over. $w wins!", "And that's the game: $w wins!", "$w wins it!")
+            }
             Sentence.MateOnReceivingEnd -> one("And that's you on the receiving end of it.")
 
             // -- found tactic --------------------------------------------------------------
@@ -143,7 +226,11 @@ object EnglishNarration : NarrationStrings {
                 val what = materialPayoff(sentence.payoff)
                 listOf("That's $what in the bank.", "${cap(what)}, just like that.", "So that's $what.")
             }
-            Sentence.PressureNoMaterialYet -> one("It doesn't win material yet, but the pressure is real.")
+            Sentence.PressureNoMaterialYet -> listOf(
+                "It doesn't win material yet, but the pressure is real.",
+                "No material changes hands yet, but the pressure is on.",
+                "Nothing is won yet, but the pressure builds."
+            )
             Sentence.GoodSolid -> one("Good, solid stuff.")
 
             // -- errors --------------------------------------------------------------------
@@ -168,16 +255,53 @@ object EnglishNarration : NarrationStrings {
                 val before = standing(sentence.before)
                 val after = standing(sentence.after)
                 listOf(
-                    "${cap(who)} ${was(s)} $before before that. Now $who ${be(s)} $after.",
-                    "That's $before turning into $after in a single move.",
-                    "${cap(who)} ${have(s)} gone from $before to $after."
+                    "${cap(who)} ${was(s)} $before. Now $who ${be(s)} $after.",
+                    "That takes $who from $before to $after.",
+                    "${cap(who)} ${have(s)} slipped from $before to $after."
                 )
             }
-            is Sentence.BetterWas -> {
+            is Sentence.BetterHere -> {
                 val phrase = Vocabulary.movePhrase(sentence.move)
-                // "and everything holds" claimed the better move holds a position that may already be
-                // lost; the engine's top move gives nothing away by definition, which is what is said (C1).
-                listOf("${cap(phrase)} was the move.", "Instead, $phrase, which gives nothing away.", "The move was $phrase.")
+                when (val r = sentence.result) {
+                    BetterResult.Plain -> listOf("${cap(phrase)} was the move.", "The move was $phrase.", "Instead, $phrase.")
+                    is BetterResult.Mates -> {
+                        val n = number(r.mateIn)
+                        listOf(
+                            "${cap(phrase)} was the move: mate in $n.",
+                            "The move was $phrase, forcing mate in $n.",
+                            "Instead, $phrase, and it is mate in $n."
+                        )
+                    }
+                    is BetterResult.Wins -> {
+                        val what = materialGain(r.gain)
+                        listOf(
+                            "${cap(phrase)} was the move, winning $what.",
+                            "The move was $phrase, which wins $what.",
+                            "Instead, $phrase wins $what."
+                        )
+                    }
+                }
+            }
+            is Sentence.AllowsMate -> {
+                val n = number(sentence.mateIn)
+                listOf(
+                    "That allows a forced mate in $n.",
+                    "It walks into a forced mate in $n.",
+                    "After that, there is a forced mate in $n."
+                )
+            }
+            is Sentence.PlayedThenReply -> {
+                val clause = moveClause(sentence.subject, sentence.verb, sentence.move, sentence.recapture)
+                val phrase = Vocabulary.movePhrase(sentence.reply)
+                val wins = sentence.gain?.let { ", winning ${materialGain(it)}" } ?: ""
+                val opp = subject(sentence.opponent)
+                // No "lets", "allows" or "can play": those are the words the claim checker reads a charge by
+                // (ClaimChecker.CHARGE_VERB), and this sentence names no charge of its own.
+                listOf(
+                    "$clause, and now $opp has $phrase$wins.",
+                    "$clause, but $opp has the reply $phrase$wins.",
+                    "$clause, and $opp can answer with $phrase$wins."
+                )
             }
             is Sentence.MateWasAvailable ->
                 one("There was mate in ${number(sentence.mateIn)} on the board, starting with ${Vocabulary.movePhrase(sentence.move)}.")
@@ -186,13 +310,26 @@ object EnglishNarration : NarrationStrings {
                 "and now look what's available.",
                 "and the reply is unpleasant."
             )
-            is Sentence.EvalShift -> one(
-                if (sentence.favours) "The evaluation moves in ${possessive(sentence.subject)} favour."
-                else "The evaluation moves against ${subject(sentence.subject)}."
-            )
+            is Sentence.PlayedSlip -> {
+                val clause = moveClause(sentence.subject, sentence.verb, sentence.move, sentence.recapture)
+                listOf("$clause, a small slip.", "$clause, which is slightly off.", "$clause, but not the most precise.")
+            }
+            is Sentence.SmallSwing -> {
+                val who = subject(sentence.subject)
+                val poss = possessive(sentence.subject)
+                if (sentence.favours) listOf(
+                    "That helps $who.",
+                    "It nudges the game ${if (sentence.subject.person == Person.SECOND) "your" else "${side(sentence.subject.color)}'s"} way.",
+                    "${cap(poss)} position improves."
+                ) else listOf(
+                    "That gives a little back.",
+                    "It costs $who a little.",
+                    "${cap(poss)} position slips a little."
+                )
+            }
             Sentence.InaccuracyNote -> listOf(
-                "It's not losing, it's just loose.",
-                "That's an inaccuracy — playable, but it gives something back.",
+                "A small slip.",
+                "That's an inaccuracy: playable, but it gives something back.",
                 "Slightly off."
             )
 
@@ -206,6 +343,15 @@ object EnglishNarration : NarrationStrings {
                     "Pause here. A stronger continuation was available. ",
                     "Hold the position a moment: there was a better move than the one played. "
                 )
+            is Sentence.PivotQuestion -> {
+                val w = side(sentence.side)
+                if (coach) listOf(
+                    "Hold on, back up. Can you see what $w missed? ",
+                    "Let's rewind. Do you see what $w missed here? ",
+                    "Freeze it there. Can you see what $w missed? "
+                )
+                else listOf("A stronger move was available to $w. ", "$w had something better here. ")
+            }
             is Sentence.PivotReveal -> {
                 val phrase = Vocabulary.movePhrase(sentence.move)
                 if (coach) listOf("The move is $phrase.", "It starts with $phrase.", "The move was $phrase.")
@@ -227,20 +373,13 @@ object EnglishNarration : NarrationStrings {
                 val what = materialGain(sentence.gain)
                 listOf("That is $what off the board.", "That is $what, collected.", "And there goes $what.")
             }
-            Sentence.CheckMustBeAnswered -> listOf(
-                "The king has to answer that first, which is the whole point of the move order.",
-                "Check, so the reply is not a choice.",
-                "The king comes under fire, and nothing else gets done."
-            )
             is Sentence.AlreadyUp -> {
                 val s = sentence.subject
-                one("${cap(subject(s))} ${be(s)} already ${materialGain(sentence.gain)} up here, and the pressure is not going away.")
+                listOf(
+                    "${cap(subject(s))} ${be(s)} already ${materialGain(sentence.gain)} up.",
+                    "${cap(subject(s))} ${be(s)} ${materialGain(sentence.gain)} up already."
+                )
             }
-            Sentence.QuietMove -> listOf(
-                "No fireworks. It just keeps everything pointed at the same weakness.",
-                "That is the quiet move, and it is the one that makes the rest work.",
-                "Nothing is captured, and nothing has to be. The threat does the work."
-            )
             Sentence.OnlyLegalReply -> one("There is nothing else legal.")
             Sentence.ForcedByCheck -> listOf(
                 "Forced — the king was in check, so nothing else was even legal.",
@@ -249,11 +388,6 @@ object EnglishNarration : NarrationStrings {
             Sentence.RecaptureNatural -> listOf(
                 "Taking back is the natural answer, and it changes nothing.",
                 "The recapture is more or less forced, and it does not help."
-            )
-            Sentence.BestDefence -> listOf(
-                "That is the best defence on offer.",
-                "That is the toughest try in the position.",
-                "That is the engine's own choice, so nothing better exists."
             )
             Sentence.PayoffLead ->
                 if (coach) listOf("And there it is. ", "So add it up. ", "Now look at the end of that line. ")
@@ -281,6 +415,13 @@ object EnglishNarration : NarrationStrings {
                     }
                 )
             }
+            is Sentence.PayoffStanding -> {
+                val s = sentence.subject
+                listOf(
+                    "The line ends there, with ${subject(s)} ${standing(sentence.standing)}.",
+                    "That is as far as it goes, and ${subject(s)} ${be(s)} ${standing(sentence.standing)}."
+                )
+            }
             is Sentence.MateBehindIt -> one("And there was mate in ${number(sentence.mateIn)} behind it.")
             // Said after "Back to the game now." (V4), so none of them says "back" again.
             Sentence.PivotOut ->
@@ -297,8 +438,8 @@ object EnglishNarration : NarrationStrings {
             Sentence.BackToTheGame -> one("Back to the game now.")
             Sentence.ChanceGone ->
                 if (coach) listOf(
-                    "And the chance is gone. It does not come back.",
-                    "The moment passes, and that is that.",
+                    "And the chance is gone.",
+                    "The moment passes.",
                     "And with that, the window shuts."
                 ) else listOf(
                     "The opportunity does not recur.",
@@ -334,98 +475,103 @@ object EnglishNarration : NarrationStrings {
             }
 
             // -- turning point -------------------------------------------------------------
-            Sentence.TurningPointLead ->
-                if (coach) listOf(
-                    "And that is the turning point of the whole game. ",
-                    "Stop there, because that is the moment the game changed hands. ",
-                    "That right there is where this game was decided. "
-                ) else listOf(
-                    "This is the largest evaluation swing in the game. ",
-                    "This move produces the decisive change in evaluation. "
-                )
-            is Sentence.TurningPointSwing -> one("Nothing else in this game swings the evaluation like move ${sentence.moveNumber}.")
-            is Sentence.TurningPointFromTo ->
-                one("${cap(subject(sentence.subject))} went from ${standing(sentence.before)} to ${standing(sentence.after)} on one move.")
+            is Sentence.TurningPointLead ->
+                if (sentence.significant) {
+                    if (coach) listOf("That was the turning point. ", "That's where the game turned. ", "And that was the turning point. ")
+                    else listOf("This is the largest evaluation swing in the game. ", "This move produces the decisive change in evaluation. ")
+                } else {
+                    if (coach) listOf("That was the biggest slip of the game. ", "If there is a turning point, that is it. ")
+                    else listOf("This is the largest evaluation swing in the game. ")
+                }
+            is Sentence.TurningPointSwing -> listOf(
+                "No other move in this game cost as much.",
+                "Nothing else in this game swings the evaluation like move ${sentence.moveNumber}."
+            )
+            is Sentence.TurningAftermath -> {
+                val side = side(sentence.side)
+                when (sentence.kind) {
+                    AftermathKind.NEVER_BACK -> listOf("From there, $side never gave the lead back.", "From then on, $side stayed ahead.")
+                    AftermathKind.FOUGHT_BACK -> {
+                        val back = if (sentence.standing?.leader == sentence.side) "ahead again" else "back to level"
+                        listOf("It wasn't over: $side was $back by move ${sentence.moveNumber}.")
+                    }
+                }
+            }
 
             // -- outro ----------------------------------------------------------------------
-            Sentence.OutroLead -> listOf("Right, numbers. ", "Let's put numbers on it. ", "So where did that leave us? ")
-            is Sentence.OutroAccuracy ->
-                one("${sentence.white} finished on ${sentence.whiteAccuracy} percent accuracy, ${sentence.black} on ${sentence.blackAccuracy} percent.")
-            is Sentence.OutroRatings -> one("That's play at roughly ${sentence.whiteRating} and ${sentence.blackRating}.")
-            is Sentence.NoMistakes -> one("${sentence.name} did not make a single mistake the engine cares about.")
-            is Sentence.ErrorCounts -> {
-                val parts = ArrayList<String>()
-                if (sentence.blunders > 0) parts.add("${number(sentence.blunders)} ${plural("blunder", sentence.blunders)}")
-                if (sentence.mistakes > 0) parts.add("${number(sentence.mistakes)} ${plural("mistake", sentence.mistakes)}")
-                if (sentence.misses > 0) parts.add("${number(sentence.misses)} missed ${plural("win", sentence.misses)}")
-                if (sentence.inaccuracies > 0) parts.add("${number(sentence.inaccuracies)} ${plural("inaccuracy", sentence.inaccuracies)}")
-                one("${sentence.name} had ${listJoin(parts)}.")
+            is Sentence.OutroEnding -> {
+                val n = moveCount(sentence.fullMoves)
+                val w = sentence.winner?.let { side(it) }
+                when {
+                    w != null && sentence.byMate -> listOf("$w won by checkmate on move ${sentence.fullMoves}.", "It ended in checkmate: $w wins on move ${sentence.fullMoves}.")
+                    w != null -> listOf("$w won after $n.", "$w took the win after $n.")
+                    sentence.drawn -> listOf("It ended in a draw after $n.", "The game was drawn after $n.")
+                    else -> one("The game stops after $n.")
+                }
             }
-            Sentence.ShortGameCaveat -> one("It's a short game, so treat those rating estimates as a rough guide rather than gospel.")
+            is Sentence.OutroDecider -> {
+                val s = sentence.mover
+                val noun = errorNoun(sentence.classification)
+                val poss = possessive(s)
+                val who = subject(s)
+                listOf(
+                    "The decisive moment was $poss $noun on move ${sentence.moveNumber}, which took $who from ${standing(sentence.before)} to ${standing(sentence.after)}.",
+                    "It all came down to $poss $noun on move ${sentence.moveNumber}: ${cap(who)} went from ${standing(sentence.before)} to ${standing(sentence.after)}."
+                )
+            }
+            Sentence.OutroNoDecider -> listOf("There was no single decisive mistake.", "Neither side made one decisive mistake.")
 
             // -- lessons ---------------------------------------------------------------------
             is Sentence.LessonLead -> buildList {
-                add("So what do you take away from this? ")
-                add(if (sentence.count == 1) "Here's the one thing to actually work on. " else "Here's what to actually work on. ")
-                // A lead that counts the lessons is only used when the count is right.
-                when (sentence.count) {
-                    2 -> add("Two things to take out of this game. ")
-                    3 -> add("Three things to take out of this game. ")
-                    4 -> add("Four things to take out of this game. ")
+                if (sentence.count == 1) {
+                    add("So what's the takeaway? ")
+                    add("Here's the one thing to take away. ")
+                    add("One thing to take out of this game. ")
+                } else {
+                    add("So what do you take away from this? ")
+                    add("Here's what to actually work on. ")
+                    // A lead that counts the lessons is only used when the count is right.
+                    when (sentence.count) {
+                        2 -> add("Two things to take out of this game. ")
+                        3 -> add("Three things to take out of this game. ")
+                        4 -> add("Four things to take out of this game. ")
+                    }
                 }
             }
-            is Sentence.LessonRepeatedMiss -> {
-                val squares = sentence.squares.map { Vocabulary.square(it) }
-                val where = when (squares.size) {
-                    0 -> ""
-                    1 -> " The one that hurt was on ${squares[0]}."
-                    else -> " They were on ${listJoin(squares)}."
+            is Sentence.TakeawayMissed -> {
+                val who = subject(sentence.subject)
+                val miss = "$who missed ${EnglishGrammar.withArticle(tacticName(sentence.type))}"
+                val move = sentence.better?.let { " ${cap(Vocabulary.movePhrase(it))} was the move." } ?: ""
+                listOf("At move ${sentence.moveNumber}, $miss.$move", "Look at move ${sentence.moveNumber}. ${cap(miss)}.$move")
+            }
+            is Sentence.TakeawayAllowed -> {
+                val opp = side(sentence.opponent)
+                val tail = when {
+                    sentence.mateIn != null -> " It allowed a forced mate in ${number(sentence.mateIn)}."
+                    sentence.reply != null -> " $opp could answer with ${Vocabulary.movePhrase(sentence.reply)}."
+                    else -> ""
                 }
-                one("${cap(subject(sentence.subject))} walked past ${countedTactic(sentence.type, sentence.count)} in this game.$where")
+                listOf("Move ${sentence.moveNumber} let $opp in.$tail", "At move ${sentence.moveNumber}, the door opened for $opp.$tail")
             }
-            is Sentence.LessonSingleMiss -> {
-                val at = sentence.moveNumber?.let { " at move $it" } ?: ""
-                val where = sentence.square?.let { " The one that hurt was on ${Vocabulary.square(it)}." } ?: ""
-                one("The one thing ${subject(sentence.subject)} left on the board was ${EnglishGrammar.withArticle(tacticName(sentence.type))}$at.$where")
+            is Sentence.TakeawayCostly -> {
+                val severity = lossSeverity(sentence.severity)
+                val bands = if (sentence.before != sentence.after) ", from ${standing(sentence.before)} to ${standing(sentence.after)}" else ""
+                listOf("Move ${sentence.moveNumber} gave up $severity$bands.", "At move ${sentence.moveNumber}, ${subject(sentence.subject)} gave up $severity$bands.")
             }
-            is Sentence.LessonLateErrors -> one(
-                "Every one of ${possessive(sentence.subject)} ${number(sentence.count)} errors came after move ${sentence.afterMove}, " +
-                    "once the pieces were out and real decisions started. That's a calculation problem, not an opening problem — " +
-                    "give yourself an extra thirty seconds the moment the position opens up."
-            )
-            is Sentence.LessonSpreadErrors -> one(
-                "${cap(possessive(sentence.subject))} mistakes ran from move ${sentence.firstMove} to move ${sentence.lastMove}, " +
-                    "so they're spread right across the game rather than bunched at the end. That usually means the checks are missing, not the stamina."
-            )
-            is Sentence.LessonOneMistake -> one(
-                "One mistake. Move ${sentence.moveNumber} cost ${sentence.lossPercent} percent of the position on its own, and everything else " +
-                    "${subject(sentence.subject)} played was fine. A game like this is decided by one moment, so the drill is " +
-                    "simple: on every move where material can change hands, stop and check the whole board."
-            )
-            is Sentence.LessonGifts -> one(
-                "${cap(subject(sentence.subject))} handed over a tactic ${number(sentence.count)} times in this game — moves that were fine " +
-                    "in themselves but let something in. Before you commit, ask one question: what does this let them do next?"
+            Sentence.TakeawayClean -> one("Neither side made a decisive mistake, so the habit to keep is simple: check what every move allows.")
+            Sentence.TakeawayHabitAllowed -> one("Before you commit, ask one question: what does this let them do next?")
+            is Sentence.TakeawayHabitStanding -> one(
+                when (sentence.standing) {
+                    Standing.COMPLETELY_WINNING, Standing.WINNING, Standing.CLEARLY_BETTER ->
+                        "When you're ahead, slow down. Check every capture and every check before you move."
+                    Standing.A_LITTLE_BETTER, Standing.ABOUT_LEVEL ->
+                        "In a level position, every move counts. Check every capture and every check before you move."
+                    else -> "Even when you're worse, don't rush. Check every capture and every check before you move."
+                }
             )
             is Sentence.LessonMatedButNotTheMistake -> one(
-                "${cap(subject(sentence.subject))} got mated at the end, but the mate wasn't the mistake — move ${sentence.turningMove} was. " +
-                    "By the time the king was getting hit there was nothing left to defend with. Fix move ${sentence.turningMove} and the mate never happens."
-            )
-            is Sentence.LessonOpponentMissedToo -> {
-                val s = sentence.subject
-                val their = if (s.person == Person.SECOND) "your" else "their"
-                one(
-                    "Worth knowing: the other side left ${countedTactic(sentence.type, sentence.count)} on the board too, and " +
-                        "${subject(s)} converted ${number(sentence.converted)} ${plural("chance", sentence.converted)} of $their own. " +
-                        "Both players are missing the same kind of thing, which means whoever drills it first wins the rematch."
-                )
-            }
-            is Sentence.LessonPositive -> one(
-                "${cap(subject(sentence.subject))} found the engine's top move ${timesWord(sentence.bestMoves)} out of ${sentence.totalMoves}, " +
-                    "for ${sentence.accuracy} percent. The plan-making is working; the gap is in the tactics, and tactics are the part you can drill."
-            )
-            is Sentence.LessonRatingAnchor -> one(
-                "${cap(subject(sentence.subject))} came out of this at ${sentence.accuracy} percent, which the model reads as about ${sentence.rating}. " +
-                    "The next step up is fewer than one blunder a game, and that's a habit, not talent."
+                "${cap(subject(sentence.subject))} got mated at the end, but the mate wasn't the mistake. Move ${sentence.turningMove} was. " +
+                    "Fix it and the mate never happens."
             )
         }
     }
@@ -594,6 +740,79 @@ object EnglishNarration : NarrationStrings {
         Standing.CLEARLY_WORSE -> "clearly worse"
         Standing.LOSING -> "losing"
         Standing.COMPLETELY_LOST -> "decisively lost"
+    }
+
+    /** "the position is about level" / "White is slightly better": a phase standing as a clause. */
+    private fun phaseClause(p: PhaseStanding): String = when {
+        p == PhaseStanding.BALANCED -> "the position is about level"
+        else -> "${side(p.leader!!)} is ${phaseWords(p)}"
+    }
+
+    /** The spoken bands, folded: edge / clear / decisive. */
+    private fun phaseWords(p: PhaseStanding): String = when (p.level) {
+        1 -> "slightly better"
+        2 -> "clearly better"
+        3 -> "winning"
+        else -> "about level"
+    }
+
+    /** "after Black's blunder on move 11" / "after winning a knight" / "with a forced mate in three": why a phase began. */
+    private fun causeClause(cause: PhaseCause?): String = when (cause) {
+        null -> ""
+        is PhaseCause.Error -> ", after ${side(cause.color)}'s ${errorNoun(cause.classification)} on move ${cause.moveNumber}"
+        is PhaseCause.WonMaterial -> ", after winning ${materialGain(cause.gain)}"
+        is PhaseCause.MateFound -> ", with a forced mate in ${number(cause.mateIn)}"
+    }
+
+    private fun errorNoun(c: MoveClassification): String = when (c) {
+        MoveClassification.BLUNDER -> "blunder"
+        MoveClassification.MISTAKE -> "mistake"
+        MoveClassification.MISS -> "missed win"
+        else -> "slip"
+    }
+
+    /**
+     * A phase boundary in a sentence: who took the lead, who let it go, or that it was level again, with the reason
+     * when the boards prove one (`PhaseCause`).
+     */
+    private fun phaseTurn(t: Sentence.PhaseTurn): List<String> {
+        val why = causeClause(t.cause)
+        val to = t.to
+        val from = t.from
+        val newLeader = to.leader
+        val oldLeader = from.leader
+        return when {
+            newLeader == null -> {
+                val x = side(oldLeader!!)
+                val y = side(oldLeader.opposite())
+                if (t.cause is PhaseCause.Error && t.cause.color == oldLeader) listOf(
+                    "$x gave up the advantage with a ${errorNoun(t.cause.classification)} on move ${t.cause.moveNumber}, and it was level again.",
+                    "It was level again$why."
+                ) else listOf(
+                    "$y fought back to level$why.",
+                    "It was level again$why."
+                )
+            }
+            oldLeader != null && oldLeader != newLeader -> {
+                val n = side(newLeader)
+                listOf(
+                    "The game turned$why: $n was ${phaseWords(to)} now.",
+                    "$n took over$why, and was ${phaseWords(to)}."
+                )
+            }
+            to.level > from.level -> {
+                val n = side(newLeader)
+                when (to.level) {
+                    1 -> listOf("$n edged ahead$why.", "$n got a small edge$why.")
+                    2 -> listOf("$n built a clear edge$why.", "$n took control$why.")
+                    else -> listOf("$n was winning now$why.", "$n's edge became a winning one$why.")
+                }
+            }
+            else -> {
+                val n = side(newLeader)
+                listOf("$n's grip loosened$why: only ${phaseWords(to)} now.", "$n gave some ground$why, and was only ${phaseWords(to)} now.")
+            }
+        }
     }
 
     private fun lossSeverity(l: LossSeverity): String = when (l) {

@@ -171,9 +171,11 @@ class BestLineVideoTest {
 
     @Test
     fun `game01 and the Opera Game show lines, and a viewer's side changes no move`() {
-        for ((name, g) in listOf("game01" to RealGameFixture.game01, "chesscom" to RealGameFixture.chesscom)) {
+        for ((name, g) in listOf("game01" to RealGameFixture.game01, "chesscom" to RealGameFixture.chesscom, "immortal" to RealGameFixture.immortal)) {
             val (_, s) = script(g, VideoPace.NORMAL)
-            assertTrue("$name has at least one played-out best line", s.segments.any { it.bestLine != null })
+            // game01's errors are all told as full detours or as errors with their own words since NS (the budget no
+            // longer thins them), so it may have no key moment left that only names the better move; the other two do.
+            if (name != "game01") assertTrue("$name has at least one played-out best line", s.segments.any { it.bestLine != null })
             val (_, white) = script(g, VideoPace.NORMAL, Color.WHITE)
             val (_, black) = script(g, VideoPace.NORMAL, Color.BLACK)
             for (other in listOf(white, black)) {
