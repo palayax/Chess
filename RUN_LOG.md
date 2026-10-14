@@ -4979,3 +4979,39 @@ the main log that the emulator's shutdown lost before it was read; two repeats o
 
 APKs: `dist/PalayaChess-1.1-arm64-c480901.apk` (40,098,245 B) and `-universal-c480901.apk`, release cert SHA-256
 ca4f7b42….
+
+---
+
+## EL: Elo engine levels + game time budget (2026-10-14)
+
+Owner: "Auto mode takes half an hour on a Pixel 8; I need a review in up to 10 minutes on such phones. Change the analysis depth
+levels into Elo (2500 up to engine max), like DroidFish. The time estimation is far from correct." Design and numbers:
+ANALYSIS_SPEC §8.6 (new), §8.4 (estimates), §8.5 marked legacy.
+
+### What was built
+- `EngineLevel` (2500 / 2700 / 2900 / 3100 default / Max, codes stored in the old `depth` Int; legacy depths 6..30 unchanged),
+  `GameTimeBudget` + `GAME_ENGINE_BUDGET_MS` (5 min for the whole first pass), `SearchBudget.forLevel` (key `lvl<code>:n<nodes>:g<budget>`).
+- `AnalysisService`: a level searches `go depth 60 nodes N movetime T` with T from the budget (resumed run: its share); Max has no
+  node limit; `PositionEval.timeCapped` (core, cache JSON) replaces "depth below requested" for levels; start line logs level,
+  budget and native variant.
+- Estimates: sliding window of the last 8 positions (`RecentSpeed`), min(nodes x speed, budget left), Max = budget left from the
+  first position; the Review options screen shows the whole review (engine + measured other stages); `withEngine` blends 0.7/0.3;
+  the overall engine time-left now includes legacy Auto's second pass and keeps updating during it (it stopped once pass 1 ended).
+- UI: Settings "Engine level" (2500 / 2700 / 2900 / 3100 / Max), Review options lists the five levels, Summary card "Analysed at about
+  2900" / "Analysed at Max" (old games keep Quick / Standard / Deep / Auto). Auto is never offered again; its code path stays.
+- Settings default: new install 3100; a stored legacy depth (or Auto) is mapped with `forLegacyDepth` on read, not rewritten.
+
+### Verified (host only)
+Pure-Kotlin tests compiled and run with a scratch Gradle project over the repo sources (no Android SDK here): `PositionEvalCappedTest` 3,
+`EngineLevelTest` 7, `AnalysisTimeLeftTest` 17, `ReviewPipelineLogicTest` 10, `ReviewOptionsLogicTest` 15, `GameStrengthLogicTest` 9,
+`SearchBudgetTest` 13, `AnalysisFractionTest` 5: all passed. The pure `:core` change is a single field.
+
+### NOT verified
+- `:app` was not compiled (no Android SDK): `AnalysisService`, `AnalysisViewModel`, `SettingsRepository`, `GameRepository`, the three
+  screens and `strings.xml` are self-reviewed only. `SettingsLogicTest` and `GameRepositoryReviewOptionsTest` need Android classes and
+  were edited, not run. No device run: no real search at a level, no check that the 5-minute budget really gives ~10 minutes on a
+  Pixel 8, no check of the Elo labels (an approximation, spec §8.6; measure with a gauntlet on the app's binary).
+- The instrumented tests that drove Quick / Standard in the UI (`ReviewOptionsInstrumentedTest`, `A4AnalyticsInstrumentedTest`,
+  `FamousGames`, `RephraseFlow`) were edited to the 2500 / 2900 levels and labels but not run; `AutoDepthInstrumentedTest` and the
+  other direct `AnalysisService` tests still use legacy depths on purpose.
+

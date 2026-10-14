@@ -36,7 +36,10 @@ import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisFraction
 import net.palaya.chessanalyzer.ui.model.AnalysisProgress
 import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
+import net.palaya.chessanalyzer.ui.model.GAME_ENGINE_BUDGET_MS
+import net.palaya.chessanalyzer.ui.model.GameTimeBudget
 import net.palaya.chessanalyzer.ui.model.SearchBudget
 
 /**
@@ -137,23 +140,34 @@ class AnalysisService(
         val game = games.getOrElse(gameIndex) { games[0] }
         val userColor = detectUserColor(game, username)
         val budget = settings.searchBudget
-        val auto = settings.autoDepth
+        // Elo level (spec §8.6): the depth Int is a level code; a legacy depth (an old game reopened or resumed) is null.
+        val level: EngineLevel? = settings.level
+        val auto = settings.autoDepth && level == null
         val deepStrength = AutoDepthBudget.deep
         val autoLog = if (auto) {
             ", auto-depth: critical positions again at depth ${deepStrength.depth}, node budget " +
                 "${deepStrength.budget.nodes}, time cap ${deepStrength.budget.movetimeMs} ms, policy ${AdaptiveDepth.POLICY_VERSION}"
         } else ""
+        val variant = runCatching { engineController.engineOrNull()?.nativeVariant }.getOrNull() ?: "not loaded yet"
+        val levelLog = if (level != null) {
+            "level ${level.name} (${if (level.isMax) "Max" else "about ${level.code}"}), node budget ${level.nodes ?: "none"}, " +
+                "game engine budget $GAME_ENGINE_BUDGET_MS ms, min ${GameTimeBudget(GAME_ENGINE_BUDGET_MS).minPerPositionMs} ms per position"
+        } else {
+            "depth ${settings.depth}, node budget ${budget.nodes}, time cap ${budget.movetimeMs} ms"
+        }
         diagnostics?.log(
             TAG,
-            "analysis start: depth ${settings.depth}, multipv ${settings.multiPv}, node budget ${budget.nodes}, " +
-                "time cap ${budget.movetimeMs} ms, threads ${EngineController.defaultThreads()}, " +
-                "hash ${EngineController.defaultHashMb()} MB, user side ${userColor ?: "unknown"}$autoLog\n" +
+            "analysis start: $levelLog, multipv ${settings.multiPv}, " +
+                "threads ${EngineController.defaultThreads()}, " +
+                "hash ${EngineController.defaultHashMb()} MB, native $variant, user side ${userColor ?: "unknown"}$autoLog\n" +
                 formatGameForLog(game),
         )
 
         // The budget is part of the key: a cached result is reused only under identical limits. The first pass
         // (every strength) is stored under [baseKey]; Auto's assembled result under its own key, which also
         // carries the deep tier and the policy version (spec §8.5).
+        // For a level the budget part is "lvl<code>:n<nodes>:g<game budget>": the per-position movetime is dynamic and
+        // is not in the key (spec §8.6).
         val baseKey = gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, budget.cacheKeyPart)
         val finalKey = if (auto) {
             gameRepository.cacheKey(pgnText, settings.depth, settings.multiPv, AutoDepthBudget.cacheKeyPart)
@@ -192,6 +206,7 @@ class AnalysisService(
                 diagnostics?.error(TAG, "engine missing after preparation")
                 return Outcome.EngineError(Failure.ENGINE_START)
             }
+            diagnostics?.log(TAG, "engine ready: native variant ${runCatching { engine.nativeVariant }.getOrNull() ?: "unknown"}")
             // Every result of this run is the loaded net's, so the checkpoint and the result go to its folder.
             val runPrefix = engineController.loadedNetName?.let { NetStore.prefixOf(it) } ?: gameRepository.currentNetPrefix()
 
@@ -205,40 +220,61 @@ class AnalysisService(
                 deepTypicalNodes = AutoDepthBudget.TYPICAL_DEEPENED_NODES,
                 expectedDeepPositions = expectedDeep,
             )
+            // Elo level (spec §8.6): the engine time of this run. A resumed run gets the budget's share of the positions
+            // it still has to do (set once the checkpoint is read); a legacy depth has none.
+            var runBudgetMs = if (level != null) GAME_ENGINE_BUDGET_MS else 0L
+            val progressOut: (AnalysisProgress) -> Unit = { p -> onProgress(p.copy(engineBudgetMs = runBudgetMs)) }
             // This run's own search totals, for the time-left estimate (spec §8.4).
             var runNodes = 0L
             var runSearchMs = 0L
             var runPositions = 0
+            val terminalDepth = if (level != null) EngineLevel.SEARCH_DEPTH else settings.depth
 
             // One engine search of [fen] at [depth] / [limits], with the "depth d of D" progress updates on top of
             // [searching], counted into this run's totals and logged (the spec §8.1 diagnostic line).
-            suspend fun searchPosition(index: Int, fen: String, depth: Int, limits: SearchBudget, searching: AnalysisProgress): PositionEval {
+            suspend fun searchPosition(
+                index: Int,
+                fen: String,
+                depth: Int,
+                limits: SearchBudget,
+                searching: AnalysisProgress,
+                positionsLeft: Int = 0,
+            ): PositionEval {
                 val startedAt = nowMs()
                 var shownDepth = 0
+                val levelSearch = level != null
+                val movetime = if (levelSearch) GameTimeBudget(runBudgetMs).movetimeFor(positionsLeft, runSearchMs) else limits.movetimeMs
+                val nodeLimit: Long? = if (levelSearch) level?.nodes else limits.nodes
                 val started = searching.copy(
-                    targetDepth = depth,
+                    // A level has no depth to reach: the "depth d of D" line stays hidden (targetDepth 0).
+                    targetDepth = if (levelSearch) 0 else depth,
                     positionStartedAtMs = startedAt,
                     runNodes = runNodes,
                     runSearchMs = runSearchMs,
                     runPositionsSearched = runPositions,
                 )
-                onProgress(started)
+                progressOut(started)
                 engine.setPosition(fen = fen)
                 val result = engine.analyze(
                     multiPv = settings.multiPv,
-                    depth = depth,
-                    movetimeMs = limits.movetimeMs,
-                    nodes = limits.nodes,
+                    depth = if (levelSearch) EngineLevel.SEARCH_DEPTH else depth,
+                    movetimeMs = movetime,
+                    nodes = nodeLimit,
                     onProgress = { p ->
                         // One update per new depth: the screen shows "depth 15 of 18", nothing finer.
                         if (p.depth != shownDepth) {
                             shownDepth = p.depth
-                            onProgress(started.copy(searchDepth = p.depth))
+                            progressOut(started.copy(searchDepth = p.depth))
                         }
                     },
                 )
-                val eval = toPositionEval(fen, result, depth)
                 val wallMs = nowMs() - startedAt
+                // A level search is capped when the clock stopped it before its node budget (Max is defined by time,
+                // so it is never capped). The clock must really have been the reason: a search that ended early for
+                // another reason (a forced line) is not flagged.
+                val timeCapped = levelSearch && nodeLimit != null &&
+                    result.nodes < nodeLimit * TIME_CAPPED_NODE_FRACTION && wallMs >= movetime * TIME_CAPPED_CLOCK_FRACTION
+                val eval = toPositionEval(fen, result, if (levelSearch) null else depth, timeCapped)
                 runNodes += result.nodes
                 runSearchMs += wallMs
                 runPositions++
@@ -249,7 +285,7 @@ class AnalysisService(
                         PositionLogLine(
                             index = index,
                             san = sanBefore(game, index),
-                            requestedDepth = depth,
+                            requestedDepth = if (levelSearch) EngineLevel.SEARCH_DEPTH else depth,
                             reachedDepth = result.depth,
                             nodes = result.nodes,
                             timeMs = wallMs,
@@ -289,9 +325,10 @@ class AnalysisService(
                     positionsDone = { computed.size }
                     computed.forEachIndexed { i, e -> onPositionEvaluated(i, e) }
                     val startIndex = computed.size
+                    if (level != null && total > 0) runBudgetMs = GAME_ENGINE_BUDGET_MS * (total - startIndex) / total
                     if (startIndex > 0) {
                         diagnostics?.log(TAG, "resuming from the checkpoint: $startIndex of $total positions already done")
-                        onProgress(
+                        progressOut(
                             AnalysisProgress(
                                 phase = AnalysisPhase.ANALYZING_MOVES,
                                 currentMoveIndex = startIndex,
@@ -308,13 +345,13 @@ class AnalysisService(
                         // anyway is pure latency at best, and the last ply of most annotated games IS
                         // such a position, so short-circuit it here rather than paying for a search
                         // whose answer we already know from the rules.
-                        val terminal = terminalEvalOrNull(fen, settings.depth)
+                        val terminal = terminalEvalOrNull(fen, terminalDepth, if (level != null) null else settings.depth)
                         val eval = if (terminal != null) {
                             val best = terminal.best
                             diagnostics?.log(
                                 TAG,
                                 formatPositionLine(
-                                    PositionLogLine(index, sanBefore(game, index), settings.depth, settings.depth, 0, 0, false, scoreText(best?.scoreCp, best?.mateIn)),
+                                    PositionLogLine(index, sanBefore(game, index), terminalDepth, terminalDepth, 0, 0, false, scoreText(best?.scoreCp, best?.mateIn)),
                                 ),
                             )
                             terminal
@@ -328,11 +365,12 @@ class AnalysisService(
                                     fractionComplete = bar.firstPass(index),
                                     deepPassExpected = expectedDeep,
                                 ),
+                                positionsLeft = total - index,
                             )
                         }
                         computed.add(eval)
                         onPositionEvaluated(index, eval)
-                        onProgress(
+                        progressOut(
                             AnalysisProgress(
                                 phase = AnalysisPhase.ANALYZING_MOVES,
                                 currentMoveIndex = index + 1,
@@ -420,7 +458,7 @@ class AnalysisService(
                             } else {
                                 diagnostics?.log(TAG, "pos ${d.index} was searched deeper ($why)")
                             }
-                            onProgress(
+                            progressOut(
                                 AnalysisProgress(
                                     phase = AnalysisPhase.ANALYZING_MOVES,
                                     currentMoveIndex = total,
@@ -525,7 +563,7 @@ class AnalysisService(
      * perspective; stalemate is a dead draw at 0 centipawns. Returns null for any position that
      * still has a legal move, which is the normal case.
      */
-    private fun terminalEvalOrNull(fen: String, depth: Int): PositionEval? {
+    private fun terminalEvalOrNull(fen: String, depth: Int, requestedDepth: Int? = depth): PositionEval? {
         val position = Position.fromFen(fen)
         if (position.legalMoves().isNotEmpty()) return null
         val line = if (position.isInCheck()) {
@@ -533,7 +571,7 @@ class AnalysisService(
         } else {
             EngineLineInput(multiPv = 1, scoreCp = 0, mateIn = null, depth = depth, pvUci = emptyList())
         }
-        return PositionEval(fen = fen, lines = listOf(line), depth = depth, requestedDepth = depth)
+        return PositionEval(fen = fen, lines = listOf(line), depth = depth, requestedDepth = requestedDepth)
     }
 
     /**
@@ -556,14 +594,14 @@ class AnalysisService(
      * so [PositionEval.depth] is that depth and the position is capped when it is below
      * [requestedDepth].
      */
-    internal fun toPositionEval(fen: String, result: AnalysisResult, requestedDepth: Int): PositionEval {
+    internal fun toPositionEval(fen: String, result: AnalysisResult, requestedDepth: Int?, timeCapped: Boolean = false): PositionEval {
         val lines = result.lines.map {
             EngineLineInput(multiPv = it.multiPv, scoreCp = it.scoreCp, mateIn = it.mateIn, depth = it.depth, pvUci = it.pvUci)
         }
         val effectiveLines = if (lines.isEmpty()) {
             listOf(EngineLineInput(multiPv = 1, scoreCp = null, mateIn = null, depth = result.depth, pvUci = listOf(result.bestMoveUci)))
         } else lines
-        return PositionEval(fen = fen, lines = effectiveLines, depth = result.depth, requestedDepth = requestedDepth)
+        return PositionEval(fen = fen, lines = effectiveLines, depth = result.depth, requestedDepth = requestedDepth, timeCapped = timeCapped)
     }
 
     private suspend fun openingBook(): OpeningBook = withContext(Dispatchers.IO) {
@@ -576,6 +614,12 @@ class AnalysisService(
     }
 
     companion object {
+        /** A level search is time-capped when it used less than this share of its node budget ... */
+        internal const val TIME_CAPPED_NODE_FRACTION = 0.95
+
+        /** ... and the clock (not another reason) ended it: it ran at least this share of its movetime. */
+        internal const val TIME_CAPPED_CLOCK_FRACTION = 0.8
+
         /**
          * Plies between partial-cache checkpoints: every ply (F1). A Deep position can take minutes
          * on a phone and Android may kill a backgrounded app at any point; the write is one small

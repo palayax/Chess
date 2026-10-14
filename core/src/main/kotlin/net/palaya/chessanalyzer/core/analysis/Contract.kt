@@ -46,9 +46,14 @@ data class PositionEval(
     val lines: List<EngineLineInput>,
     val depth: Int,
     val requestedDepth: Int? = null,
+    /**
+     * An Elo-level search (spec §8.6) has no depth to reach; it is capped when the game time budget stopped it
+     * before its node budget. False for fixed-depth searches and for caches written before levels.
+     */
+    val timeCapped: Boolean = false,
 ) {
-    /** True when the budget stopped this position's search below [requestedDepth]. */
-    val isCapped: Boolean get() = requestedDepth != null && depth < requestedDepth
+    /** True when the budget stopped this position's search below [requestedDepth], or the clock stopped a level search. */
+    val isCapped: Boolean get() = timeCapped || (requestedDepth != null && depth < requestedDepth)
 
     val best: EngineLineInput? get() = lines.minByOrNull { it.multiPv }
     val secondBest: EngineLineInput? get() = lines.filter { it.multiPv == 2 }.minByOrNull { it.multiPv }

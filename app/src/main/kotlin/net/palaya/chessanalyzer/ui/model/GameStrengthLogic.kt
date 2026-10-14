@@ -12,16 +12,21 @@ package net.palaya.chessanalyzer.ui.model
  */
 
 /**
- * What a game is analysed with: a search [depth] (a preset's, or an old custom one) and whether Auto-depth deepens
+ * What a game is analysed with: an Elo level code (spec §8.6), or a legacy search [depth] (a preset's, or an old custom one) and whether Auto-depth deepens
  * its critical moves afterwards (ANALYSIS_SPEC §8.5; [depth] is then Auto's first pass). A depth alone cannot say
  * Auto, so this pair is what the request, the stored game and the chooser carry.
  */
 data class AnalysisLevel(val depth: Int, val autoDepth: Boolean = false) {
-    /** The named strength, or null for an old custom depth. */
-    val strength: AnalysisStrength? get() = AnalysisStrength.of(depth, autoDepth)
+    /** The legacy named strength (Quick / Standard / Deep / Auto), or null for a level or an old custom depth. */
+    val strength: AnalysisStrength? get() = if (isLevel) null else AnalysisStrength.of(depth, autoDepth)
+
+    /** The Elo level (spec §8.6) when [depth] is a level code, else null (a game analysed before the levels). */
+    val engineLevel: EngineLevel? get() = EngineLevel.fromCode(depth)
+
+    val isLevel: Boolean get() = engineLevel != null
 
     companion object {
-        fun of(strength: AnalysisStrength): AnalysisLevel = AnalysisLevel(strength.depth, strength.autoDepth)
+        fun of(level: EngineLevel): AnalysisLevel = AnalysisLevel(level.code, autoDepth = false)
     }
 }
 
@@ -34,15 +39,15 @@ fun gameAnalysisLevel(explicit: AnalysisLevel?, stored: AnalysisLevel?, settings
     explicit ?: stored ?: settingsDefault
 
 /** One line of the "Re-analyse" chooser. */
-data class StrengthChoice(val strength: AnalysisStrength, val isCurrent: Boolean)
+data class StrengthChoice(val level: EngineLevel, val isCurrent: Boolean)
 
-/** The four strengths, Quick, Standard, Deep, then Auto; the one [current] is marked (none for a custom depth). */
+/** The five Elo levels (2500 .. Max); the one [current] is marked (none for a game analysed with an old depth or Auto). */
 fun strengthChoices(current: AnalysisLevel): List<StrengthChoice> =
-    AnalysisStrength.entries.map { StrengthChoice(it, isCurrent = it == current.strength) }
+    EngineLevel.entries.map { StrengthChoice(it, isCurrent = it == current.engineLevel) }
 
 /**
  * Whether "Re-analyse" can be pressed: something is picked and it differs from the strength the game
  * already has. (The same strength would hit the eval cache and change nothing.)
  */
-fun canReanalyse(current: AnalysisLevel, picked: AnalysisStrength?): Boolean =
-    picked != null && picked != current.strength
+fun canReanalyse(current: AnalysisLevel, picked: EngineLevel?): Boolean =
+    picked != null && picked != current.engineLevel

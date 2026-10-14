@@ -147,4 +147,76 @@ class AnalysisTimeLeftTest {
         assertNull("not analysing", thinkingDeeper(searching(10_000L, 15).copy(phase = AnalysisPhase.PREPARING_ENGINE), 60_000L))
         assertEquals("never past the target", 18 to 18, thinkingDeeper(searching(10_000L, depth = 19), 60_000L))
     }
+
+    // ---- Elo levels (spec §8.4, §8.6) ----
+
+    @Test
+    fun aLevelEstimateIsBoundedByTheEngineBudgetLeft() {
+        // 10 positions done of 81; 1 ms per node, level nodes 180,000: 71 x 180 s would be 12,780 s, the budget left decides.
+        val bounded = estimateAnalysisRemainingMs(
+            10, 81, runNodes = 1_800_000, runMs = 1_800_000, runPositions = 10, typicalNodes = 180_000, budgetLeftMs = 240_000,
+        )
+        assertEquals(240_000L, bounded)
+        // A fast phone: 0.001 ms per node: 71 x 180,000 x 0.001 = 12,780 ms, under the budget, so the nodes decide.
+        val fast = estimateAnalysisRemainingMs(
+            10, 81, runNodes = 1_800_000, runMs = 1_800, runPositions = 10, typicalNodes = 180_000, budgetLeftMs = 240_000,
+        )
+        assertEquals(12_780L, fast)
+        // Still hidden before enough positions were measured (a level that has a node count).
+        assertNull(estimateAnalysisRemainingMs(3, 81, runNodes = 540_000, runMs = 540, runPositions = 3, typicalNodes = 180_000, budgetLeftMs = 240_000))
+    }
+
+    @Test
+    fun maxIsTheBudgetLeftFromTheFirstPosition() {
+        assertEquals(
+            250_000L,
+            estimateAnalysisRemainingMs(1, 81, runNodes = 0, runMs = 0, runPositions = 0, typicalNodes = 0, budgetLeftMs = 250_000),
+        )
+        val tracker = AnalysisTimeLeftTracker(typicalNodes = 0, levelRun = true)
+        val shown = tracker.onProgress(progress(1, nodes = 1_000_000, ms = 4_000).copy(engineBudgetMs = 300_000))
+        assertEquals(ExportTimeLeft.Minutes(5), shown)
+    }
+
+    @Test
+    fun theSpeedIsTheLastEightPositionsNotTheWholeRun() {
+        val r = RecentSpeed()
+        assertNull(r.msPerNode())
+        // 20 positions at 1 ms per 1000 nodes (0.001), then the phone throttles to 0.004.
+        var nodes = 0L
+        var ms = 0L
+        for (p in 1..20) { nodes += 100_000; ms += 100; r.add(p, nodes, ms) }
+        assertEquals(0.001, r.msPerNode()!!, 1e-9)
+        for (p in 21..40) { nodes += 100_000; ms += 400; r.add(p, nodes, ms) }
+        // The whole-run average would be 0.0025; the window of 8 sees only the slow phone.
+        assertEquals(0.004, r.msPerNode()!!, 1e-9)
+        assertEquals(0.0025, ms.toDouble() / nodes, 1e-9)
+        // A repeated position count adds nothing.
+        r.add(40, nodes + 1, ms + 1)
+        assertEquals(0.004, r.msPerNode()!!, 1e-9)
+    }
+
+    @Test
+    fun theEstimateUsesTheRecentSpeedWhenGiven() {
+        val whole = estimateAnalysisRemainingMs(10, 81, runNodes = 1_000_000, runMs = 1_000, runPositions = 10, typicalNodes = 100_000)!!
+        val recent = estimateAnalysisRemainingMs(
+            10, 81, runNodes = 1_000_000, runMs = 1_000, runPositions = 10, typicalNodes = 100_000, recentMsPerNode = 0.004,
+        )!!
+        assertEquals(Math.round(71 * 100_000.0 * 0.001), whole)
+        assertEquals(Math.round(71 * 100_000.0 * 0.004), recent)
+    }
+
+    @Test
+    fun aLevelTrackerFollowsAThrottlingPhone() {
+        val tracker = AnalysisTimeLeftTracker(typicalNodes = 100_000, levelRun = true)
+        var nodes = 0L
+        var ms = 0L
+        var shown: ExportTimeLeft = ExportTimeLeft.Hidden
+        // Fast first: 0.1 s per position (0.001 ms per node)...
+        for (p in 1..20) { nodes += 100_000; ms += 100; shown = tracker.onProgress(progress(p, total = 100, nodes = nodes, ms = ms).copy(engineBudgetMs = 300_000)) }
+        val fast = shown
+        // ...then 4x slower: the shown time rises (it is only allowed to when plainly wrong, here 4x).
+        for (p in 21..40) { nodes += 100_000; ms += 400; shown = tracker.onProgress(progress(p, total = 100, nodes = nodes, ms = ms).copy(engineBudgetMs = 300_000)) }
+        assertTrue("$fast then $shown", fast is ExportTimeLeft.Minutes || fast == ExportTimeLeft.LessThanMinute)
+        assertTrue("$shown", shown is ExportTimeLeft.Minutes || shown == ExportTimeLeft.LessThanMinute)
+    }
 }

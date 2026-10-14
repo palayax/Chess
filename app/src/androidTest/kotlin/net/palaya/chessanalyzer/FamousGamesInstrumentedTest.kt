@@ -23,7 +23,7 @@ import net.palaya.chessanalyzer.data.models.GeneratedModelPins
 import net.palaya.chessanalyzer.data.models.ModelDownloader
 import net.palaya.chessanalyzer.data.models.ModelSetup
 import net.palaya.chessanalyzer.engine.NetStore
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.SideChoice
 import net.palaya.chessanalyzer.ui.screens.FAMOUS_SEARCH_TAG
@@ -197,7 +197,7 @@ class FamousGamesInstrumentedTest {
         runBlocking {
             val before = app.settingsRepository.current()
             settingsBefore = before
-            app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth, username = game.white))
+            app.settingsRepository.save(before.copy(depth = EngineLevel.L2500.code, username = game.white))
             // RF: straight to processing with the defaults (the side then comes from the famous game: "Not me").
             TestApp.reviewImportsWithDefaults()
         }

@@ -25,16 +25,30 @@ data class SearchBudget(
      * (spec §8.4), never as a limit, and not part of the cache key.
      */
     val typicalNodes: Long = nodes,
+    /** Set for an Elo level (spec §8.6): its cache key part, which must not hold the dynamic per-position movetime. */
+    private val levelKeyPart: String? = null,
 ) {
 
     /** Part of the eval-cache key: a result is reused only under identical limits. */
-    val cacheKeyPart: String get() = "n$nodes:t$movetimeMs"
+    val cacheKeyPart: String get() = levelKeyPart ?: "n$nodes:t$movetimeMs"
 
     companion object {
         // Calibration and the reasoning per number: docs/ANALYSIS_SPEC.md §8.1.
         val QUICK = SearchBudget(nodes = 4_000_000L, movetimeMs = 30_000L, typicalNodes = 500_000L)
         val STANDARD = SearchBudget(nodes = 25_000_000L, movetimeMs = 150_000L, typicalNodes = 3_450_000L)
         val DEEP = SearchBudget(nodes = 45_000_000L, movetimeMs = 270_000L, typicalNodes = 10_300_000L)
+
+        /**
+         * An Elo level's budget (spec §8.6): its node budget (0 for Max, which has none) and, as [movetimeMs], the whole
+         * game's engine time ([GAME_ENGINE_BUDGET_MS]); the per-position movetime is set by [GameTimeBudget] while it
+         * runs. The key is `lvl<code>:n<nodes>:g<game budget>`.
+         */
+        fun forLevel(level: EngineLevel): SearchBudget = SearchBudget(
+            nodes = level.nodes ?: 0L,
+            movetimeMs = GAME_ENGINE_BUDGET_MS,
+            typicalNodes = level.nodes ?: 0L,
+            levelKeyPart = "lvl${level.code}:n${level.nodes ?: 0L}:g$GAME_ENGINE_BUDGET_MS",
+        )
 
         fun forStrength(strength: AnalysisStrength): SearchBudget = when (strength) {
             AnalysisStrength.QUICK -> QUICK
@@ -45,11 +59,12 @@ data class SearchBudget(
         }
 
         /**
-         * The budget for any stored depth (6..30). A preset depth gets its strength's budget; an
+         * The budget for any stored depth (6..30) or Elo level code (spec §8.6). A preset depth gets its strength's budget; an
          * old custom depth gets the budget of the smallest preset at or above it, and anything
          * deeper than Deep gets Deep's (it is then usually capped, and flagged as such).
          */
         fun forDepth(depth: Int): SearchBudget {
+            EngineLevel.fromCode(depth)?.let { return forLevel(it) }
             val strength = AnalysisStrength.entries.filter { !it.autoDepth }.sortedBy { it.depth }.firstOrNull { depth <= it.depth }
                 ?: AnalysisStrength.DEEP
             return forStrength(strength)

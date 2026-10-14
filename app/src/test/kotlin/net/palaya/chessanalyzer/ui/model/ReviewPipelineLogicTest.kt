@@ -15,7 +15,7 @@ class ReviewPipelineLogicTest {
         video: Boolean = true,
         voice: NarrationProviderChoice = NarrationProviderChoice.NEURAL,
     ) = ReviewOptions(
-        strength = AnalysisStrength.STANDARD,
+        level = EngineLevel.L2900,
         side = SideChoice.UNKNOWN,
         naturalWording = wording,
         prepareVideo = video,
@@ -156,5 +156,13 @@ class ReviewPipelineLogicTest {
             ),
         )
         assertEquals(ReviewStage.RECORD_VOICE, run.current?.stage)
+    }
+
+    @Test
+    fun theEngineSpeedBlendFavoursTheLatestRun() {
+        val first = ReviewSpeeds().withEngine(runMs = 10_000L, runNodes = 1_000_000L, runPositions = 10) // 0.01
+        assertEquals(0.01, first.engineMsPerNode!!, 1e-12)
+        val second = first.withEngine(runMs = 20_000L, runNodes = 1_000_000L, runPositions = 10) // 0.02
+        assertEquals(0.7 * 0.02 + 0.3 * 0.01, second.engineMsPerNode!!, 1e-12)
     }
 }

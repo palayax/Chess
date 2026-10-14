@@ -99,8 +99,8 @@ class GameRepository(
 
         /** This game with [options] stored (the strength goes to [depth], the side to [userColorName]). */
         fun withReviewOptions(options: ReviewOptions): StoredGame = copy(
-            depth = options.strength.depth,
-            autoDepth = options.strength.autoDepth,
+            depth = options.level.code,
+            autoDepth = false,
             userColorName = options.side.storedName ?: userColorName,
             voiceProvider = options.voice.name,
             speakerId = options.speakerId,
@@ -185,8 +185,7 @@ class GameRepository(
     suspend fun savePendingOptions(id: String, options: ReviewOptions) = withContext(Dispatchers.IO) {
         pendingOptionsDir.mkdirs()
         val json = JSONObject().apply {
-            put("depth", options.strength.depth)
-            put("strength", options.strength.name)
+            put("depth", options.level.code)
             options.side.storedName?.let { put("side", it) }
             put("naturalWording", options.naturalWording)
             put("prepareVideo", options.prepareVideo)
@@ -267,7 +266,7 @@ class GameRepository(
             result = json.optString("result", "*"),
             date = json.optString("date", ""),
             plyCount = json.optInt("plyCount", 0),
-            depth = json.optInt("depth", SettingsRepository.DEFAULT_DEPTH),
+            depth = json.optInt("depth", SettingsRepository.LEGACY_DEFAULT_DEPTH),
             multiPv = json.optInt("multiPv", SettingsRepository.DEFAULT_MULTI_PV),
             userColorName = json.optString("userColorName", null).takeUnless { it.isNullOrEmpty() },
             savedAtMs = json.optLong("savedAtMs", file.lastModified()),
@@ -364,6 +363,7 @@ class GameRepository(
         put("fen", eval.fen)
         put("depth", eval.depth)
         eval.requestedDepth?.let { put("requestedDepth", it) }
+        if (eval.timeCapped) put("timeCapped", true)
         val lines = JSONArray()
         eval.lines.forEach { line ->
             lines.put(
@@ -396,6 +396,7 @@ class GameRepository(
             lines = lines,
             depth = json.getInt("depth"),
             requestedDepth = if (json.has("requestedDepth")) json.getInt("requestedDepth") else null,
+            timeCapped = json.optBoolean("timeCapped", false),
         )
     }
 

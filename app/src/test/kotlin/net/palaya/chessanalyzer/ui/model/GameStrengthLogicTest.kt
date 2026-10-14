@@ -12,7 +12,7 @@ class GameStrengthLogicTest {
     private val standard = AnalysisLevel(14)
     private val quick = AnalysisLevel(12)
     private val deep = AnalysisLevel(18)
-    private val auto = AnalysisLevel.of(AnalysisStrength.AUTO)
+    private val auto = AnalysisLevel(14, autoDepth = true)
 
     @Test
     fun aNewGameUsesTheSettingsDefault() {
@@ -42,44 +42,52 @@ class GameStrengthLogicTest {
     }
 
     @Test
-    fun theChooserOffersQuickStandardDeepAutoInThatOrderAndMarksTheCurrentOne() {
-        val choices = strengthChoices(standard)
+    fun theChooserOffersTheFiveLevelsInOrderAndMarksTheCurrentOne() {
+        val choices = strengthChoices(AnalysisLevel.of(EngineLevel.L2900))
         assertEquals(
-            listOf(AnalysisStrength.QUICK, AnalysisStrength.STANDARD, AnalysisStrength.DEEP, AnalysisStrength.AUTO),
-            choices.map { it.strength },
+            listOf(EngineLevel.L2500, EngineLevel.L2700, EngineLevel.L2900, EngineLevel.L3100, EngineLevel.MAX),
+            choices.map { it.level },
         )
-        assertEquals(listOf(false, true, false, false), choices.map { it.isCurrent })
-        assertEquals(listOf(false, false, false, true), strengthChoices(auto).map { it.isCurrent })
+        assertEquals(listOf(false, false, true, false, false), choices.map { it.isCurrent })
+        assertEquals(listOf(false, false, false, false, true), strengthChoices(AnalysisLevel.of(EngineLevel.MAX)).map { it.isCurrent })
     }
 
     @Test
-    fun aCustomDepthMarksNoneOfThePresetsAsCurrent() {
-        assertTrue(strengthChoices(AnalysisLevel(16)).none { it.isCurrent })
+    fun aGameFromBeforeTheLevelsMarksNoneAsCurrentAndKeepsItsLegacyStrength() {
+        for (old in listOf(standard, quick, deep, auto, AnalysisLevel(16))) {
+            assertTrue(strengthChoices(old).none { it.isCurrent })
+            assertNull(old.engineLevel)
+        }
+        assertEquals(AnalysisStrength.AUTO, auto.strength)
         assertNull(AnalysisStrength.fromDepth(16))
+        // A level has no legacy strength.
+        assertNull(AnalysisLevel.of(EngineLevel.L3100).strength)
     }
 
     @Test
-    fun reanalyseNeedsAPickThatDiffersFromTheCurrentStrength() {
-        assertFalse(canReanalyse(standard, picked = null))
-        assertFalse(canReanalyse(standard, picked = AnalysisStrength.STANDARD))
-        assertTrue(canReanalyse(standard, picked = AnalysisStrength.DEEP))
-        assertTrue(canReanalyse(standard, picked = AnalysisStrength.QUICK))
-        // Auto has Standard's depth, but it is another strength.
-        assertTrue(canReanalyse(standard, picked = AnalysisStrength.AUTO))
-        assertTrue(canReanalyse(auto, picked = AnalysisStrength.STANDARD))
-        assertFalse(canReanalyse(auto, picked = AnalysisStrength.AUTO))
-        // A custom depth can be replaced by any preset.
-        assertTrue(canReanalyse(AnalysisLevel(16), picked = AnalysisStrength.STANDARD))
+    fun reanalyseNeedsAPickThatDiffersFromTheCurrentLevel() {
+        val current = AnalysisLevel.of(EngineLevel.L2900)
+        assertFalse(canReanalyse(current, picked = null))
+        assertFalse(canReanalyse(current, picked = EngineLevel.L2900))
+        assertTrue(canReanalyse(current, picked = EngineLevel.L3100))
+        assertTrue(canReanalyse(current, picked = EngineLevel.MAX))
+        // An old game can be re-analysed at any level, including the one pre-selected for it.
+        assertTrue(canReanalyse(standard, picked = EngineLevel.L2900))
+        assertTrue(canReanalyse(auto, picked = EngineLevel.L3100))
     }
 
     @Test
-    fun theLevelOfAStrengthReadsBackAsThatStrength() {
-        for (s in AnalysisStrength.entries) assertEquals(s, AnalysisLevel.of(s).strength)
+    fun aLevelGameIsReopenedAtItsOwnLevelWhateverSettingsSaysNow() {
+        val l = AnalysisLevel.of(EngineLevel.L2500)
+        assertEquals(l, gameAnalysisLevel(explicit = null, stored = l, settingsDefault = AnalysisLevel.of(EngineLevel.MAX)))
     }
 
     @Test
-    fun theFourStrengthsHaveDifferentEvalCacheKeysSoTheirResultsStayApart() {
-        val keys = AnalysisStrength.entries.map { if (it.autoDepth) AutoDepthBudget.cacheKeyPart else it.budget.cacheKeyPart }
-        assertEquals(4, keys.toSet().size)
+    fun theLegacyStrengthsStillHaveDifferentEvalCacheKeysAndTheLevelsDifferFromThem() {
+        val legacy = AnalysisStrength.entries.map { if (it.autoDepth) AutoDepthBudget.cacheKeyPart else it.budget.cacheKeyPart }
+        assertEquals(4, legacy.toSet().size)
+        val levels = EngineLevel.entries.map { SearchBudget.forLevel(it).cacheKeyPart }
+        assertEquals(5, levels.toSet().size)
+        assertTrue((legacy + levels).toSet().size == 9)
     }
 }

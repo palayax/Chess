@@ -576,7 +576,12 @@ advantage" from 95 (a MISS needs 90 win-percent or a mate before the move, §2).
 
 ## 8. Analysis engine settings
 
-- Strength presets in Settings: **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**,
+- **Engine levels (owner, 2026-10-14; §8.6).** New analyses use an Elo level, **2500 / 2700 / 2900 / 3100 (default) /
+  Max**, with a hard time budget for the whole engine stage (5 minutes for any game on any phone). Quick / Standard /
+  Deep / Auto below are **legacy**: they are no longer offered, but a game analysed with one is still read, resumed and
+  reopened from its cache exactly as before (a stored depth 6..30 is a legacy depth; a stored value of 1000 or more is a
+  level code).
+- Legacy strength presets (no longer offered): **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**,
   and **Auto** = every position at Standard, then the critical positions again at Deep (§8.5)
   (`SettingsLogic.AnalysisStrength`). MultiPV 3, Threads `min(cores, 4)`, Hash 96 MB, one position at
   a time, the hash kept from position to position. A stored custom depth (6..30, from older versions)
@@ -754,9 +759,28 @@ reaches the end before the report. The status line says "Taking a deeper look at
 N of M" during the second pass ("Move x of y" before it); "Thinking deeper … depth d of 18" works as for
 any search.
 
+**Elo levels (§8.6).** For a level the estimate is **min(positions left x the level's node budget x ms per node, the
+engine budget left)**; Max has no node budget, so it is the budget left, shown from the first position. The speed is
+the **last 8 searched positions** (`RecentSpeed`), not the whole run, so a phone that throttles when it heats is tracked
+(the whole-run average lagged behind). The "thinking deeper … depth d of D" line is not shown for a level (it has no
+target depth).
+
+**Overall estimate (Review options screen, processing screen).** The Review options screen shows, per level, the time of
+the **whole review** on this phone: the engine stage as above (`levelEstimateMs`; Max = the 5-minute budget even before
+anything was measured) plus the other stages of the plan that this phone has measured (`ReviewSpeeds.estimateMs`; a
+stage never measured adds nothing and nothing is invented). Cached evaluations at that level count 0 for the engine.
+`ReviewSpeeds.withEngine` blends the stored engine speed **0.7 latest run / 0.3 earlier** (the latest run says most about
+the next one). The processing screen's overall "about N min left" uses the engine stage's own estimate for the whole
+stage, including legacy Auto's second pass (it used to leave the second pass out and to stop updating once the first
+pass was done).
+
 The estimate and the "thinking deeper" line are a polite live region; the ticking clock is not.
 
 ### 8.5 Auto-depth: deeper on the critical moves (owner, 2026-10-11)
+
+> **Legacy: no longer offered (owner 2026-10-14: Auto took half an hour on a Pixel 8; the Elo levels of §8.6
+> replace it).** The code path stays so that an old pending Auto request can resume and a game analysed with Auto
+> reopens from its cache; Settings, the Review options screen and the Summary never offer it again.
 
 The owner asked for "different moves analyzed with different depth based on complexity and engine scoring".
 **Auto** (`AnalysisStrength.AUTO`, stored as depth 14 + `autoDepth`) does that in two passes:
@@ -891,6 +915,60 @@ the two estimate constants: **EXPECTED_DEEP_FRACTION 0.24** (24% calibration, 22
 and a deepened one again when its deep result replaces the first one.
 
 ---
+
+### 8.6 Engine levels in Elo and the game time budget (owner, 2026-10-14)
+
+The owner: a review must take up to 10 minutes on a Pixel 8 (Auto took half an hour), the depth choices should be Elo
+levels "like DroidFish" (2500 up to the engine's maximum), and the time estimate was far from the truth.
+
+**Levels** (`ui/model/EngineLevel.kt`; the stored `depth` Int holds the code):
+
+| Level | Code | Node budget per position (all threads, MultiPV 3) |
+|---|---|---|
+| About 2500 | 2500 | 20,000 |
+| About 2700 | 2700 | 60,000 |
+| About 2900 | 2900 | 180,000 |
+| About 3100 (default) | 3100 | 600,000 |
+| Max | 4000 | none: the game time budget alone decides |
+
+Every level searches with `go depth 60 nodes N movetime T` (depth 60 = no depth limit in practice; Max omits `nodes`).
+
+**[approximation] The Elo labels are not measured.** The node counts come from extrapolation, not from a gauntlet:
+a hobbyist fixed-node table for Stockfish 16.1 (single thread, MultiPV 1: 512 nodes about 1709, up to 8192 nodes about
+2779; talkchess thread 83654), continued with the diminishing returns Stockfish's own discussion #3402 / the wiki
+"Useful data" give (about 200, then 130, then 90 Elo per doubling), and multiplied by about 4 because this app searches
+MultiPV 3 and 4 threads (lazy SMP wastes nodes). Treat the labels as "about", plus or minus 150 Elo. They should be
+measured with a gauntlet of the app's own binary at these node counts before anyone quotes them as strengths. Why not
+`UCI_Elo`: in Stockfish it does not reduce search work, it makes the engine pick a worse move at the end of a full-strength
+search (`Skill::time_to_pick`, `search.cpp`), so it would be as slow as full strength and would make the analysis worse
+than its label. DroidFish also analyses at full strength and uses `UCI_Elo` only when the engine plays.
+
+**Game time budget** (`GameTimeBudget`, `GAME_ENGINE_BUDGET_MS` = 300,000 ms): the whole first pass gets 5 minutes of
+engine time whatever the game's length, which is what keeps a whole review near 10 minutes on a slow phone (the rest goes
+to wording, narration and the voice). Position by position the search gets
+`movetime = max(250 ms, (budget - spent) / positions left x 1.5)`, and never more than the time left when it is the
+last position. A position that ends early on its node budget leaves its time to the later ones; terminal positions
+(checkmate, stalemate) are not searched and cost nothing. If every search used its whole movetime the total would still
+be at most the budget plus the 250 ms minimums (host-tested). A resumed run (§8.3) gets the budget's share of the
+positions it still has to do. Legacy depths have no game budget.
+
+**Cache key.** `SHA-256(PGN, code, MultiPV, "lvl<code>:n<nodes>:g<game budget>")`, for example
+`lvl2900:n180000:g300000` (Max: `n0`). The dynamic per-position movetime is not in the key, and a changed game budget
+re-analyses.
+
+**Capped positions.** A level has no depth to reach, so a position is never "capped by depth". `PositionEval.timeCapped`
+(cache JSON key `timeCapped`, absent = false) is set when the clock ended a level search before it spent 95% of its node
+budget (and it ran at least 80% of its movetime, so a search that stopped for another reason is not flagged). Max is
+defined by time and is never capped. `PositionEval.isCapped` = depth-capped or `timeCapped`, so the Summary's "searched
+less deeply" line keeps working.
+
+**Legacy mapping** (`EngineLevel.forLegacyDepth`), used only to pre-select a level for a re-analysis of an old game and to
+migrate the Settings default (the stored game and its cache are not rewritten): depth 12 or less -> 2700, 13..14 -> 2900,
+18, deeper and Auto -> 3100.
+
+**Diagnostics.** The "analysis start" line names the level, its node budget, the game budget, the minimum per position and
+the native Stockfish variant (`StockfishEngine.nativeVariant`; the engine's variant is also logged as "engine ready" once
+the engine has loaded).
 
 ## 9. Narration significance and move sequences
 

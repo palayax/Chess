@@ -67,9 +67,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import net.palaya.chessanalyzer.data.ReviewPreferencesRepository
 import net.palaya.chessanalyzer.ui.model.AdvancedExpander
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
 import net.palaya.chessanalyzer.ui.model.AppLanguage
 import net.palaya.chessanalyzer.ui.model.AppLocales
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.model.KOKORO_DEFAULT_SPEAKER_ID
@@ -267,7 +267,7 @@ fun SettingsScreen(
                                 AnalysisStrengthControl(
                                     depth = settings.depth,
                                     autoDepth = settings.autoDepth,
-                                    onChange = { onSettingsChange(settings.copy(depth = it.depth, autoDepth = it.autoDepth)) },
+                                    onChange = { onSettingsChange(settings.copy(depth = it.code, autoDepth = false)) },
                                 )
                                 ReviewDetailControl(
                                     thresholdCp = settings.narrationThresholdCp,
@@ -762,20 +762,21 @@ private fun VoicePickerRow(
 }
 
 /**
- * "Analysis strength": Quick / Standard / Deep / Auto (ANALYSIS_SPEC §8.5: deeper on the critical moves). A stored
- * depth outside those shows "Custom (N)".
+ * "Engine level": 2500 / 2700 / 2900 / 3100 / Max (ANALYSIS_SPEC §8.6), roughly how strong a player the engine analyses
+ * like. A stored legacy depth (not a level) shows "Custom (N)" until a level is picked.
  */
 @Composable
-private fun AnalysisStrengthControl(depth: Int, autoDepth: Boolean, onChange: (AnalysisStrength) -> Unit) {
-    val preset = AnalysisStrength.of(depth, autoDepth)
+private fun AnalysisStrengthControl(depth: Int, autoDepth: Boolean, onChange: (EngineLevel) -> Unit) {
+    val preset = EngineLevel.fromCode(depth)
     PresetControl(
-        title = stringResource(R.string.settings_depth),
+        title = stringResource(R.string.settings_level),
         help = stringResource(R.string.settings_depth_help),
         options = listOf(
-            AnalysisStrength.QUICK to stringResource(R.string.settings_depth_quick),
-            AnalysisStrength.STANDARD to stringResource(R.string.settings_depth_standard),
-            AnalysisStrength.DEEP to stringResource(R.string.settings_depth_deep),
-            AnalysisStrength.AUTO to stringResource(R.string.settings_depth_auto),
+            EngineLevel.L2500 to stringResource(R.string.settings_level_2500),
+            EngineLevel.L2700 to stringResource(R.string.settings_level_2700),
+            EngineLevel.L2900 to stringResource(R.string.settings_level_2900),
+            EngineLevel.L3100 to stringResource(R.string.settings_level_3100),
+            EngineLevel.MAX to stringResource(R.string.settings_level_max),
         ),
         selected = preset,
         customLabel = if (preset == null) stringResource(R.string.settings_custom_value, customDepthValue(depth)) else null,

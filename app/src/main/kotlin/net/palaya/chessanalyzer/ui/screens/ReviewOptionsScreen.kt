@@ -52,7 +52,7 @@ import net.palaya.chessanalyzer.R
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.a11y.asHeading
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameHeader
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
@@ -133,9 +133,9 @@ fun ReviewOptionsScreen(
             GameHeaderLine(draft.header, draft.plies)
             OptionsCard {
                 StrengthChooser(
-                    selected = options.strength,
+                    selected = options.level,
                     estimates = draft.strengthEstimatesMs,
-                    onSelect = { onOptionsChange(options.copy(strength = it)) },
+                    onSelect = { onOptionsChange(options.copy(level = it)) },
                 )
             }
             OptionsCard {
@@ -247,46 +247,48 @@ private fun GameHeaderLine(header: GameHeader, plies: Int) {
 }
 
 @StringRes
-private fun strengthLabelRes(strength: AnalysisStrength): Int = when (strength.name) {
-    "QUICK" -> R.string.settings_depth_quick
-    "STANDARD" -> R.string.settings_depth_standard
-    "DEEP" -> R.string.settings_depth_deep
-    else -> R.string.settings_depth_auto
+private fun levelLabelRes(level: EngineLevel): Int = when (level) {
+    EngineLevel.L2500 -> R.string.level_label_2500
+    EngineLevel.L2700 -> R.string.level_label_2700
+    EngineLevel.L2900 -> R.string.level_label_2900
+    EngineLevel.L3100 -> R.string.level_label_3100
+    EngineLevel.MAX -> R.string.level_label_max
 }
 
 @StringRes
-private fun strengthHintRes(strength: AnalysisStrength): Int = when (strength.name) {
-    "QUICK" -> R.string.reanalyse_hint_quick
-    "STANDARD" -> R.string.reanalyse_hint_standard
-    "DEEP" -> R.string.reanalyse_hint_deep
-    else -> R.string.reanalyse_hint_auto
+private fun levelHintRes(level: EngineLevel): Int = when (level) {
+    EngineLevel.L2500 -> R.string.level_hint_2500
+    EngineLevel.L2700 -> R.string.level_hint_2700
+    EngineLevel.L2900 -> R.string.level_hint_2900
+    EngineLevel.L3100 -> R.string.level_hint_3100
+    EngineLevel.MAX -> R.string.level_hint_max
 }
 
 /**
- * Every [AnalysisStrength] as a radio row: its name, a one-line description, and the rough time on this phone when one
- * was measured (or "ready at once" when this game's evaluations at that strength are already on the phone).
+ * Every [EngineLevel] as a radio row: its name, a one-line description, and the rough time of the whole review on this
+ * phone when one was measured (or "ready at once" when this game's evaluations at that level are already on the phone).
  */
 @Composable
-private fun StrengthChooser(selected: AnalysisStrength, estimates: Map<AnalysisStrength, Long?>, onSelect: (AnalysisStrength) -> Unit) {
+private fun StrengthChooser(selected: EngineLevel, estimates: Map<EngineLevel, Long?>, onSelect: (EngineLevel) -> Unit) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         SectionHeading(stringResource(R.string.review_options_strength))
         Column(modifier = Modifier.selectableGroup()) {
-            for (strength in AnalysisStrength.entries) {
-                val estimate = estimates[strength]
+            for (level in EngineLevel.entries) {
+                val estimate = estimates[level]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 56.dp)
-                        .selectable(selected = strength == selected, role = Role.RadioButton) { onSelect(strength) }
+                        .selectable(selected = level == selected, role = Role.RadioButton) { onSelect(level) }
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RadioButton(selected = strength == selected, onClick = null)
+                    RadioButton(selected = level == selected, onClick = null)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text(text = stringResource(strengthLabelRes(strength)), style = MaterialTheme.typography.bodyLarge)
+                        Text(text = stringResource(levelLabelRes(level)), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = stringResource(strengthHintRes(strength)),
+                            text = stringResource(levelHintRes(level)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -357,7 +359,7 @@ private fun SideChooser(selected: SideChoice, onSelect: (SideChoice) -> Unit) {
 @Composable
 private fun ReviewOptionsScreenPreview() {
     val options = ReviewOptions(
-        strength = AnalysisStrength.STANDARD,
+        level = EngineLevel.L2900,
         side = SideChoice.WHITE,
         naturalWording = true,
         prepareVideo = true,
@@ -374,7 +376,7 @@ private fun ReviewOptionsScreenPreview() {
                 options = options,
                 wording = WordingOption.SWITCH,
                 voiceInstalled = true,
-                strengthEstimatesMs = mapOf(AnalysisStrength.QUICK to 40_000L, AnalysisStrength.STANDARD to 0L, AnalysisStrength.DEEP to 600_000L),
+                strengthEstimatesMs = mapOf(EngineLevel.L2500 to 120_000L, EngineLevel.L2900 to 0L, EngineLevel.MAX to 600_000L),
             ),
             options = options,
             onOptionsChange = {},

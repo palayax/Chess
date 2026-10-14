@@ -255,11 +255,6 @@
     <!-- A4: the analysis strength belongs to the game. RF: re-analyse opens the Review options screen. %1$s = "Quick", "Standard", "Deep" or "Custom (16)". -->
     <string name="reanalyse_analysed_at">Analysed at %1$s</string>
     <string name="reanalyse_button">Re-analyse with different settings…</string>
-    <!-- The one-line description of each strength (Review options). -->
-    <string name="reanalyse_hint_quick">Fastest, looks a little less deeply.</string>
-    <string name="reanalyse_hint_standard">A good balance of speed and accuracy.</string>
-    <string name="reanalyse_hint_deep">Slowest, the most accurate.</string>
-    <string name="reanalyse_hint_auto">Standard, plus Deep on the critical moves. Faster than Deep.</string>
     <!-- A4: material on the Board and at the end of the game on the Summary. -->
     <string name="summary_move_quality">Move quality</string>
     <string name="summary_final_material">Material at the end</string>
@@ -304,7 +299,27 @@
     <string name="settings_depth_standard">Standard</string>
     <string name="settings_depth_deep">Deep</string>
     <string name="settings_depth_auto">Auto</string>
-    <string name="settings_depth_help">Deeper is more accurate and slower. Auto looks at every move like Standard, then as deeply as Deep at the critical ones. This is the default for new games; each game can be analysed again at another strength from its Review options.</string>
+    <string name="settings_depth_help">Roughly how strong a player the engine analyses like. Higher is more accurate and slower, and every level finishes within about 5 minutes of engine time. This is the default for new games; each game can be analysed again at another level from its Review options.</string>
+    <!-- ANALYSIS_SPEC 8.6: engine levels in Elo (approximate). Short labels for the Settings control. -->
+    <string name="settings_level">Engine level</string>
+    <string name="settings_level_2500">2500</string>
+    <string name="settings_level_2700">2700</string>
+    <string name="settings_level_2900">2900</string>
+    <string name="settings_level_3100">3100</string>
+    <string name="settings_level_max">Max</string>
+    <!-- Review options rows and the Summary card. -->
+    <string name="level_label_2500">About 2500</string>
+    <string name="level_label_2700">About 2700</string>
+    <string name="level_label_2900">About 2900</string>
+    <string name="level_label_3100">About 3100 (recommended)</string>
+    <string name="level_label_max">Max</string>
+    <string name="level_hint_2500">Fastest. Finds the clear mistakes.</string>
+    <string name="level_hint_2700">Quick, with a closer look at tactics.</string>
+    <string name="level_hint_2900">More careful on tactics and close calls.</string>
+    <string name="level_hint_3100">Careful and accurate, and still about 5 minutes of engine time at most.</string>
+    <string name="level_hint_max">Uses the whole 5 minutes of engine time on the game. The most accurate.</string>
+    <string name="reanalyse_analysed_at_about">Analysed at about %1$d</string>
+    <string name="reanalyse_analysed_at_max">Analysed at Max</string>
     <!-- A stored value that is not one of the presets. %1$s is already formatted and LRM-wrapped ("18", "±0.7"). -->
     <string name="settings_custom_value">Custom (%1$s)</string>
     <!-- What the review talks about = significance threshold 100 / 50 / 0 cp. -->
@@ -731,15 +746,15 @@
     <!-- RF: the Review options screen (everything a review needs, decided once, before any processing) -->
     <string name="review_options_title">Review options</string>
     <string name="review_options_start">Start review</string>
-    <string name="review_options_strength">Analysis strength</string>
+    <string name="review_options_strength">Engine level</string>
     <!-- The game's evaluations at this strength are already on the phone. -->
-    <string name="review_options_strength_ready">Already analysed at this strength: ready at once</string>
+    <string name="review_options_strength_ready">Already analysed at this level: ready at once</string>
     <!-- A rough time measured on this phone in earlier reviews; shown only when it was measured. -->
     <plurals name="review_options_strength_minutes">
-        <item quantity="one">About %1$d min on this phone</item>
-        <item quantity="other">About %1$d min on this phone</item>
+        <item quantity="one">About %1$d min for the whole review on this phone</item>
+        <item quantity="other">About %1$d min for the whole review on this phone</item>
     </plurals>
-    <string name="review_options_strength_under_minute">About a minute on this phone</string>
+    <string name="review_options_strength_under_minute">About a minute for the whole review on this phone</string>
     <string name="review_options_side_help">The review then says \'you\' and \'your opponent\', and Practise uses your own mistakes.</string>
     <string name="review_options_wording_help">Rewords the commentary and the narration on this phone. Every fact is checked against the app\'s own text.</string>
     <string name="review_options_wording_download">Natural wording (on-device AI) needs the wording model, which you can download in Settings.</string>

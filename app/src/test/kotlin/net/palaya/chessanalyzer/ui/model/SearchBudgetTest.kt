@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.ui.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,7 +54,7 @@ class SearchBudgetTest {
     @Test
     fun theSettingsDepthMapsToItsStrengthsBudget() {
         assertEquals(AnalysisStrength.QUICK.budget, EngineSettings(depth = 12).searchBudget)
-        assertEquals(AnalysisStrength.STANDARD.budget, EngineSettings().searchBudget)
+        assertEquals(AnalysisStrength.STANDARD.budget, EngineSettings(depth = 14).searchBudget)
         assertEquals(AnalysisStrength.DEEP.budget, EngineSettings(depth = 18).searchBudget)
     }
 
@@ -94,6 +95,32 @@ class SearchBudgetTest {
     fun theBudgetIsPartOfTheCacheKeyText() {
         assertEquals("n${AnalysisStrength.DEEP.budget.nodes}:t${AnalysisStrength.DEEP.budget.movetimeMs}", AnalysisStrength.DEEP.budget.cacheKeyPart)
         assertNotEquals(AnalysisStrength.QUICK.budget.cacheKeyPart, AnalysisStrength.DEEP.budget.cacheKeyPart)
+    }
+
+    @Test
+    fun aLevelCodeMapsToItsLevelBudgetWithAKeyWithoutTheDynamicMovetime() {
+        for (level in EngineLevel.entries) {
+            val b = EngineSettings(depth = level.code).searchBudget
+            assertEquals(SearchBudget.forLevel(level), b)
+            assertEquals("lvl${level.code}:n${level.nodes ?: 0L}:g$GAME_ENGINE_BUDGET_MS", b.cacheKeyPart)
+            assertEquals(level, EngineSettings(depth = level.code).level)
+        }
+        assertEquals("lvl2900:n180000:g300000", EngineLevel.L2900.let { SearchBudget.forLevel(it).cacheKeyPart })
+        assertEquals("lvl4000:n0:g300000", SearchBudget.forLevel(EngineLevel.MAX).cacheKeyPart)
+        assertEquals(SearchBudget.forLevel(EngineLevel.L3100), SearchBudget.forDepth(3100))
+    }
+
+    @Test
+    fun everyLevelHasItsOwnCacheKeyDifferentFromEveryLegacyStrength() {
+        val keys = EngineLevel.entries.map { SearchBudget.forLevel(it).cacheKeyPart } +
+            AnalysisStrength.entries.filter { !it.autoDepth }.map { it.budget.cacheKeyPart } + AutoDepthBudget.cacheKeyPart
+        assertEquals(keys.size, keys.toSet().size)
+    }
+
+    @Test
+    fun legacyDepthsKeepTheirBudgetsAfterTheLevelsWereAdded() {
+        assertEquals(AnalysisStrength.QUICK.budget, EngineSettings(depth = 12).searchBudget)
+        assertNull(EngineSettings(depth = 12).level)
     }
 
     private companion object {

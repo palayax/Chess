@@ -21,7 +21,7 @@ import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.text.FakeRephraser
 import net.palaya.chessanalyzer.core.text.RephraseSurface
 import net.palaya.chessanalyzer.data.FamousGamesStore
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.screens.FAMOUS_SEARCH_TAG
 import org.junit.After
@@ -120,7 +120,7 @@ class RephraseFlowInstrumentedTest {
             TestApp.ensureSetUp()
             val before = app.settingsRepository.current()
             settingsBefore = before
-            app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth))
+            app.settingsRepository.save(before.copy(depth = EngineLevel.L2500.code))
             app.settingsRepository.setRephraseEnabled(true)
             app.narrationSettingsRepository.setProvider(net.palaya.chessanalyzer.ui.model.NarrationProviderChoice.DEVICE)
             TestApp.restoreReviewDefaults()

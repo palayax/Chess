@@ -75,6 +75,12 @@ conflict.
    analysis stored under the Standard key; a deep result is accepted only for the same FEN and requestedDepth 18.
    The host measurement harness is `desktop/src/test/.../bench/` (run with `java` outside Gradle; see its KDoc).
 
+10. **Analysis depth is an Elo level now (EL, `docs/ANALYSIS_SPEC.md` §8.6).** The stored `depth` Int is a legacy fixed depth
+   (6..30) or a level code (>= 1000: 2500/2700/2900/3100/4000 = Max, `ui/model/EngineLevel`). A level searches with a node budget and
+   a game-wide time budget (`GameTimeBudget`, 5 min for the whole first pass); never put the dynamic per-position movetime in the
+   cache key. Auto/Quick/Standard/Deep are legacy code paths kept only for old games and pending requests: do not offer them.
+   Do not use `UCI_Elo` for analysis (it does not reduce search work). The Elo labels are an approximation until measured.
+
 ## Build gotchas
 
 - Stockfish source is **not** committed. Run `scripts/fetch_stockfish.sh` (pinned to tag `sf_19`)

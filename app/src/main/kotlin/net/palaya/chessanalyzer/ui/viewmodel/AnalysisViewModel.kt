@@ -41,6 +41,10 @@ import net.palaya.chessanalyzer.data.mapper.toUiReport
 import net.palaya.chessanalyzer.rephrase.RephraseService
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
+import net.palaya.chessanalyzer.ui.model.deepPositionsLeft
+import net.palaya.chessanalyzer.ui.model.levelEstimateMs
+import net.palaya.chessanalyzer.ui.model.wholeReviewEstimateMs
 import net.palaya.chessanalyzer.ui.model.AnalysisLevel
 import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
 import net.palaya.chessanalyzer.ui.model.gameAnalysisLevel
@@ -553,11 +557,16 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         )
         val positions = game.moves.size + 1
         val speeds = withContext(Dispatchers.IO) { app.reviewSpeedStore.load() }
-        val estimates = AnalysisStrength.entries.associateWith { strength ->
-            val budget = runCatching { strength.budget }.getOrNull()
-            val cached = budget != null && strength.depth > 0 &&
-                app.gameRepository.hasEvalCache(app.gameRepository.cacheKey(text, strength.depth, settingsNow.multiPv, budget.cacheKeyPart))
-            strengthEstimateMs(positions, budget?.typicalNodes, speeds.engineMsPerNode, cached)
+        // The WHOLE review per level (spec §8.4, §8.6): the engine stage (min of nodes x speed and the game budget) plus the
+        // other stages of the plan that this phone has measured. The plan is the one the prefilled options give.
+        val wordingUsable = app.wordingModelUsable()
+        val kokoro = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+        val plan = reviewStagePlan(prefilled, wordingUsable, kokoro)
+        val estimates = EngineLevel.entries.associateWith { level ->
+            val cached = app.gameRepository.hasEvalCache(
+                app.gameRepository.cacheKey(text, level.code, settingsNow.multiPv, SearchBudget.forLevel(level).cacheKeyPart),
+            )
+            wholeReviewEstimateMs(levelEstimateMs(level, positions, speeds.engineMsPerNode, cached), plan, speeds, game.moves.size)
         }
         val supported = app.wordingModelSupported()
         ReviewOptionsLoad.Ready(
@@ -580,7 +589,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     fun startReview(gameId: String, options: ReviewOptions) {
         pendingOptionsByGameId[gameId] = options
-        pendingLevelByGameId[gameId] = AnalysisLevel.of(options.strength)
+        pendingLevelByGameId[gameId] = AnalysisLevel.of(options.level)
         // The options' side is the user's answer; the side the game opened with must not come back.
         if (options.side != SideChoice.UNKNOWN) pendingSideByGameId.remove(gameId)
         games[gameId]?.pgnText?.takeIf { it.isNotBlank() }?.let { pendingPgnByGameId[gameId] = it }
@@ -593,7 +602,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.gameRepository.savePendingOptions(gameId, options) }
         diagnostics.log(
             AppDiagnostics.TAG_ANALYSIS,
-            "review options for $gameId: ${options.strength.name.lowercase()}, side ${options.side}, wording ${options.naturalWording}, " +
+            "review options for $gameId: ${options.level.name.lowercase()}, side ${options.side}, wording ${options.naturalWording}, " +
                 "video ${options.prepareVideo}, voice ${options.voice}/${options.speakerId}, pace ${options.pace}",
         )
     }
@@ -842,9 +851,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             val engineCached = app.gameRepository.hasEvalCache(
                 app.gameRepository.cacheKey(pgnText, currentSettings.depth, currentSettings.multiPv, budget.cacheKeyPart),
             )
+            val runLevel = currentSettings.level
             val estimates = plan.associateWith { stage ->
-                if (stage == ReviewStage.ENGINE) strengthEstimateMs(plies + 1, budget.typicalNodes, speeds.engineMsPerNode, engineCached)
-                else speeds.estimateMs(stage, plies)
+                if (stage == ReviewStage.ENGINE) {
+                    if (runLevel != null) levelEstimateMs(runLevel, plies + 1, speeds.engineMsPerNode, engineCached)
+                    else strengthEstimateMs(plies + 1, budget.typicalNodes, speeds.engineMsPerNode, engineCached)
+                } else speeds.estimateMs(stage, plies)
             }
             val runStartedAt = SystemClock.elapsedRealtime()
             val state = RunState(plan, stageWeights(plan, estimates), ReviewTimeLeftTracker(speeds, plies), runStartedAt)
@@ -857,7 +869,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             val timeLeft = AnalysisTimeLeftTracker(
                 typicalNodes = currentSettings.searchBudget.typicalNodes,
                 // Auto-depth's second pass (ANALYSIS_SPEC §8.5) is counted in its own, dearer positions.
-                deepTypicalNodes = if (currentSettings.autoDepth) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                deepTypicalNodes = if (currentSettings.autoDepth && runLevel == null) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                levelRun = runLevel != null,
             )
             var lastEngine = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
             val outcome = analysisService.analyze(
@@ -871,15 +884,24 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     _progress.value = withTime
                     if (p.runPositionsSearched > 0) lastEngine = p
                     state.engine = withTime
-                    if (p.phase == AnalysisPhase.ANALYZING_MOVES && p.totalMoves > 0 && p.currentMoveIndex < p.totalMoves) {
-                        state.engineRemainingMs = estimateAnalysisRemainingMs(
-                            done = p.currentMoveIndex,
-                            total = p.totalMoves,
-                            runNodes = p.runNodes,
-                            runMs = p.runSearchMs,
-                            runPositions = p.runPositionsSearched,
-                            typicalNodes = currentSettings.searchBudget.typicalNodes,
-                        ) ?: state.engineRemainingMs
+                    if (p.phase == AnalysisPhase.ANALYZING_MOVES && p.totalMoves > 0) {
+                        // The same terms as the tracker's own line, including legacy Auto's second pass (which this
+                        // used to leave out, and which stopped updating once the first pass was done).
+                        val deepLeft = deepPositionsLeft(p)
+                        state.engineRemainingMs = if (p.currentMoveIndex >= p.totalMoves && deepLeft == 0) 0L else {
+                            estimateAnalysisRemainingMs(
+                                done = p.currentMoveIndex,
+                                total = p.totalMoves,
+                                runNodes = p.runNodes,
+                                runMs = p.runSearchMs,
+                                runPositions = p.runPositionsSearched,
+                                typicalNodes = currentSettings.searchBudget.typicalNodes,
+                                deepLeft = deepLeft,
+                                deepTypicalNodes = if (currentSettings.autoDepth && runLevel == null) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                                recentMsPerNode = timeLeft.recentMsPerNode(),
+                                budgetLeftMs = if (runLevel != null) (p.engineBudgetMs - p.runSearchMs).coerceAtLeast(0L) else null,
+                            ) ?: state.engineRemainingMs
+                        }
                     }
                     // "Starting…" and the final DONE update carry no counts: they must not reset the stage's own.
                     if (p.totalMoves > 0) state.stageProgress(ReviewStage.ENGINE, p.currentMoveIndex, p.totalMoves) else state.emit()
@@ -1238,6 +1260,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             if (plan.deleteEvalCache && stored != null) {
                 val keys = AnalysisStrength.entries.mapNotNull { s ->
                     runCatching { repo.cacheKey(stored.pgnText, s.depth, stored.multiPv, s.budget.cacheKeyPart) }.getOrNull()
+                } + EngineLevel.entries.map { l ->
+                    repo.cacheKey(stored.pgnText, l.code, stored.multiPv, SearchBudget.forLevel(l).cacheKeyPart)
                 } + repo.cacheKey(stored.pgnText, stored.depth, stored.multiPv, SearchBudget.forDepth(stored.depth).cacheKeyPart)
                 val deleted = repo.deleteEvalCacheFor(keys.distinct())
                 diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "deleted $deleted eval-cache file(s) of $gameId")
