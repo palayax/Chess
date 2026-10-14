@@ -32,15 +32,15 @@ jobs:
       - name: Build the debug APK (arm64-v8a only)
         run: bash ./gradlew --no-daemon --stacktrace :app:assembleDebug -Pandroid.injected.build.abi=arm64-v8a
 
-      - name: Host unit tests
-        continue-on-error: true
-        run: bash ./gradlew --no-daemon :core:test :app:testDebugUnitTest :engine:testDebugUnitTest
-
       - uses: actions/upload-artifact@v4
         with:
           name: chess-analyzer-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/**/*.apk
           if-no-files-found: error
+
+      - name: Host unit tests
+        continue-on-error: true
+        run: bash ./gradlew --no-daemon --continue :core:test :app:testDebugUnitTest :engine:testDebugUnitTest
 
       - uses: actions/upload-artifact@v4
         if: always()

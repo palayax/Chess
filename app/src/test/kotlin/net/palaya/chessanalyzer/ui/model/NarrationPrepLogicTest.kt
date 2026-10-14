@@ -72,7 +72,7 @@ class NarrationPrepLogicTest {
     // ---- the Summary starts the recording ----
 
     private fun options(prepare: Boolean = true, voice: NarrationProviderChoice = NarrationProviderChoice.NEURAL, side: SideChoice = SideChoice.UNKNOWN, sid: Int = 1) =
-        ReviewOptions(AnalysisStrength.STANDARD, side, naturalWording = false, prepareVideo = prepare, voice = voice, speakerId = sid, pace = VideoPace.NORMAL)
+        ReviewOptions(EngineLevel.L2900, side, naturalWording = false, prepareVideo = prepare, voice = voice, speakerId = sid, pace = VideoPace.NORMAL)
 
     @Test
     fun theRecordingStartsOnlyForAGameThatAsksForTheVideoWithTheInstalledNaturalVoice() {
