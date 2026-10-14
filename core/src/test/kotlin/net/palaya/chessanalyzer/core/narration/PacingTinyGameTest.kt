@@ -85,9 +85,9 @@ class PacingTinyGameTest {
             assertTrue("$name ($moves moves) ran ${s.storyMs / 1000.0}s against ${budget / 1000.0}s", s.storyMs <= budget)
             minutes[moves] = s.totalEstimatedMs / 60_000.0
         }
-        // 17 moves about four to five minutes, the Immortal Game six to eight (seven to eight before NS, which
-        // dropped the filler sentences and the statistics: the budget is a ceiling, never a target), forty moves at
-        // most about twelve.
+        // Measured on the merged code (NS story + NC delivery, 169 wpm): 17 moves 4.42 min, the Immortal Game 6.87,
+        // forty moves 7.32. NS dropped the filler sentences and the statistics (the budget is a ceiling, never a
+        // target); NC's calmer delivery adds back about 5 % of speech. Forty moves at most about twelve.
         assertTrue("17 moves: ${minutes[17]} min", minutes.getValue(17) in 4.0..6.0)
         assertTrue("23 moves: ${minutes[23]} min", minutes.getValue(23) in 6.0..8.0)
         assertTrue("40 moves: ${minutes[40]} min", minutes.getValue(40) <= 12.0)

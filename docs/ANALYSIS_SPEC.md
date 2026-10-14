@@ -1524,6 +1524,52 @@ jumped. Taken: the pause on the position before the key move with the move's squ
 appearing only with the move, the hold on the result, and a steady per-move rate for a sequence with no
 skipped replies. Our own timing values and words; no assets.
 
+### 9.10 Delivery (NC): per-beat speed and pauses
+
+The owner heard the narration "read with the same intonation". Parts A and B fixed the words; this fixes how
+they are said. Each beat has a `Delivery(speed, gapScale)` (`core/.../narration/Delivery.kt`, field
+`ScriptSegment.delivery`, default speed 1 and gapScale 1 = the delivery before NC). **The words never change.**
+
+**Assignment.** `DeliveryPlan.apply` runs at the end of `ScriptBuilder.build`, on the finished story and before
+the §9.7 budget measures it. It is a pure function of each segment (kind, classification, board, narration) and of
+the next segment: no clock, no randomness. First matching rule wins:
+
+| Rule | Beats | speed | gapScale |
+|---|---|---|---|
+| none | blank narration | 1 | 1 |
+| weighty | a played move that gives checkmate (`PlayMove.san` ends in `#`), a BRILLIANT move; not a move of a line | 0.95 | 1.5 |
+| brisk | a BEST_LINE move, a played-out MISSED_TACTIC move (`PlayMove`), a FORCED move, a later move of an announced forced mate (`ScriptSegment.mateStep`, §9.9: the moves said bare) | 1.08 | 0.8 |
+| cards | intro (it carries the §9.9 cold open), opening summary, outro summary, lessons (the §9.9 takeaways) (calm even right before a key move) | 0.94 | 1.25 |
+| set-up | a PUZZLE_PROMPT; the beat right before a key move (an error: BLUNDER/MISTAKE/MISS; a found tactic; a mate; a BRILLIANT or GREAT move) when it is not itself a key move (the moves of a sequence keep the normal pace) | 0.90 | 1.4 |
+| quiet | a NORMAL_MOVE with a verdict and a swing of at most 25 cp | 0.94 | 1.25 |
+| normal | everything else: normal moves, a phase-shift sentence (inside a move's beat it takes that beat's delivery; a standalone phase beat is a NORMAL_MOVE hold and so normal, or set-up when a key move follows), chapter/skip-ahead hops, errors, found tactics (including the beat that announces a forced mate), the turning point | 1 | 1 |
+
+The §9.9 beats map as: cold open = INTRO (calm); phase shift = normal; mate announcement (the move that starts the forced mate) = normal; the bare moves that follow = brisk; the final "Game over, X wins!" mating move = weighty; takeaways = lessons (calm).
+
+Speeds stay within 0.90 to 1.10 (`Delivery` refuses others; Kokoro makes artefacts outside it). The best line's
+spoken moves (added by `paced`, §9.8) are brisk too; its "back to the game" sentence is normal.
+**These numbers are a first guess, chosen without listening; tune them by ear.** Measured on the host (estimates
+only): the 17-move Opera Game's total grew from about 5.7 to 5.9 min at the Normal pace (6.01 at the default), the
+Immortal Game's story from 424 s to 434 s of its 442 s budget; the story still fits the §9.7 budget everywhere.
+
+**Where it acts.** (1) Speech: `NarrationVoiceProvider.synthesize(text, file, speed)`; Kokoro passes it as the
+per-call `speed` of `OfflineTts.generate` (effective length = lengthScale / speed, no reload), the device voice
+multiplies its speech rate. (2) Gaps: the silence stitched between a segment's sentences is the base gap (220 ms,
+320 ms after a question) times `gapScale`, clamped to 120..600 ms (`Delivery.gapMs`). The stitched segment WAV is what
+the player and the exporter play, so neither computes gaps itself; `TimelineBuilder`, `SegmentFrameBuilder`, the
+exporter's PCM track and the player still honour `leadIn` and use the real clip length, unchanged. (3) Estimate:
+`estimateSpeechMs(text, wpm, delivery)` = words at `wpm` divided by `speed`, plus the 240 ms sentence pauses times
+`gapScale`; the §9.7 budget, the pace holds (§9.8) and the rephrase cap measure the story as it will be spoken. The
+pace is still laid over the finished story and does not touch the delivery, so every pace has the same words,
+deliveries and cached clips.
+
+**Cache key.** The delivery is different audio for the same words, so it is part of the narration key, built only by
+`video/NarrationKeys.kt`: a sentence clip's key text gets `/spd0.94` appended (two decimals, `Locale.ROOT`) when its
+speed is not 1; a segment clip's key text gets that and `/gap1.25` when its gap scale is not 1 (the stitched gaps are
+in it). A neutral delivery appends nothing, so clips made before NC stay valid. Every caller goes through it
+(`NarrationCoordinator` sentence and segment keys and `isFullyPrepared`, `NarrationPreparer.missingSegments`, the
+player); the desktop producer does not use `ScriptSegment.delivery` yet and keeps its own 220/320 ms gaps.
+
 ---
 
 ### 9.9 The story of the game (NS, owner's phone test 2026-10-13)

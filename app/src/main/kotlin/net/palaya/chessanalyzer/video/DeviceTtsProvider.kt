@@ -2,6 +2,7 @@ package net.palaya.chessanalyzer.video
 
 import android.content.Context
 import java.io.File
+import net.palaya.chessanalyzer.core.narration.Delivery
 
 /**
  * The floor [NarrationVoiceProvider]: free, fully offline, no download needed, works for every
@@ -23,10 +24,14 @@ class DeviceTtsProvider(context: Context) : NarrationVoiceProvider {
 
     override suspend fun prepare(): Boolean = synthesizer.prepareEngine()
 
-    override suspend fun synthesize(text: String, outFile: File): SynthesisResult {
+    override suspend fun synthesize(text: String, outFile: File): SynthesisResult = synthesize(text, outFile, 1f)
+
+    /** NC: [speed] multiplies the engine's speech rate for this utterance ([NarrationSynthesizer.synthesizeSegment]). */
+    override suspend fun synthesize(text: String, outFile: File, speed: Float): SynthesisResult {
+        val delivery = Delivery(speed = speed.coerceIn(Delivery.MIN_SPEED, Delivery.MAX_SPEED))
         // estimatedMs is only used for the Silent-fallback duration, which the caller
         // (NarrationCoordinator) already tracks separately — 0 here is never surfaced.
-        return when (val result = synthesizer.synthesizeSegment(text, outFile, estimatedMs = 0L)) {
+        return when (val result = synthesizer.synthesizeSegment(text, outFile, estimatedMs = 0L, delivery = delivery)) {
             is NarrationSynthesizer.Result.Synthesized -> SynthesisResult.Success(result.wavFile, result.durationMs)
             is NarrationSynthesizer.Result.Silent -> SynthesisResult.Failure(result.reason)
         }

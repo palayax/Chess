@@ -96,9 +96,9 @@ class VoiceChangeNarrationInstrumentedTest {
         for (name in listOf("A", "B")) {
             for (seg in s.segments) {
                 val display = "Test voice $name $marker"
-                store.fileFor(store.keyFor(seg.narration, display, "default")).delete()
+                store.fileFor(NarrationKeys.segmentKey(seg, display, "default")).delete()
                 for (sentence in NarrationSynthesizer.splitIntoSentences(seg.narration)) {
-                    store.fileFor(store.keyFor(sentence, display, "default")).delete()
+                    store.fileFor(NarrationKeys.sentenceKey(sentence, display, "default", seg.delivery)).delete()
                 }
             }
         }
@@ -145,7 +145,7 @@ class VoiceChangeNarrationInstrumentedTest {
             assertEquals(0, preparer.missingSegments(s, voiceB))
             assertTrue("voice B was asked to speak", voiceB.calls >= 3)
             for (seg in s.segments) {
-                assertNotNull(store.get(store.keyFor(seg.narration, voiceB.displayName, voiceB.narrationCacheFingerprint())))
+                assertNotNull(store.get(NarrationKeys.segmentKey(seg, voiceB.displayName, voiceB.narrationCacheFingerprint())))
             }
 
             val after = withContext(Dispatchers.Main) { VideoPlayerController(context, s, scope, voiceB) }

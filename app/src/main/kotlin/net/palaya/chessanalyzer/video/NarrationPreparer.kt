@@ -25,7 +25,7 @@ class NarrationPreparer(
     fun segmentKeys(script: VideoScript, provider: NarrationVoiceProvider): List<String> {
         val fingerprint = provider.narrationCacheFingerprint()
         return script.segments.filter { it.narration.isNotBlank() }
-            .map { store.keyFor(it.narration, provider.displayName, fingerprint) }
+            .map { NarrationKeys.segmentKey(it, provider.displayName, fingerprint) }
     }
 
     /**
@@ -40,7 +40,7 @@ class NarrationPreparer(
         val fingerprint = provider.narrationCacheFingerprint()
         val indexes = outcome.fallbackSegmentIndexes.toSet()
         return script.segments.filter { it.index in indexes && it.narration.isNotBlank() }
-            .map { store.keyFor(it.narration, provider.displayName, fingerprint) }.toSet()
+            .map { NarrationKeys.segmentKey(it, provider.displayName, fingerprint) }.toSet()
     }
 
     /**

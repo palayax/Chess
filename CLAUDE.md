@@ -148,6 +148,14 @@ conflict.
   `TimelineBuilder`, `SegmentFrameBuilder`, the exporter's PCM track and the player; a new timeline consumer must
   honour it too. A voice from an update is accepted by `VoiceStore.isInstalled()`
   through its `kokoro/.compat` record (layout + sherpa-onnx range) while this build still matches it.
+- **Delivery (NC, ANALYSIS_SPEC §9.10) is part of the narration cache key.** `ScriptSegment.delivery` (speed, gapScale; set by
+  `DeliveryPlan.apply` at the end of `ScriptBuilder.build`, a pure function of the story) changes the audio for the same words, so
+  every clip key is built by `video/NarrationKeys` (`sentenceKey`: speed; `segmentKey`: speed + gap scale; neutral adds nothing, so
+  old caches stay valid). A new caller never calls `NarrationStore.keyFor` with a segment's or sentence's text: it uses the shared
+  function, or the player, the preparer's "missing" count and the coordinator disagree. The speed goes to
+  `NarrationVoiceProvider.synthesize(text, file, speed)` (Kokoro: per-call `speed`; device voice: speech rate); the stitch gap is
+  `Delivery.gapMs(base)` (clamped 120..600 ms). `estimateSpeechMs` takes the delivery, so a path that re-estimates a segment
+  (`RephrasedScript`, the best line) passes `segment.delivery`. Speeds stay within 0.90..1.10; the values are a first guess to tune by ear.
 - **Only `data/models/ModelDownloader.kt` may open a network connection** (`NetworkCallSitesTest` scans
   `:app` and `:engine` main sources). The manifest has INTERNET + ACCESS_NETWORK_STATE since D2b; the app
   must still make no network call on its own: downloads start only from a user tap.

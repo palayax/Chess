@@ -5122,3 +5122,55 @@ Host tests: see the report of the change (`ReviewBudgetTest` and the extended `E
 `ReviewOptionsLogicTest` and `GameRepositoryReviewOptionsTest` need classes the host subset cannot compile and were edited, not run).
 To verify on a Pixel 8: a 40-move game at 3100 and at Max with wording + video + Kokoro, first review and a later one: total wall time vs 10 min,
 the stage log lines, the background recording after the deadline, and the "Up to about" line on a fresh install.
+
+---
+
+## NC (2026-10-14): per-beat delivery (speed and pauses vary with the beat)
+
+**Owner's report:** the narration is "read with the same intonation". Parts A and B (story arc, rhythm) fixed the words; NC
+varies how they are said. **Not device-verified: nothing here has been heard.** The owner should listen to a game with the
+Kokoro voice and a game with the device voice; every number below is a first guess to tune by ear.
+
+**Reference.** chess.com's coach slows down and leaves a beat before the decisive move and moves briskly through a played-out
+line (pattern only, our own numbers).
+
+**What changed**
+- `core/.../narration/Delivery.kt`: `Delivery(speed, gapScale)` (speed within 0.90..1.10, refused otherwise), the named
+  values CALM 0.94/1.25, SETUP 0.90/1.4, BRISK 1.08/0.8, WEIGHTY 0.95/1.5, and `DeliveryPlan` (a pure function of the story;
+  rules and measured effect in ANALYSIS_SPEC 9.10). `ScriptSegment.delivery` (default neutral). `ScriptBuilder.build` applies it
+  before the 9.7 budget measures the story; `estimateSpeechMs(text, wpm, delivery)` divides the speech by the speed and scales
+  the sentence pauses by the gap scale; the best line's spoken moves are BRISK; `RephrasedScript` re-estimates with the
+  segment's delivery.
+- `app`: `NarrationVoiceProvider.synthesize(text, file, speed)` (default method, so test doubles still compile); Kokoro passes it
+  as `OfflineTts.generate(speed=)`, the device voice as `setSpeechRate(base * speed)` per utterance; the coordinator stitches
+  the sentence gap as `Delivery.gapMs(base)` (clamped 120..600 ms). The stitched segment WAV is what the player and the
+  exporter play, so neither computes gaps itself and `leadIn` is untouched (TimelineBuilder, SegmentFrameBuilder, the
+  exporter's PCM track and the player were not changed).
+- **Cache keys:** one pure function, `video/NarrationKeys` (`sentenceKey`: `/spd0.94` when speed != 1; `segmentKey`: that and
+  `/gap1.25` when gapScale != 1; neutral adds nothing, so every clip made before NC is still found). Callers moved to it:
+  `NarrationCoordinator` (sentence key, segment key, `isFullyPrepared`), `NarrationPreparer.missingSegments`,
+  `VideoPlayerController`; `NarrationStore.keyFor` delegates its hash to it. Two instrumented tests that looked clips up by
+  `keyFor(seg.narration, ...)` now use `NarrationKeys.segmentKey(seg, ...)`. This tree has no `NarrationPrepLogic` or
+  `PreparedNarrationStore` (the S5/EL2 ledger lives on another branch): when it is merged, its keys must go through
+  `NarrationKeys` too (CLAUDE.md bullet).
+- Desktop producer: compiles unchanged (default argument); it does not use `delivery` and keeps its own 220/320 ms gaps.
+
+**Tests (host, 7 min; the repo's script reads /home/user/Chess, so a copy pointing at this worktree was run):** `:core` 621 / 0
+/ 0 (612 before; `DeliveryTest` 9 new), the app `ui/model` subset plus `NarrationKeysTest` 56 / 0 / 0 (52 before; 4 new).
+Existing tests changed honestly: the 17-move game's total (story + pace) is now 6.01 min at the default pace, so the ceilings in
+`PacingTiersTest` / `PacingTinyGameTest` went from 6.0 to 6.25 min (the story still fits its 9.7 budget in both);
+`RephrasedScriptTest` passes the segment's delivery to its expected estimates and gives its cap tests 60 s of budget room
+(the Immortal Game's story now sits 8 s under its budget). A first draft made the beat before every key move slow, which put
+40 % of the beats at 0.90; the set-up now applies only to a beat that is not itself a key move.
+
+**Unverified:** how any of it sounds (the speeds and gaps are guesses; Kokoro artefacts at 0.90 and 1.08 are not ruled out);
+that `OfflineTts.generate(speed=)` behaves as the sherpa-onnx docs say on the device; `:app` and `:engine` were not compiled (no
+Android SDK here), only reviewed; no instrumented test was run; the device-voice rate per utterance (`setSpeechRate` before
+`synthesizeToFile`) is untested. Budget effect: the story gets about 3 to 6 % longer in the recorded games.
+
+**Merge into main (2026-10-14).** NC was written on 4f35dd4 and merged after S5/EL2 and NS. Integration: the preparer's `segmentKeys`/`fallbackKeys`
+(and so `NarrationPrepLogic`'s missing count and the `PreparedNarrationStore` ledger, which only store what the preparer returns) use
+`NarrationKeys.segmentKey(segment, ...)`, so a segment recorded with a non-neutral delivery is not "missing" on the Video screen; the two
+instrumented tests that built keys by hand now use `NarrationKeys`. NS beats in `DeliveryPlan`: new `ScriptSegment.mateStep` (a bare move of an
+announced forced mate) is BRISK; the final mate stays WEIGHTY, the cold open (INTRO) and takeaways (lessons) CALM, phase shifts and the mate
+announcement normal (spec 9.10). `PacingTinyGameTest` bounds kept at 17 moves 4.0..6.0 and 23 moves 6.0..8.0 (measured 4.42 and 6.87 min).

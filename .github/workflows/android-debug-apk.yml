@@ -1,4 +1,4 @@
-# Builds an installable debug APK (arm64-v8a: Pixel 8 and every modern phone) and attaches it to the run.
+# Builds an installable debug APK (all ABIs; package net.palaya.chessanalyzer.dev, so it installs beside the release) and attaches it to the run.
 # The models are not in the APK: on first launch the app downloads them from this repo's models release (Setup screen).
 name: Android debug APK
 
@@ -29,13 +29,13 @@ jobs:
           bash scripts/fetch_stockfish.sh
           bash scripts/fetch_llama_cpp.sh
 
-      - name: Build the debug APK (arm64-v8a only)
-        run: bash ./gradlew --no-daemon --stacktrace :app:assembleDebug -Pandroid.injected.build.abi=arm64-v8a
+      - name: Build the debug APK (installs next to the released app as net.palaya.chessanalyzer.dev)
+        run: bash ./gradlew --no-daemon --stacktrace :app:assembleDebug -PpalayaSideBySide
 
       - uses: actions/upload-artifact@v4
         with:
           name: chess-analyzer-debug-apk
-          path: app/build/**/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: Host unit tests
