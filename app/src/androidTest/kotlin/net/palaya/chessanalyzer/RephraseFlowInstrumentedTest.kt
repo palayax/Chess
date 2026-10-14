@@ -61,8 +61,7 @@ class RephraseFlowInstrumentedTest {
         asked.add(r.surface.name + ": " + r.text)
         if (r.surface == RephraseSurface.NARRATION) {
             narrationCalls++
-            // merge the move and its evaluation into one sentence, as the real model does
-            r.text.replaceFirst(". The evaluation moves", ", and the evaluation moves")
+            narrationReword(r.text)
         } else r.text
             .replaceFirst(". It ", ", and it ")
             .replaceFirst(". That takes ", ", and that takes ")
@@ -71,6 +70,29 @@ class RephraseFlowInstrumentedTest {
     }
 
     private var narrationCalls = 0
+
+    /**
+     * One small, checker-safe change to a narration beat: the FIRST of these rules that applies (a single change per beat,
+     * each probed on the real checker over the recorded games' current beats; the story texts moved on with NS/NC, which
+     * is why the old ". The evaluation moves" join, a sentence the narration no longer has, reworded nothing). Which
+     * rules fire depends on the game's beats (an Opera Game run may have no missed-tactic replay), so there are several.
+     * Facts, their order and the number of every term stay the same.
+     */
+    private fun narrationReword(text: String): String {
+        val rules: List<(String) -> String> = listOf(
+            { t -> t.replaceFirst("Back to the game now.", "Now back to the game.") },
+            { t -> t.replaceFirst("Here we go. ", "Here we go, ") },
+            { t -> t.replaceFirst(". The move was ", ", and the move was ") },
+            { t -> t.replaceFirst(Regex("\\. (Black|White) plays "), ", and $1 plays ") },
+            { t -> t.replaceFirst(". It was ", ", and it was ") },
+            { t -> t.replaceFirst("Let's find it.", "Let's go and find it.") },
+        )
+        for (rule in rules) {
+            val out = rule(text)
+            if (out != text) return out
+        }
+        return text
+    }
 
     private companion object {
         /**
@@ -193,10 +215,11 @@ class RephraseFlowInstrumentedTest {
         val base = runBlocking { vm.videoScriptFor(stored.id) }!!
         val worded = runBlocking { vm.rephrasedVideoScriptFor(stored.id) }!!
         assertEquals(base.segments.size, worded.segments.size)
+        val changed = base.segments.indices.filter { worded.segments[it].narration != base.segments[it].narration }
         assertTrue(
-            "some beat carries the accepted rewording",
-            worded.segments.any { it.narration.contains(", and the evaluation moves") } &&
-                base.segments.none { it.narration.contains(", and the evaluation moves") },
+            "some beat carries the accepted rewording (asked ${asked.size} narration/card texts; " +
+                "narration calls $narrationCalls; first narration asked: ${asked.filter { it.startsWith("NARRATION") }.take(3)})",
+            changed.isNotEmpty(),
         )
         assertEquals(0, runBlocking { vm.narrationPolishPending(stored.id) })
 
