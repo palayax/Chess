@@ -1,0 +1,52 @@
+# Builds an installable debug APK (arm64-v8a: Pixel 8 and every modern phone) and attaches it to the run.
+# The models are not in the APK: on first launch the app downloads them from this repo's models release (Setup screen).
+name: Android debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Android SDK packages (compileSdk 36, NDK r28c, CMake 3.22.1)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - name: Fetch the pinned native sources (Stockfish sf_19, llama.cpp b11190)
+        run: |
+          bash scripts/fetch_stockfish.sh
+          bash scripts/fetch_llama_cpp.sh
+
+      - name: Build the debug APK (arm64-v8a only)
+        run: bash ./gradlew --no-daemon --stacktrace :app:assembleDebug -Pandroid.injected.build.abi=arm64-v8a
+
+      - name: Host unit tests
+        continue-on-error: true
+        run: bash ./gradlew --no-daemon :core:test :app:testDebugUnitTest :engine:testDebugUnitTest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chess-analyzer-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-reports
+          path: "**/build/reports/tests/**"
+          if-no-files-found: ignore
