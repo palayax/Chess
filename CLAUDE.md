@@ -402,6 +402,12 @@ conflict.
 
 ## Testing standards
 
+- **CI (GitHub Actions, `.github/workflows/`).** `android-debug-apk.yml` builds a downloadable debug APK on every
+  `claude/**` push with `-PpalayaSideBySide` (package `net.palaya.chessanalyzer.dev`, so it installs beside the
+  release-signed app on the owner's phone) and runs the host unit tests. `emulator-tests.yml` runs the instrumented
+  suites on an API 34 x86_64 emulator; a push runs it only when the commit message contains `[emulator]`. The
+  cloud development container has no Android SDK (dl.google.com is blocked), so CI is where `:app` is compiled.
+
 - **Instrumented tests share one real DataStore.** Preferences written by one test survive into the
   next, so a test that needs a pristine value must *establish* it, not assume it (see
   `NarrationSettingsRepository.clearProviderChoiceForTesting`). A test that passed alone and fails
