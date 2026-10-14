@@ -75,8 +75,15 @@ jobs:
             sleep 10
           done
 
+      # One suite at a time (CLAUDE.md: never two connected suites at once; Gradle would run them in parallel on the
+      # one emulator; run 2 did, and its export timing test then failed, most likely from that load).
       - name: Instrumented tests
-        run: bash ./gradlew --no-daemon --continue ${{ inputs.suites || ':engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest' }}
+        run: |
+          rc=0
+          for t in ${{ inputs.suites || ':engine:connectedDebugAndroidTest :app:connectedDebugAndroidTest' }}; do
+            bash ./gradlew --no-daemon "$t" || rc=1
+          done
+          exit $rc
 
       - uses: actions/upload-artifact@v4
         if: always()
