@@ -85,9 +85,11 @@ class PacingTinyGameTest {
             assertTrue("$name ($moves moves) ran ${s.storyMs / 1000.0}s against ${budget / 1000.0}s", s.storyMs <= budget)
             minutes[moves] = s.totalEstimatedMs / 60_000.0
         }
-        // 17 moves about five minutes, the Immortal Game seven to eight, forty moves at most about twelve.
+        // 17 moves about four to five minutes, the Immortal Game six to eight (seven to eight before NS, which
+        // dropped the filler sentences and the statistics: the budget is a ceiling, never a target), forty moves at
+        // most about twelve.
         assertTrue("17 moves: ${minutes[17]} min", minutes.getValue(17) in 4.0..6.0)
-        assertTrue("23 moves: ${minutes[23]} min", minutes.getValue(23) in 7.0..8.0)
+        assertTrue("23 moves: ${minutes[23]} min", minutes.getValue(23) in 6.0..8.0)
         assertTrue("40 moves: ${minutes[40]} min", minutes.getValue(40) <= 12.0)
         assertTrue("8 moves: ${minutes[8]} min", minutes.getValue(8) < 152 / 60.0)
         assertTrue("4 moves: ${minutes[4]} min", minutes.getValue(4) in 0.7..1.1)
@@ -100,7 +102,9 @@ class PacingTinyGameTest {
         assertTrue("${s.storyMs} vs $budget", s.storyMs < budget - 20_000L)
         // The structure is whole: nothing was trimmed because nothing had to be.
         assertTrue(s.segments.any { it.kind == SegmentKind.OPENING_SUMMARY })
-        assertTrue(s.segments.count { it.kind == SegmentKind.OUTRO_LESSONS } >= 2)
+        // One takeaway since NS (ANALYSIS_SPEC 9.9), and the outro says how the game stopped and that nothing decided it.
+        assertEquals(1, s.segments.count { it.kind == SegmentKind.OUTRO_LESSONS })
+        assertTrue(s.segments.single { it.kind == SegmentKind.OUTRO_SUMMARY }.narration.contains("no single decisive mistake"))
     }
 
     // -----------------------------------------------------------------------
@@ -140,19 +144,26 @@ class PacingTinyGameTest {
 
     @Test
     fun `the structure gives way in order, and only after the story has`() {
-        // A one-minute game keeps one lesson and drops the ratings and the opening summary...
+        // A one-minute game keeps its one lesson, and says how it ended; the sentence about the decisive move and
+        // the opening summary have gone...
         val (_, tiny) = script(RealGameFixture.scholars)
-        assertTrue(tiny.segments.count { it.kind == SegmentKind.OUTRO_LESSONS } <= 1)
+        assertEquals(1, tiny.segments.count { it.kind == SegmentKind.OUTRO_LESSONS })
         assertTrue(tiny.segments.none { it.kind == SegmentKind.OPENING_SUMMARY })
         val outro = tiny.segments.single { it.kind == SegmentKind.OUTRO_SUMMARY }.narration
-        assertTrue(outro, "percent accuracy" in outro)
-        // no estimate is given, so no caveat about estimates is left dangling either
-        assertTrue(outro, "roughly" !in outro && "rating" !in outro)
+        assertTrue(outro, "checkmate" in outro)
+        assertTrue(outro, "decisive" !in outro)
         // ...while the Opera Game, which fits, loses none of it.
         val (_, normal) = script(RealGameFixture.chesscom)
         assertTrue(normal.segments.any { it.kind == SegmentKind.OPENING_SUMMARY })
-        assertTrue(normal.segments.count { it.kind == SegmentKind.OUTRO_LESSONS } >= 2)
-        assertTrue(normal.segments.single { it.kind == SegmentKind.OUTRO_SUMMARY }.narration.contains("roughly"))
+        assertEquals(1, normal.segments.count { it.kind == SegmentKind.OUTRO_LESSONS })
+        assertTrue(normal.segments.single { it.kind == SegmentKind.OUTRO_SUMMARY }.narration.contains("decisive moment"))
+        // No statistic is read out in either: the numbers are on the cards.
+        for (s in listOf(tiny, normal)) {
+            for (seg in s.segments.filter { it.kind == SegmentKind.OUTRO_SUMMARY || it.kind == SegmentKind.OUTRO_LESSONS }) {
+                assertTrue(seg.narration, !Regex("percent|roughly|rating|accuracy").containsMatchIn(seg.narration))
+                assertTrue(seg.narration, !Regex("\\d+\\.\\d").containsMatchIn(seg.narration))
+            }
+        }
     }
 
     @Test

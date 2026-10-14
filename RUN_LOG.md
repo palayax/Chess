@@ -5036,3 +5036,56 @@ Causes found by reading the code, fixed in this branch (no Gradle/Android SDK in
 Host tests added (not run): `NarrationPrepLogicTest`, `PreparedNarrationStoreTest`, `NarrationFallbackIndexesTest`, `LlamaRephraserTest.aRetiredRephraser...`.
 To verify on a phone: a Pixel 8 timing of review + video; side answer then Video (should be recording already or done); restart then Video
 (no new Kokoro load when only fallbacks are missing); the LLM not loading during a recording (log "rephrase: model released", no new load).
+
+
+---
+
+## NS: narration story + rhythm (2026-10-14)
+
+Owner's phone test: "The narration voice is great but the script is pretty terrible: it's not clear what is going on during the
+game, everything is read with the same intonation." Parts A (story) and B (rhythm) approved; part C (per-beat TTS speed) not in
+scope, `app/` untouched. Design and rules: ANALYSIS_SPEC 9.9, COMMENTARY_STYLE 8.
+
+What changed (all in `:core`): `GamePhases` (new, pure: seven standings from the White win-percent series, 3-point hysteresis,
+merging of phases under four positions, shifts on the move that caused them), `StoryArc` (stakes: comeback / took over / tight
+draw / wasted lead; what followed the turning move), and the generator: a cold open with the stakes and how it ended (the hook
+keeps its data, the unprovable "closer than the result makes it look" is gone); the opening ends with where the book left the
+game; every phase boundary is told at its move with the cause when the boards prove one (error / forced mate / settled material),
+promoted to BRIEF and kept by the budget; errors as cause and consequence (what the move let in: the engine's mate or best
+capture; the better move and what it did: mate or settled material over four plies; "gives nothing away" removed); mating
+sequences announced once with the engine's distance then said bare; skipped stretches described by what the board shows;
+turning point with its aftermath; outro = how it ended + the decisive move (no accuracy, rating or counts spoken); one takeaway
+tied to the worst error. Rhythm: bare moves next to comma-linked cause and effect, two shapes for an inaccuracy, one question
+(before a missed move that gets no pause), "!" only for the checkmate and a Brilliant move, no lead-in glued to an interjection,
+filler removed or thinned. Removed sentences: OutroAccuracy/OutroRatings/ErrorCounts/NoMistakes/ShortGameCaveat/OutroLead,
+Lesson* (7), EvalShift, MateClosing, BetterWas, QuietMove, BestDefence, CheckMustBeAnswered, TurningPointFromTo, TheoryRunsOut.
+The "That's losing turning into decisively lost" read for an EXCELLENT move was not a bug: a mover-relative band change across a
+cut-off by a hair was narrated as a turn; the beat now says a band change only for an error, and a phase boundary otherwise.
+
+Verification: `:core:test` 642 tests, 0 failed, 0 skipped (was 613). `audit_commentary.py`: `after` 144 texts / 0 WRONG, `lines`
+2604 checks / 0 WRONG, `mutate` (cards, lines, story) 0 not flagged, `story` 1397 sentences / 0 WRONG, `mutate-story` 0 not flagged,
+`rephrase` and `mutate-rephrase` agree with Kotlin (8690 mutation lines, 287 / 287 / 578 / 287 recorded-run lines: 0 differences).
+ClaimChecker/rephrase_check.py unchanged. Found by the checker: the first wording of the "what it let in" sentence used "lets /
+allows / can play", which ClaimChecker reads as a charge and mis-attributes (14 mutations rejected for the wrong reason); the
+sentence uses "now X has" instead (CLAUDE.md gotcha).
+
+Test expectations changed (not weakened): `PacingTiersTest` sacrifices/brilliancies (a nine-second proxy for DWELL replaced by
+the beat's kind, the key-move hold and the word "brilliant"/"forced mate"), `PacingTinyGameTest` (one lesson; no statistics in the
+outro; 23 moves now 6 to 8 minutes), `VideoScriptGeneratorTest` (one takeaway; a question to the viewer is not an address to a
+player), `BestLineVideoTest` (game01 has no key moment left that only names the better move: the budget no longer thins its
+errors), `NarrationTacticGateTest` (the fixture's missed-tactic move now is not the engine's best move), `NarrationClaimsTest`
+(two removed lesson sentences), `RephraseMeasurementDumpTest` (see below).
+
+Length (Normal pace, no side; story+pace seconds, old in brackets): Immortal 396 (463), Byrne-Fischer 437 (576), game01 597 (616),
+Opera 253 (342), scholar's mate 50 (54). All inside the section 9.7 budget.
+
+Remains / not done:
+- The recorded wording-model runs (`docs/audit/rephrase/raw_*.jsonl`) are of the old narration; their NARRATION rows are judged but
+  stale (the test now holds only the CARD rows to the 2 % bar and says so in the report). They must be re-run with
+  `scripts/rephrase_measure.py` on a host with llama.cpp and the models; I could not here.
+- Three story verifiers are untested on real data (`OpeningVerdict`, `TakeawayAllowed`, `TakeawayHabitAllowed`, COMMENTARY_AUDIT NS).
+- Not run: `:app` / `:engine` / device tests (no Android SDK here). `:app` code does not reference any removed sentence (grep), and
+  `SpokenRespellingTest` only needs the catalogue to keep a zwischenzug and an en prise sentence, which it does.
+- The spoken script is longer on bare beats in a decided position (a 50 cp swing still earns its beat, 9.2); a "nothing to say"
+  SKIP was tried and reverted because it contradicts 9.2 and `NarrationSignificanceTest`.
+- Owner's ear: the new prose is unheard; part C (per-beat speed) would add the intonation the text can only hint at.

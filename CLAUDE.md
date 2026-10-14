@@ -404,6 +404,11 @@ conflict.
   professional term is used only where its definition is proved (C1). Phrasings rotate by
   `Variety(ply)`, never by randomness, so the text is a pure function of the annotation and the
   viewer's side, is rewritten when the user picks a side, and keeps the narration cache reproducible.
+- **The narrated story is verified too (NS, ANALYSIS_SPEC 9.9).** `core.analysis.GamePhases` + `core.narration.StoryArc` give the video its
+  arc (stakes, phase turns, causes); every story sentence is recorded by `VideoScriptGenerator.generateWithStory` and re-derived by
+  `scripts/audit_commentary.py story` (and broken one claim at a time by `mutate-story`). A new story sentence needs a verifier there, a
+  template in `NarrationStoryTest`, a row in `docs/COMMENTARY_STYLE.md` and a catalogue sample. Gotcha: never put `lets`, `let`, `hands`,
+  `can play` or `allows` next to a move in narration prose; `ClaimChecker` reads those as a charge and mis-attributes it.
 - Move generation is verified by **perft** against the five standard positions: **depth 5** on the
   start position and Position 3, **depth 4** on Kiwipete, Position 4 and Position 5. If you
   touch move generation, those numbers must stay exact — they are the correctness oracle.

@@ -2,11 +2,16 @@ package net.palaya.chessanalyzer.core.narration
 
 import net.palaya.chessanalyzer.core.analysis.BestLines
 import net.palaya.chessanalyzer.core.analysis.ExchangeEvaluator
+import net.palaya.chessanalyzer.core.analysis.GamePhases
 import net.palaya.chessanalyzer.core.analysis.GameReport
+import net.palaya.chessanalyzer.core.analysis.MaterialBalance
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
 import net.palaya.chessanalyzer.core.analysis.MoveSequence
 import net.palaya.chessanalyzer.core.analysis.MoveSequenceDetector
+import net.palaya.chessanalyzer.core.analysis.Phase
+import net.palaya.chessanalyzer.core.analysis.PhaseShift
+import net.palaya.chessanalyzer.core.analysis.PhaseStanding
 import net.palaya.chessanalyzer.core.analysis.PlayerReport
 import net.palaya.chessanalyzer.core.analysis.TacticInstance
 import net.palaya.chessanalyzer.core.analysis.TacticReferenceLibrary
@@ -53,7 +58,18 @@ class VideoScriptGenerator(
     private val strings: NarrationStrings = NarrationLocales.default
 ) {
 
-    fun generate(report: GameReport, game: PgnGame, options: NarrationOptions): VideoScript {
+    fun generate(report: GameReport, game: PgnGame, options: NarrationOptions): VideoScript =
+        run(report, game, options).first
+
+    /**
+     * [generate] and, beside the script, what its story sentences claimed (ANALYSIS_SPEC §9.9): each as the sentence
+     * kind, the words and the plies it is about. The input of the story audit (`scripts/audit_commentary.py story`),
+     * which re-derives every claim from the engine's recorded numbers without the generator's help.
+     */
+    internal fun generateWithStory(report: GameReport, game: PgnGame, options: NarrationOptions): Pair<VideoScript, List<StoryPart>> =
+        run(report, game, options).let { (script, builder) -> script to builder.storyParts.toList() }
+
+    private fun run(report: GameReport, game: PgnGame, options: NarrationOptions): Pair<VideoScript, ScriptBuilder> {
         var demoted: Map<Int, PacingTier> = emptyMap()
         var trim = 0
         var builder = ScriptBuilder(report, game, options, userColor, strings, demoted, trim)
@@ -88,7 +104,7 @@ class VideoScriptGenerator(
         // ANALYSIS_SPEC 9.8: the pace is laid over the finished story, after the budget has decided what
         // is told, so every pace tells the same story in the same words (and plays the same cached
         // narration); only the silent board time around the key moves differs.
-        return builder.paced(script)
+        return builder.paced(script) to builder
     }
 
     companion object {
@@ -153,6 +169,13 @@ class VideoScriptGenerator(
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
+
+/**
+ * One story sentence as it was said (ANALYSIS_SPEC §9.9): [id] the sentence kind (`Sentence` class name), [text] the
+ * words as rendered, [plies] the plies it is about (the move it follows, a phase boundary's ply, a skipped stretch's two
+ * ends). What the story audit reads.
+ */
+internal class StoryPart(val id: String, val text: String, val plies: List<Int>)
 
 /** Why a ply earned a spoken beat. Maps onto [SegmentKind] once the segment is emitted. */
 private enum class BeatKind { MISSED_TACTIC, ERROR, FOUND_TACTIC, THREAT, KEY, NORMAL }
@@ -233,6 +256,36 @@ private class ScriptBuilder(
     private val keyMomentPlies = report.keyMoments.map { it.ply }.toSet()
 
     /**
+     * The White win-percent of every position (index `k` = the board after ply `k`, 0 = the start), the series
+     * [GamePhases] reads (ANALYSIS_SPEC §9.9). The report's own graph when it has one position per ply plus the
+     * start, else rebuilt from the annotations.
+     */
+    private val whiteSeries: List<Double> =
+        if (annotations.isNotEmpty() && report.evalGraph.size == annotations.size + 1) {
+            report.evalGraph
+        } else if (annotations.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(flipToWhite(annotations[0].winPercentBefore, annotations[0].color)) +
+                annotations.map { flipToWhite(it.winPercentAfter, it.color) }
+        }
+
+    /** The stretches of the game in which one side held one standing, and the boundaries between them. */
+    private val phases: List<Phase> = GamePhases.detect(whiteSeries)
+    private val shiftAt: Map<Int, PhaseShift> = GamePhases.shifts(phases).associateBy { it.ply }
+
+    /** The plies whose beat already said how the standing changed (an error beat says it in its own words). */
+    private val phaseTold = HashSet<Int>().also { told ->
+        // The opening summary says where the book left the game; the boundaries inside the book are not told again.
+        val bookEnd = annotations.lastOrNull { it.classification == MoveClassification.BOOK }?.ply ?: 0
+        for (ply in shiftAt.keys) if (ply <= bookEnd) told.add(ply)
+    }
+
+    /** The last ply of a mating sequence that was announced or stepped, and who was mating (A5). */
+    private var lastMatePly = -10
+    private var lastMateColor: Color? = null
+
+    /**
      * The one move that changed the game most. Book moves and forced moves are never it: theory is
      * not a decision, and a forced move is not a choice, so neither can be where the game turned.
      */
@@ -253,6 +306,16 @@ private class ScriptBuilder(
     /** The words for [sentence] in this language, rotating through the locale's variants. */
     private fun say(sentence: Sentence): String =
         phrases.pick(sentence.poolKey, strings.render(sentence, options.style))
+
+    /** Every story sentence said, for the audit; see [StoryPart]. */
+    val storyParts = ArrayList<StoryPart>()
+
+    /** [say] for a sentence that makes a claim the story audit re-derives; remembers what was said and about which plies. */
+    private fun story(sentence: Sentence, vararg plies: Int): String {
+        val text = say(sentence)
+        storyParts.add(StoryPart(sentence::class.simpleName ?: "sentence", text, plies.toList()))
+        return text
+    }
 
     // -----------------------------------------------------------------------
     // Entry point
@@ -337,7 +400,14 @@ private class ScriptBuilder(
             ).append(' ')
         }
 
-        sb.append(resultSentence()).append(' ')
+        // The cold open (ANALYSIS_SPEC §9.9): one sentence about the stakes, proven by the game's phases, then how it
+        // ended; a game whose graph proves no such sentence keeps the plain result.
+        val arc = StoryArc.of(phases, report.result, annotations.size)
+        if (arc != null) {
+            sb.append(story(stakesSentence(arc))).append(' ').append(endingSentence()).append(' ')
+        } else {
+            sb.append(resultSentence()).append(' ')
+        }
         if (userColor != null && options.addressUserAsYou && coach) {
             sb.append(say(Sentence.IntroYouWere(subj(userColor)))).append(' ')
         }
@@ -370,6 +440,23 @@ private class ScriptBuilder(
         )
     }
 
+    private fun stakesSentence(arc: StoryArc): Sentence = when (arc) {
+        is StoryArc.Comeback -> Sentence.StakesComeback(arc.winner, arc.moves)
+        is StoryArc.TookOver -> Sentence.StakesTookOver(arc.winner, arc.moveNumber, arc.fromTheStart)
+        StoryArc.TightDraw -> Sentence.StakesTightDraw
+        is StoryArc.WastedLead -> Sentence.StakesWastedLead(arc.leader, arc.moves)
+    }
+
+    /** How the game ended, said after a stakes sentence that has already named the winner. */
+    private fun endingSentence(): String {
+        val fullMoves = (annotations.size + 1) / 2
+        val mated = annotations.lastOrNull()?.san?.endsWith("#") == true
+        return when (report.result) {
+            "1/2-1/2" -> say(Sentence.ResultDraw(fullMoves))
+            else -> if (mated) story(Sentence.ResultEndsInMate(fullMoves)) else story(Sentence.ResultLasted(fullMoves))
+        }
+    }
+
     private fun resultSentence(): String {
         val fullMoves = (annotations.size + 1) / 2
         val mated = annotations.lastOrNull()?.san?.endsWith("#") == true
@@ -386,9 +473,9 @@ private class ScriptBuilder(
         val biggest = turningPoint
         return when {
             missedMate != null -> say(Sentence.HookMissedMate)
-            biggest != null && biggest.loss >= 30.0 -> say(Sentence.HookBigTurn(biggest.moveNumber))
-            biggest != null && biggest.loss >= 12.0 -> say(Sentence.HookClose(biggest.moveNumber))
-            biggest != null -> say(Sentence.HookClean)
+            biggest != null && biggest.loss >= 30.0 -> story(Sentence.HookBigTurn(biggest.moveNumber), biggest.ply)
+            biggest != null && biggest.loss >= 12.0 -> story(Sentence.HookClose(biggest.moveNumber), biggest.ply)
+            biggest != null -> story(Sentence.HookClean, biggest.ply)
             else -> say(Sentence.HookNoMistakes)
         }
     }
@@ -404,12 +491,17 @@ private class ScriptBuilder(
         sb.append(if (family != null) say(Sentence.OpeningPlan(family)) else genericOpeningPlan())
 
         val bookEndPly = annotations.lastOrNull { it.classification == MoveClassification.BOOK }?.ply
-        if (bookEndPly != null && bookEndPly >= 4) {
-            sb.append(' ').append(say(Sentence.TheoryRunsOut((bookEndPly + 1) / 2)))
-        }
 
         // One ply drives the held position AND the eval bar, so the two can never disagree.
         val openingPly = bookEndPly ?: annotations.getOrNull(min(5, annotations.size - 1))?.ply
+
+        // How the opening left the game (ANALYSIS_SPEC §9.9): the band of the board after the last book move.
+        val standingThere = openingPly?.let { whiteSeries.getOrNull(it) }?.let { PhaseStanding.of(it) }
+        if (bookEndPly != null && bookEndPly >= 4 && standingThere != null) {
+            sb.append(' ').append(story(Sentence.TheoryEnds((bookEndPly + 1) / 2, standingThere), openingPly!!))
+        } else if (standingThere != null) {
+            sb.append(' ').append(story(Sentence.OpeningVerdict(standingThere), openingPly!!))
+        }
         val fen = openingPly?.let { annotations[it - 1].fenAfter }
             ?: game.startFen ?: Position.STANDARD_START_FEN
 
@@ -467,6 +559,8 @@ private class ScriptBuilder(
                 chapter(Sentence.ChapterMove(a.moveNumber, a.san))
             }
             emitBeat(ply, leadIn)
+            // A phase boundary whose beat did not say it (an error beat tells the standing in its own words).
+            phaseBeatIfUntold(ply)
             // A turning point the budget has taken down to BRIEF is told by its own beat alone.
             if (turningPoint != null && turningPoint.ply == ply && tiers[ply] != PacingTier.BRIEF) {
                 chapter(Sentence.ChapterTurningPoint)
@@ -526,6 +620,13 @@ private class ScriptBuilder(
             if (candidates != null && a.ply !in candidates) t = PacingTier.SKIP
             if (pruning && t != PacingTier.SKIP && !isMate(a) && !isSignificant(a.ply)) t = PacingTier.SKIP
             tier[a.ply] = t
+        }
+
+        // A phase boundary is told at the move that caused it (ANALYSIS_SPEC §9.9): at least a BRIEF beat, whatever
+        // else the plan said about the ply. Not in MISTAKES_ONLY, which is only the errors.
+        if (depth != NarrationDepth.MISTAKES_ONLY) {
+            val bookEnd = annotations.lastOrNull { it.classification == MoveClassification.BOOK }?.ply ?: 0
+            for (ply in shiftAt.keys) if (ply > bookEnd && tier[ply] == PacingTier.SKIP) tier[ply] = PacingTier.BRIEF
         }
 
         // The turning point is the story of the game, so it is always FULL (if it survived at all).
@@ -1007,7 +1108,10 @@ private class ScriptBuilder(
             msByPly[ply] = (msByPly[ply] ?: 0L) + s.estimatedSpeechMs + s.holdAfterMs
         }
         fun movable(tier: PacingTier) = annotations
-            .filter { tiers[it.ply] == tier && !isMate(it) && !isProtected(it) && it.ply != turningPoint?.ply }
+            .filter {
+                tiers[it.ply] == tier && !isMate(it) && !isProtected(it) && it.ply != turningPoint?.ply &&
+                    !(tier == PacingTier.BRIEF && it.ply in shiftAt)
+            }
             .sortedWith(compareBy<MoveAnnotation> { interest(it) }.thenByDescending { it.ply })
 
         val out = LinkedHashMap<Int, PacingTier>()
@@ -1118,13 +1222,37 @@ private class ScriptBuilder(
         .map { it.ply }
         .toSet()
 
+    /**
+     * What the plies between two told beats were like, as far as the boards prove it: no capture and no check and
+     * hardly any change in the evaluation (QUIET), trades in both directions (TRADES), or nothing more (PLAIN).
+     */
+    private fun skipKind(fromPly: Int, toPly: Int): SkipKind {
+        val skipped = (fromPly + 1) until toPly
+        var capturesWhite = 0
+        var capturesBlack = 0
+        var checks = 0
+        var swing = 0.0
+        for (k in skipped) {
+            val move = moves.getOrNull(k - 1)
+            if (move?.isCapture == true) if (move.color == Color.WHITE) capturesWhite++ else capturesBlack++
+            val san = annotations[k - 1].san
+            if (san.endsWith("+") || san.endsWith("#")) checks++
+            swing = max(swing, abs(whiteSeries.getOrElse(k) { 50.0 } - whiteSeries.getOrElse(k - 1) { 50.0 }))
+        }
+        return when {
+            capturesWhite == 0 && capturesBlack == 0 && checks == 0 && swing <= QUIET_SWING -> SkipKind.QUIET
+            capturesWhite >= 1 && capturesBlack >= 1 -> SkipKind.TRADES
+            else -> SkipKind.PLAIN
+        }
+    }
+
     private fun connective(fromPly: Int, toPly: Int) {
         val target = annotations[toPly - 1]
         val fromMoveNo = annotations[fromPly - 1].moveNumber
         add(
             kind = SegmentKind.NORMAL_MOVE,
             ply = null,
-            narration = say(Sentence.SkipAhead(target.moveNumber)),
+            narration = story(Sentence.SkipAhead(target.moveNumber, skipKind(fromPly, toPly)), fromPly, toPly),
             caption = say(Sentence.CaptionMoves(fromMoveNo, target.moveNumber)),
             board = BoardDirective.Hold(target.fenBefore),
             eval = evalBefore(toPly),
@@ -1152,11 +1280,137 @@ private class ScriptBuilder(
     private fun emitBeat(ply: Int, leadIn: String) {
         val a = annotations[ply - 1]
         if (isMate(a)) return matingBeat(a, leadIn)
+        // A move of a mating sequence that is already under way is said bare, whatever tier it earned.
+        if (continuesMate(a) && moverMate(a) != null && options.depth != NarrationDepth.EVERY_MOVE) return mateStepBeat(a)
         when (tiers[ply] ?: PacingTier.BRIEF) {
             PacingTier.FULL -> fullBeat(a, leadIn)
             PacingTier.DWELL -> dwellBeat(a, leadIn)
             PacingTier.BRIEF, PacingTier.SKIP -> briefBeat(a, leadIn)
         }
+    }
+
+    // -- The story (ANALYSIS_SPEC §9.9) --------------------------------------------------------
+
+    /** A lead-in fragment ("A little later, ") made a sentence of its own, for a beat that opens with an interjection. */
+    private fun asSentence(leadIn: String): String {
+        val t = leadIn.trim().trimEnd(',')
+        if (t.isEmpty()) return ""
+        return if (t.endsWith(".") || t.endsWith("?")) "$t " else "$t. "
+    }
+
+    /** The mover-relative forced mate the move started: its distance (counting the move itself), or null. */
+    private fun moverMate(a: MoveAnnotation): Int? {
+        val m = a.mateInBefore ?: return null
+        val rel = if (a.color == Color.WHITE) m else -m
+        return rel.takeIf { it in 1..MAX_MATE_SPOKEN }
+    }
+
+    /** True when [a] carries on a mating sequence the previous told beat started (the same side, at most one move apart). */
+    private fun continuesMate(a: MoveAnnotation): Boolean = lastMateColor == a.color && a.ply - lastMatePly <= 2
+
+    private fun noteMate(a: MoveAnnotation) {
+        lastMatePly = a.ply
+        lastMateColor = a.color
+    }
+
+    /**
+     * Why the standing changed at [shift], when the boards prove it, in this order: the side that lost ground played a
+     * mistake, a miss or a blunder at the boundary move or the one before; the side that gained ground started a
+     * forced mate; the gaining side came out ahead on material across those two moves (settled, named by the 40 cp rule).
+     */
+    private fun phaseCause(shift: PhaseShift): PhaseCause? {
+        val gainer = shift.benefiting ?: return null
+        val loser = gainer.opposite()
+        val window = listOf(shift.ply, shift.ply - 1).filter { it in 1..annotations.size }.map { annotations[it - 1] }
+        window.filter { it.color == loser && it.classification in PHASE_ERRORS }
+            .maxWithOrNull(compareBy<MoveAnnotation> { it.loss }.thenBy { -it.ply })
+            ?.let { return PhaseCause.Error(loser, it.classification, it.moveNumber) }
+        window.firstOrNull { it.color == gainer && moverMate(it) != null }
+            ?.let { return PhaseCause.MateFound(gainer, moverMate(it)!!) }
+        val start = positionAt(max(0, shift.ply - 2))
+        val end = positionAt(shift.ply)
+        val settled = ExchangeEvaluator.settledGain(start, end, gainer)
+        if (settled >= MIN_PAYOFF_CP) {
+            return PhaseCause.WonMaterial(gainer, NarrationVocabulary.materialGainAlong(start, end, gainer, settled))
+        }
+        return null
+    }
+
+    /** The board after ply [k] (0 = the start). */
+    private fun positionAt(k: Int): Position =
+        if (k <= 0) positionsBefore.firstOrNull() ?: Position.startPosition() else safeFen(annotations[k - 1].fenAfter)
+
+    /** The sentence for the phase boundary caused by [a]'s move, once; null when there is none or it was told already. */
+    private fun takePhase(a: MoveAnnotation): String? {
+        val shift = shiftAt[a.ply] ?: return null
+        if (!phaseTold.add(a.ply)) return null
+        return story(Sentence.PhaseTurn(shift.from, shift.to, phaseCause(shift)), shift.ply)
+    }
+
+    /** A phase boundary that no beat of its ply has told: said over the board as it stands after the move. */
+    private fun phaseBeatIfUntold(ply: Int) {
+        val a = annotations[ply - 1]
+        val text = takePhase(a) ?: return
+        add(
+            kind = SegmentKind.NORMAL_MOVE,
+            ply = null,
+            narration = text,
+            caption = caption(a),
+            board = BoardDirective.Hold(a.fenAfter),
+            eval = evalAfter(a.ply),
+            moveNumber = a.moveNumber
+        )
+    }
+
+    /** What the played move let the opponent do, as far as the engine's own numbers prove it. */
+    private sealed interface Allows {
+        data class Mate(val mateIn: Int) : Allows
+        data class Reply(val reply: SpokenMove, val gain: MaterialGain?) : Allows
+    }
+
+    private fun allowsOf(a: MoveAnnotation): Allows? {
+        val after = a.mateInAfter
+        if (after != null) {
+            val rel = if (a.color == Color.WHITE) after else -after
+            if (rel < 0 && -rel <= MAX_MATE_SPOKEN) return Allows.Mate(-rel)
+        }
+        val reply = annotations.getOrNull(a.ply)?.bestMoveUci ?: return null
+        val board = safeFen(a.fenAfter)
+        val move = SpokenChess.moveOrNull(board, reply) ?: return null
+        if (!move.isCapture) return null
+        // Taking back on the square the move just took on is the other half of a trade, not something it let in.
+        val played = moves.getOrNull(a.ply - 1)
+        if (played != null && played.isCapture && played.to == move.to) return null
+        val see = ExchangeEvaluator.see(board, move)
+        if (see < MIN_PAYOFF_CP) return null
+        return Allows.Reply(SpokenChess.describe(board, move), NarrationVocabulary.materialGain(see))
+    }
+
+    /**
+     * What the engine's best move did, from the position before the error: it started a forced mate for the mover, or
+     * along the engine's own line (the first [BETTER_LINE_PLIES] plies, settled) it nets at least a pawn; else nothing
+     * more than the move can be said.
+     */
+    private fun betterResult(a: MoveAnnotation): BetterResult {
+        moverMate(a)?.let { return BetterResult.Mates(it) }
+        val gain = bestLineGain(a)
+        if (gain >= MIN_PAYOFF_CP) return BetterResult.Wins(NarrationVocabulary.materialGain(gain))
+        return BetterResult.Plain
+    }
+
+    /** The most the mover nets, settled, at any point of the first plies of the engine's best line. */
+    private fun bestLineGain(a: MoveAnnotation): Int {
+        val line = missedLine(a) ?: return 0
+        val start = positionsBefore[a.ply - 1]
+        var pos = start
+        var best = 0
+        for (uci in line.uci.take(BETTER_LINE_PLIES)) {
+            val move = SpokenChess.moveOrNull(pos, uci) ?: break
+            pos = pos.makeMove(move)
+            best = max(best, ExchangeEvaluator.settledGain(start, pos, a.color))
+            if (pos.isCheckmate()) break
+        }
+        return best
     }
 
     private fun isErrorClass(a: MoveAnnotation): Boolean =
@@ -1219,9 +1473,9 @@ private class ScriptBuilder(
     }
 
     /**
-     * "White plays X." and then the one thing that makes it worth a beat: the tactic it carries, or
-     * what it did to the evaluation. Never a pleasantry - "Top of the engine's list" and "No
-     * complaints" say nothing, and a beat that has nothing to say should have been a skip.
+     * "White plays X." and then the one thing that makes it worth a beat: the tactic it carries, how the standing
+     * changed (a phase boundary), or what it did to the evaluation when that was worth saying. Never a pleasantry -
+     * "Top of the engine's list" and "No complaints" say nothing, and a beat that has nothing to say stops at the move.
      */
     private fun briefMoveBeat(a: MoveAnnotation, leadIn: String) {
         val tactic = a.tacticsFound
@@ -1229,12 +1483,15 @@ private class ScriptBuilder(
             .maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
         val sb = StringBuilder(leadIn)
         sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
-        val before = NarrationVocabulary.standing(a.winPercentBefore)
-        val after = NarrationVocabulary.standing(a.winPercentAfter)
+        val phase = takePhase(a)
         when {
-            tactic != null -> sb.append(say(NarrationVocabulary.tacticPoint(tactic, positionsBefore[a.ply - 1])))
-            before != after -> sb.append(say(Sentence.ConsequenceChanged(subj(a.color), before, after)))
-            else -> sb.append(say(Sentence.EvalShift(subj(a.color), a.winPercentAfter >= a.winPercentBefore)))
+            tactic != null -> {
+                sb.append(say(NarrationVocabulary.tacticPoint(tactic, positionsBefore[a.ply - 1])))
+                phase?.let { sb.append(' ').append(it) }
+            }
+            phase != null -> sb.append(phase)
+            abs(a.winPercentAfter - a.winPercentBefore) >= REMARK_MIN_SWING ->
+                sb.append(story(Sentence.SmallSwing(subj(a.color), a.winPercentAfter >= a.winPercentBefore), a.ply))
         }
         add(
             kind = if (tactic != null) SegmentKind.FOUND_TACTIC else SegmentKind.NORMAL_MOVE,
@@ -1252,9 +1509,19 @@ private class ScriptBuilder(
     /** "White plays X. Y was the move." - what an inaccuracy deserves, and no more. */
     private fun briefMistakeBeat(a: MoveAnnotation, leadIn: String) {
         val sb = StringBuilder(leadIn)
-        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        val spoken = spokenMoves.getOrNull(a.ply - 1)
+        // Two shapes, so a run of small slips does not repeat one cadence: the move and the better move as two
+        // sentences, or the move with its verdict in the same breath.
+        var saidVerdict = false
+        if (spoken != null && a.classification == MoveClassification.INACCURACY && thinned("slip", 2)) {
+            sb.append(cap(story(Sentence.PlayedSlip(subj(a.color), MoveVerb.PLAY, spoken, isRecapture(a)), a.ply))).append(' ')
+            saidVerdict = true
+        } else {
+            sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        }
         val better = betterMoveSentence(a)
-        sb.append(better ?: say(Sentence.InaccuracyNote))
+        sb.append(better ?: if (saidVerdict) "" else say(Sentence.InaccuracyNote))
+        takePhase(a)?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
@@ -1271,16 +1538,23 @@ private class ScriptBuilder(
 
     /** The finish deserves its own beat rather than being narrated as another quiet move. */
     private fun matingBeat(a: MoveAnnotation, leadIn: String) {
-        val sb = StringBuilder(leadIn)
-        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
-        sb.append(say(Sentence.MateClosing)).append(' ')
+        val continuing = continuesMate(a)
+        val sb = StringBuilder(if (continuing) "" else leadIn)
+        if (continuing) {
+            // The sequence was announced and stepped through: the mating move is said as bare as the steps were.
+            spokenMoves.getOrNull(a.ply - 1)?.let { sb.append(cap(strings.vocabulary.movePhrase(it))).append(". ") }
+                ?: sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        } else {
+            sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        }
         sb.append(
             when {
-                isUser(a.color) -> say(Sentence.MateFinish(subj(a.color)))
+                isUser(a.color) -> story(Sentence.MateFinish(subj(a.color)), a.ply)
                 userColor == a.color.opposite() -> say(Sentence.MateOnReceivingEnd)
-                else -> say(Sentence.MateFinish(subj(a.color)))
+                else -> story(Sentence.MateFinish(subj(a.color)), a.ply)
             }
         )
+        phaseTold.add(a.ply)
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
@@ -1302,6 +1576,7 @@ private class ScriptBuilder(
         val sb = StringBuilder(leadIn)
         sb.append(playedClause(a, verb)).append('.')
         flavour(a)?.let { sb.append(' ').append(it) }
+        takePhase(a)?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.NORMAL_MOVE,
             ply = a.ply,
@@ -1335,32 +1610,40 @@ private class ScriptBuilder(
         val tactic = a.tacticsFound
             .maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
         val pos = positionsBefore[a.ply - 1]
+        val mate = moverMate(a)
+        val mating = tactic != null && tactic.type in MATING_MOTIFS || mate != null
+        // A mating sequence (ANALYSIS_SPEC §9.9): its aim is announced once, with the engine's own distance, and the
+        // moves after it are said bare.
+        if (mating && continuesMate(a)) return mateStepBeat(a, extra)
         val sb = StringBuilder(leadIn)
         sb.append(playedClause(a, pickVerb("foundVerb", listOf(MoveVerb.PLAY, MoveVerb.FIND, MoveVerb.GO_FOR)))).append(". ")
         if (isRecapture(a)) {
             sb.append(say(Sentence.JustTheTrade))
         } else if (tactic != null) {
-            val onTheDestination = moves.getOrNull(a.ply - 1)?.to == tactic.targetSquares.firstOrNull()
-            if (onTheDestination && tactic.type == TacticType.HANGING_PIECE) {
-                // The clause just named that square; saying it again is how narration starts to drone.
-                sb.append(say(Sentence.NothingDefendingIt)).append(' ')
+            if (mating) {
+                noteMate(a)
+                // A named pattern (back-rank, smothered, the Greek gift) is worth its sentence; a mating net is not.
+                if (tactic.type != TacticType.MATE_NET || mate == null) sb.append(say(NarrationVocabulary.tacticPoint(tactic, pos))).append(' ')
+                if (mate != null) sb.append(story(Sentence.MateAnnounce(mate), a.ply))
             } else {
-                sb.append(say(NarrationVocabulary.tacticPoint(tactic, pos))).append(' ')
-            }
-            // A mating motif carries the mate's saturated swing, which is not material: the point
-            // sentence has said "forced mate", and nothing is "in the bank" (C1; before it, "So that's a
-            // whole queen" followed every found mate).
-            if (tactic.type in MATING_MOTIFS) {
-                Unit
-            } else if (tactic.materialSwing >= 100) {
-                sb.append(say(Sentence.MaterialInTheBank(NarrationVocabulary.materialPayoff(tactic.materialSwing))))
-            } else {
-                sb.append(say(Sentence.PressureNoMaterialYet))
+                val onTheDestination = moves.getOrNull(a.ply - 1)?.to == tactic.targetSquares.firstOrNull()
+                if (onTheDestination && tactic.type == TacticType.HANGING_PIECE) {
+                    // The clause just named that square; saying it again is how narration starts to drone.
+                    sb.append(say(Sentence.NothingDefendingIt)).append(' ')
+                } else {
+                    sb.append(say(NarrationVocabulary.tacticPoint(tactic, pos))).append(' ')
+                }
+                if (tactic.materialSwing >= 100) {
+                    sb.append(say(Sentence.MaterialInTheBank(NarrationVocabulary.materialPayoff(tactic.materialSwing))))
+                } else if (thinned("pressure", 2)) {
+                    sb.append(say(Sentence.PressureNoMaterialYet))
+                }
             }
         } else {
             sb.append(say(Sentence.GoodSolid))
         }
         extra?.let { sb.append(' ').append(it) }
+        takePhase(a)?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.FOUND_TACTIC,
             ply = a.ply,
@@ -1374,10 +1657,45 @@ private class ScriptBuilder(
         )
     }
 
+    /** A later move of a mating sequence: the move, said bare ("Queen to f six, with check."). */
+    private fun mateStepBeat(a: MoveAnnotation, extra: String? = null) {
+        noteMate(a)
+        val spoken = spokenMoves.getOrNull(a.ply - 1)
+        val sb = StringBuilder()
+        if (spoken != null) sb.append(story(Sentence.MateStep(spoken), a.ply)) else sb.append(cap(playedClause(a, MoveVerb.PLAY))).append('.')
+        extra?.let { sb.append(' ').append(it) }
+        phaseTold.add(a.ply)
+        add(
+            kind = SegmentKind.FOUND_TACTIC,
+            ply = a.ply,
+            narration = cap(sb.toString()),
+            caption = caption(a),
+            board = playMoveDirective(a),
+            tactic = a.tacticsFound.maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing })),
+            speakerColor = a.color,
+            eval = evalAfter(a.ply),
+            moveNumber = a.moveNumber
+        )
+    }
+
+    private val thinCounts = HashMap<String, Int>()
+
+    /** True on every [every]th call for [key], starting with the first: a remark that would otherwise be said every time. */
+    private fun thinned(key: String, every: Int): Boolean {
+        val n = thinCounts.merge(key, 1, Int::plus)!!
+        return (n - 1) % every == 0
+    }
+
+    /**
+     * An error told as cause and consequence (ANALYSIS_SPEC §9.9): the move and what it let the opponent do (the
+     * engine's mate against it, or its best reply and what that wins), how the standing changed, and the better move
+     * with what it did (a mate, material along the engine's line) when the boards prove one.
+     */
     private fun errorBeat(a: MoveAnnotation, leadIn: String) {
-        val sb = StringBuilder(leadIn)
+        val sb = StringBuilder()
         sb.append(say(Sentence.ErrorOpener(a.classification))).append(' ')
-        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        sb.append(leadIn)
+        appendPlayedAndAllowed(sb, a)
         sb.append(consequence(a))
         val better = betterMoveSentence(a)
         better?.let { sb.append(' ').append(it) }
@@ -1393,6 +1711,29 @@ private class ScriptBuilder(
             moveNumber = a.moveNumber
         )
         if (better != null) betterMoveBeats.add(segments.last().index)
+    }
+
+    /** "Black takes the bishop on b five with the pawn." and, when the engine proves one, what it lets in. */
+    private fun appendPlayedAndAllowed(sb: StringBuilder, a: MoveAnnotation) {
+        val spoken = spokenMoves.getOrNull(a.ply - 1)
+        when (val allows = allowsOf(a)) {
+            is Allows.Reply -> if (spoken != null) {
+                sb.append(
+                    cap(story(Sentence.PlayedThenReply(subj(a.color), MoveVerb.PLAY, spoken, isRecapture(a), Subject(a.color.opposite(), Person.THIRD), allows.reply, allows.gain), a.ply))
+                ).append(' ')
+                return
+            }
+            is Allows.Mate -> {
+                sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+                sb.append(story(Sentence.AllowsMate(allows.mateIn), a.ply)).append(' ')
+                // The aim of the opponent's mate has been said: its first move is said bare, not announced again.
+                lastMatePly = a.ply
+                lastMateColor = a.color.opposite()
+                return
+            }
+            null -> Unit
+        }
+        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
     }
 
     private fun threatBeat(a: MoveAnnotation, leadIn: String) {
@@ -1425,6 +1766,7 @@ private class ScriptBuilder(
         sb.append(say(Sentence.InaccuracyNote))
         val better = betterMoveSentence(a)
         better?.let { sb.append(' ').append(it) }
+        takePhase(a)?.let { sb.append(' ').append(it) }
         add(
             kind = SegmentKind.KEY_MOMENT,
             ply = a.ply,
@@ -1474,7 +1816,7 @@ private class ScriptBuilder(
 
         if (plies.isEmpty()) return missedWithoutALine(a, tactic, opening)
 
-        excursionPivotIn(a, tactic, opening)
+        excursionPivotIn(a, tactic, opening, asked = !worthAPuzzle)
         for (index in plies.indices) excursionPlyBeat(a, tactic, plies, index)
         excursionPayoff(a, tactic, plies)
         excursionPivotOut(a)
@@ -1539,10 +1881,12 @@ private class ScriptBuilder(
 
     // -- the beats of the excursion -----------------------------------------
 
-    private fun excursionPivotIn(a: MoveAnnotation, tactic: TacticInstance, leadIn: String) {
+    private fun excursionPivotIn(a: MoveAnnotation, tactic: TacticInstance, leadIn: String, asked: Boolean) {
         val pos = positionsBefore[a.ply - 1]
-        val sb = StringBuilder(leadIn)
-        sb.append(say(Sentence.PivotIn))
+        // The pivot is an interjection of its own ("Hold on, back up a move"), which already says that time passed.
+        val sb = StringBuilder()
+        // A missed tactic with no pause for the viewer still asks the question, once, before the answer.
+        sb.append(if (asked) story(Sentence.PivotQuestion(a.color), a.ply) else say(Sentence.PivotIn))
         val best = a.bestMoveUci?.let { SpokenChess.describeUci(pos, it) }
         if (best != null) {
             sb.append(say(Sentence.PivotReveal(best))).append(' ')
@@ -1609,13 +1953,16 @@ private class ScriptBuilder(
         val taken = ExchangeEvaluator.netGain(start, p.after, winner) -
             ExchangeEvaluator.netGain(start, p.before, winner)
         val running = ExchangeEvaluator.netGain(start, p.after, winner)
+        val before = ExchangeEvaluator.netGain(start, p.before, winner)
         return when {
             p.after.isCheckmate() -> say(Sentence.LineEndsInMate)
             taken >= MIN_PAYOFF_CP -> say(Sentence.MaterialTaken(NarrationVocabulary.materialGain(taken)))
             p.uci == tactic.moveUci && index > 0 -> say(NarrationVocabulary.tacticPoint(tactic, p.before))
-            p.after.isInCheck() -> say(Sentence.CheckMustBeAnswered)
-            running >= MIN_PAYOFF_CP -> say(Sentence.AlreadyUp(subj(winner), NarrationVocabulary.materialGainAlong(start, p.after, winner, running)))
-            else -> say(Sentence.QuietMove)
+            // The first time the line is up material is worth saying; every move after it is not.
+            running >= MIN_PAYOFF_CP && before < MIN_PAYOFF_CP ->
+                say(Sentence.AlreadyUp(subj(winner), NarrationVocabulary.materialGainAlong(start, p.after, winner, running)))
+            // A move with no reason of its own is said bare: not every move of a line needs a remark.
+            else -> ""
         }
     }
 
@@ -1634,7 +1981,7 @@ private class ScriptBuilder(
             p.before.legalMoves().size == 1 -> say(Sentence.OnlyLegalReply)
             p.before.isInCheck() -> say(Sentence.ForcedByCheck)
             recaptures(plies, index) -> say(Sentence.RecaptureNatural)
-            else -> say(Sentence.BestDefence)
+            else -> ""
         }
     }
 
@@ -1654,7 +2001,12 @@ private class ScriptBuilder(
             last.after.isCheckmate() -> sb.append(say(Sentence.PayoffMate((plies.size + 1) / 2)))
             gain >= MIN_PAYOFF_CP ->
                 sb.append(say(Sentence.PayoffMaterial(subj(winner), NarrationVocabulary.materialGainAlong(start, last.after, winner, gain))))
-            else -> sb.append(say(Sentence.PayoffOutcome(subj(winner), payoffKind(tactic, last.after, gain))))
+            else -> {
+                val kind = payoffKind(tactic, last.after, gain)
+                // A line that proves nothing else says where the engine's own play leaves the mover.
+                if (kind == PayoffKind.LINE_ENDS) sb.append(story(Sentence.PayoffStanding(subj(winner), NarrationVocabulary.standing(a.winPercentBefore)), a.ply))
+                else sb.append(say(Sentence.PayoffOutcome(subj(winner), kind)))
+            }
         }
         val mate = a.mateInBefore
         if (!last.after.isCheckmate() && mate != null && abs(mate) in 1..8) {
@@ -1717,7 +2069,7 @@ private class ScriptBuilder(
     /** The move that was really played. From here the main line is running again. */
     private fun resumedMoveBeat(a: MoveAnnotation) {
         val sb = StringBuilder()
-        sb.append(cap(playedClause(a, MoveVerb.PLAY))).append(". ")
+        appendPlayedAndAllowed(sb, a)
         sb.append(say(Sentence.ChanceGone)).append(' ')
         sb.append(consequence(a))
         val mistake = a.classification.isMistake
@@ -1740,7 +2092,7 @@ private class ScriptBuilder(
      */
     private fun missedWithoutALine(a: MoveAnnotation, tactic: TacticInstance, leadIn: String) {
         val pos = positionsBefore[a.ply - 1]
-        val sb = StringBuilder(leadIn)
+        val sb = StringBuilder()
         sb.append(say(Sentence.PivotIn))
         betterMoveSentence(a)?.let { sb.append(it).append(' ') }
         sb.append(say(NarrationVocabulary.tacticPoint(tactic, pos))).append(' ')
@@ -1812,19 +2164,21 @@ private class ScriptBuilder(
         )
     }
 
+    /**
+     * The turning point (ANALYSIS_SPEC §9.9): that it was, that nothing else cost as much, and what followed when the
+     * phases prove it. The standing change itself was told by the error beat just before, so it is not said twice.
+     */
     private fun turningPointSegment(a: MoveAnnotation) {
         val sb = StringBuilder()
-        sb.append(say(Sentence.TurningPointLead))
-        sb.append(say(Sentence.TurningPointSwing(a.moveNumber))).append(' ')
-        sb.append(
-            say(
-                Sentence.TurningPointFromTo(
-                    subj(a.color),
-                    NarrationVocabulary.standing(a.winPercentBefore),
-                    NarrationVocabulary.standing(a.winPercentAfter)
-                )
-            )
-        )
+        sb.append(story(Sentence.TurningPointLead(a.loss >= DECISIVE_LOSS), a.ply))
+        sb.append(story(Sentence.TurningPointSwing(a.moveNumber), a.ply)).append(' ')
+        when (val after = StoryArc.aftermath(phases, a.ply, a.color)) {
+            is StoryArc.Aftermath.NeverBack ->
+                sb.append(story(Sentence.TurningAftermath(AftermathKind.NEVER_BACK, after.leader, null, null), a.ply))
+            is StoryArc.Aftermath.FoughtBack ->
+                sb.append(story(Sentence.TurningAftermath(AftermathKind.FOUGHT_BACK, after.side, after.moveNumber, after.standing), a.ply))
+            null -> Unit
+        }
         add(
             kind = SegmentKind.TURNING_POINT,
             ply = a.ply,
@@ -1841,23 +2195,27 @@ private class ScriptBuilder(
     // Outro
     // -----------------------------------------------------------------------
 
+    /**
+     * The finish (ANALYSIS_SPEC §9.9): how the game ended and the move that decided it. No accuracy and no rating is
+     * spoken: the numbers are on the card and on the Summary screen, and a voice reading statistics is the one thing
+     * the owner called the worst of the old script.
+     */
     private fun outroSummary() {
         val w = report.white
         val b = report.black
         val whiteLabel = spokenName(w.name ?: game.tags["White"]) ?: strings.vocabulary.side(Color.WHITE)
         val blackLabel = spokenName(b.name ?: game.tags["Black"]) ?: strings.vocabulary.side(Color.BLACK)
 
-        val sb = StringBuilder()
-        sb.append(say(Sentence.OutroLead))
-        sb.append(say(Sentence.OutroAccuracy(whiteLabel, fmt1(w.accuracy), blackLabel, fmt1(b.accuracy))))
-        if (trim < 2) {
-            sb.append(' ').append(say(Sentence.OutroRatings(w.estimatedRating, b.estimatedRating)))
-            sb.append(' ').append(countsSentence(whiteLabel, w))
-            sb.append(' ').append(countsSentence(blackLabel, b))
+        val winner = when (report.result) {
+            "1-0" -> Color.WHITE
+            "0-1" -> Color.BLACK
+            else -> null
         }
-        // The caveat is about the rating estimates: when the budget has taken those out, it goes too.
-        if (trim < 2 && (w.lowConfidence || b.lowConfidence)) {
-            sb.append(' ').append(say(Sentence.ShortGameCaveat))
+        val mated = annotations.lastOrNull()?.san?.endsWith("#") == true
+        val sb = StringBuilder()
+        sb.append(story(Sentence.OutroEnding(winner, report.result == "1/2-1/2", mated && winner != null, (annotations.size + 1) / 2)))
+        if (trim < 2 && annotations.isNotEmpty()) {
+            sb.append(' ').append(story(decider(), turningPoint?.ply ?: 0))
         }
 
         add(
@@ -1879,19 +2237,18 @@ private class ScriptBuilder(
         )
     }
 
-    private fun countsSentence(label: String, p: PlayerReport): String {
-        val blunders = count(p, MoveClassification.BLUNDER)
-        val mistakes = count(p, MoveClassification.MISTAKE)
-        val inaccuracies = count(p, MoveClassification.INACCURACY)
-        val misses = count(p, MoveClassification.MISS)
-        if (blunders + mistakes + inaccuracies + misses == 0) return say(Sentence.NoMistakes(label))
-        return say(Sentence.ErrorCounts(label, blunders, mistakes, misses, inaccuracies))
+    /** The biggest swing of the game, in its mover's own bands, or a plain "no single decisive mistake". */
+    private fun decider(): Sentence {
+        val tp = turningPoint ?: return Sentence.OutroNoDecider
+        val before = NarrationVocabulary.standing(tp.winPercentBefore)
+        val after = NarrationVocabulary.standing(tp.winPercentAfter)
+        if (tp.loss < DECISIVE_LOSS || before == after) return Sentence.OutroNoDecider
+        return Sentence.OutroDecider(subj(tp.color), tp.classification, tp.moveNumber, before, after)
     }
 
     private fun outroLessons() {
         val lessons = when {
             trim >= 5 -> emptyList()
-            trim >= 1 -> buildLessons().take(1)
             else -> buildLessons()
         }
         lessons.forEachIndexed { i, text ->
@@ -1906,82 +2263,52 @@ private class ScriptBuilder(
     }
 
     /**
-     * The most valuable part of the video, so it is built entirely from what happened in THIS
-     * game: the motifs this player actually walked past, where in the game the errors clustered,
-     * and how often a move handed the opponent something. Nothing here is generic advice.
+     * The one takeaway (ANALYSIS_SPEC §9.9), tied to the move the game turned on: the viewer's own worst error when the
+     * viewer is known, else the error of the biggest swing. Two sentences: what that move was (a missed tactic, a move
+     * that let the opponent in, or what it gave up) and the habit that goes with it. Everything it says about the move
+     * is read off the same facts as the beats ([significantMissed], [allowsOf], the win-percent bands).
      */
     private fun buildLessons(): List<String> {
-        val focusColor = userColor ?: if (report.white.accuracy <= report.black.accuracy) Color.WHITE else Color.BLACK
-        val focus = if (focusColor == Color.WHITE) report.white else report.black
-        val other = if (focusColor == Color.WHITE) report.black else report.white
+        val focusColor = userColor ?: turningPoint?.color
+            ?: if (report.white.accuracy <= report.black.accuracy) Color.WHITE else Color.BLACK
         val you = subj(focusColor)
-        val focusMoves = annotations.filter { it.color == focusColor }
-        val errors = focusMoves.filter { it.classification.isMistake }
-        val out = ArrayList<String>()
-
-        // 1. The motif this player kept missing, with the squares it happened on.
-        val missedByType = focus.tacticsMissed.groupBy { it.type }
-            .toList()
-            .sortedWith(compareByDescending<Pair<TacticType, List<TacticInstance>>> { it.second.size }
-                .thenByDescending { it.second.maxOf { t -> t.materialSwing } }
-                .thenBy { it.first.ordinal })
-        val top = missedByType.firstOrNull()
-        if (top != null) {
-            val (type, instances) = top
-            val squares = instances.mapNotNull { it.targetSquares.firstOrNull() }.distinct().take(3)
-            // The video stays in the game: a textbook detour would break the story and the
-            // running time, so the reference example is *offered*, by name, and lives in the
-            // report where the learner can step through it at their own pace (ANALYSIS_SPEC §10).
-            val offer = if (trim < 1 && TacticReferenceLibrary.hasReference(type)) " " + say(Sentence.TextbookOffer(type)) else ""
-            val lead = if (instances.size >= 2) {
-                say(Sentence.LessonRepeatedMiss(you, type, instances.size, squares))
-            } else {
-                val ply = annotations.firstOrNull { a -> a.tacticsMissed.any { it === instances[0] } }
-                say(Sentence.LessonSingleMiss(you, type, ply?.moveNumber, squares.firstOrNull()))
+        val worst = annotations
+            .filter {
+                it.color == focusColor && it.classification.isMistake &&
+                    (it.loss >= DECISIVE_LOSS - 2.0 || significantMissed(it) != null)
             }
-            out.add("$lead ${say(Sentence.TacticLesson(type))}$offer")
-        }
+            .maxWithOrNull(compareBy<MoveAnnotation> { it.loss }.thenBy { significantMissed(it)?.materialSwing ?: 0 }.thenBy { -it.ply })
+        if (worst == null) return listOf(story(Sentence.TakeawayClean))
 
-        // 2. Where in the game the errors happened.
-        if (errors.size >= 2) {
-            val first = errors.first().moveNumber
-            val last = errors.last().moveNumber
-            val half = max(1, (annotations.size + 1) / 4)
-            out.add(
-                if (first > half) say(Sentence.LessonLateErrors(you, errors.size, half))
-                else say(Sentence.LessonSpreadErrors(you, first, last))
+        val missed = significantMissed(worst)
+        val allows = allowsOf(worst)
+        val before = NarrationVocabulary.standing(worst.winPercentBefore)
+        val after = NarrationVocabulary.standing(worst.winPercentAfter)
+        val opponent = focusColor.opposite()
+        val first = when {
+            missed != null -> Sentence.TakeawayMissed(
+                you, worst.moveNumber, missed.type,
+                worst.bestMoveUci?.let { SpokenChess.describeUci(positionsBefore[worst.ply - 1], it) }
             )
-        } else if (errors.size == 1) {
-            val e = errors.first()
-            out.add(say(Sentence.LessonOneMistake(you, e.moveNumber, fmt1(e.loss))))
+            allows is Allows.Mate -> Sentence.TakeawayAllowed(you, worst.moveNumber, opponent, allows.mateIn, null)
+            allows is Allows.Reply -> Sentence.TakeawayAllowed(you, worst.moveNumber, opponent, null, allows.reply)
+            else -> Sentence.TakeawayCostly(you, worst.moveNumber, NarrationVocabulary.lossSeverity(worst.loss), before, after)
         }
-
-        // 3. How often a move handed the opponent something.
-        val gifts = focusMoves.count { it.threatsAllowed.isNotEmpty() && !it.classification.isGood }
-        if (gifts >= 2) {
-            out.add(say(Sentence.LessonGifts(you, gifts)))
-        }
-
-        // 4. The mate, or what the opponent left behind.
-        val lastMove = annotations.lastOrNull()
-        if (lastMove != null && lastMove.san.endsWith("#") && lastMove.color != focusColor && turningPoint != null) {
-            out.add(say(Sentence.LessonMatedButNotTheMistake(you, turningPoint.moveNumber)))
-        } else if (other.tacticsMissed.isNotEmpty()) {
-            val oppType = other.tacticsMissed.groupBy { it.type }.maxByOrNull { it.value.size }
-            if (oppType != null) {
-                out.add(say(Sentence.LessonOpponentMissedToo(you, oppType.key, oppType.value.size, focus.tacticsFound.size)))
+        val last = annotations.last()
+        val matedAfterIt = last.san.endsWith("#") && last.color != focusColor && worst.ply == turningPoint?.ply
+        val text = StringBuilder(story(first, worst.ply)).append(' ')
+        when {
+            matedAfterIt -> text.append(story(Sentence.LessonMatedButNotTheMistake(you, worst.moveNumber), worst.ply))
+            missed != null -> {
+                text.append(say(Sentence.TacticLesson(missed.type)))
+                // The video stays in the game: a textbook detour would break the story and the running time, so the
+                // reference example is offered, by name, and lives in the report (ANALYSIS_SPEC §10).
+                if (trim < 1 && TacticReferenceLibrary.hasReference(missed.type)) text.append(' ').append(say(Sentence.TextbookOffer(missed.type)))
             }
+            allows != null -> text.append(story(Sentence.TakeawayHabitAllowed, worst.ply))
+            else -> text.append(story(Sentence.TakeawayHabitStanding(before), worst.ply))
         }
-
-        // 5. Positive anchor, so the video never ends on pure criticism.
-        if (out.size < 2) {
-            val bestMoves = focusMoves.count { it.classification == MoveClassification.BEST || it.classification == MoveClassification.BRILLIANT }
-            out.add(say(Sentence.LessonPositive(you, bestMoves, focusMoves.size, fmt1(focus.accuracy))))
-        }
-        if (out.size < 2) {
-            out.add(say(Sentence.LessonRatingAnchor(you, fmt1(focus.accuracy), focus.estimatedRating)))
-        }
-        return out.take(4)
+        return listOf(text.toString())
     }
 
     // -----------------------------------------------------------------------
@@ -2007,16 +2334,18 @@ private class ScriptBuilder(
         return move.isCapture && previous.isCapture && previous.to == move.to
     }
 
-    /** What the move did to the evaluation, in the mover's own terms. */
+    /** What the move did to the evaluation, in the mover's own terms. The standing change is said here, once. */
     private fun consequence(a: MoveAnnotation): String {
+        phaseTold.add(a.ply)
         val before = NarrationVocabulary.standing(a.winPercentBefore)
         val after = NarrationVocabulary.standing(a.winPercentAfter)
         if (before == after) {
-            return say(Sentence.ConsequenceUnchanged(subj(a.color), after, NarrationVocabulary.lossSeverity(a.loss)))
+            return story(Sentence.ConsequenceUnchanged(subj(a.color), after, NarrationVocabulary.lossSeverity(a.loss)), a.ply)
         }
-        return say(Sentence.ConsequenceChanged(subj(a.color), before, after))
+        return story(Sentence.ConsequenceChanged(subj(a.color), before, after), a.ply)
     }
 
+    /** The engine's better move with what it did, or null when it is the move played / not legal. */
     private fun betterMoveSentence(a: MoveAnnotation): String? {
         val bestUci = a.bestMoveUci ?: return null
         if (bestUci == a.uci) return null
@@ -2026,7 +2355,7 @@ private class ScriptBuilder(
         if (a.classification == MoveClassification.MISS && mate != null && abs(mate) in 1..8) {
             return say(Sentence.MateWasAvailable(abs(mate), best))
         }
-        return say(Sentence.BetterWas(best))
+        return story(Sentence.BetterHere(best, betterResult(a)), a.ply)
     }
 
     // -----------------------------------------------------------------------
@@ -2285,6 +2614,15 @@ private class ScriptBuilder(
         /** Between the parts of a one-line card subtitle ("1-0 · 17 moves · Philidor Defense (C41)"). */
         const val CARD_SEPARATOR = " · "
 
+        /** ANALYSIS_SPEC §9.9: a skipped stretch is "quiet" only if no ply moved the White win-percent by more than this. */
+        const val QUIET_SWING = 5.0
+
+        /** ANALYSIS_SPEC §9.9: the evaluation change (win-percent, mover's side) below which a quiet move gets no remark. */
+        const val REMARK_MIN_SWING = 4.0
+
+        /** ANALYSIS_SPEC §9.9: the biggest-swing move is called "decisive" in the outro from this loss on. */
+        const val DECISIVE_LOSS = 12.0
+
         /** Spec section 6's cap, applied to the spoken detour of a FULL moment. */
         const val MAX_EXCURSION_PLIES = 8
 
@@ -2302,6 +2640,15 @@ private class ScriptBuilder(
 
         /** ANALYSIS_SPEC 9.7: a missed tactic is worth a puzzle once it wins at least this much. */
         const val PUZZLE_MIN_SWING_CP = 150
+
+        /** ANALYSIS_SPEC §9.9: the plies of the engine's best line read for what the better move won. */
+        const val BETTER_LINE_PLIES = 4
+
+        /** ANALYSIS_SPEC §9.9: the longest forced mate the narration states. */
+        const val MAX_MATE_SPOKEN = 8
+
+        /** ANALYSIS_SPEC §9.9: the error classes a phase boundary is said to follow. */
+        val PHASE_ERRORS = setOf(MoveClassification.BLUNDER, MoveClassification.MISTAKE, MoveClassification.MISS)
 
         /** Below this, a swing is noise rather than a realised material payoff. */
         const val MIN_PAYOFF_CP = 100

@@ -193,6 +193,31 @@ mutations as before (0 missed), plus 7 on the spoken line: a move on the wrong s
 move, the wrong piece, a check left out or added, notation instead of words, "Back to the game now." over the
 line's last position instead of the game's, the return sentence missing: **7 applied, 7 flagged, 0 missed.**
 
+## NS (2026-10-14): the narrated story
+
+`python scripts/audit_commentary.py story core/build/commentary_audit/story.jsonl` (written by
+`CommentaryAuditDumpTest.dumpStory`) audits the sentences the video says about the story of the game (ANALYSIS_SPEC 9.9,
+COMMENTARY_STYLE rows marked NS). Each sentence must match the template of its kind (an unrecognised sentence is WRONG) and
+each claim is re-derived from the recorded engine numbers and python-chess: a second implementation of `GamePhases` and
+`StoryArc` for the stakes, the phase turns and their causes and the turning point's aftermath; the win-percent bands for every
+standing word; the engine's mate distance; the first four plies of the engine's line for what the better move did; the
+engine's best reply and static exchange for what a move let in; the board for the skipped stretches and the finish.
+
+Result: **1397 story sentences in 57 scripts** (the Immortal Game, the Opera Game, game01 and Byrne-Fischer, plus shortened or
+re-resulted variants of them that bring out the other sentences, each for no side, White and Black): **1397 supported, 0 WRONG**.
+The first run found one real defect: a drawn result tag on a game that ends in checkmate made "White wins!" false (the
+variant was contrived; the audit now only uses variants a real game can be). `mutate-story` (also part of `mutate`) breaks one
+claim of one sentence at a time (46 breaks applied, a wrong move count, a swapped side, a wrong band, a phase turn at the wrong
+ply, an invented cause, a reply that is not the engine's, a quiet stretch with captures in it, a takeaway about the wrong move,
+a sentence no template knows, ...): **0 not flagged**; one mutation (a better move that mates one move too late) found no
+sentence to apply to because no recorded script has a better move that mates.
+
+Not exercised by any recorded script, so their verifiers are untested on real data: `OpeningVerdict` (the book must end before
+move 4), `TakeawayAllowed` and `TakeawayHabitAllowed` (an error with no missed motif whose best answer is a winning capture or a
+mate). Their wording is pinned by `NarrationStoryTest`'s template catalogue.
+
+The retired sentences `LessonPositive` and `LessonOpponentMissedToo` (above) no longer exist.
+
 ## Found, not fixed
 
 - `LessonPositive` and `LessonOpponentMissedToo` (below) are unchanged by C1.
@@ -235,6 +260,8 @@ analysis for that side would have written), `MotifClaimsTest` (clearance, deflec
     python scripts/audit_commentary.py before docs/audit/commentary_before_r1b.txt
     python scripts/audit_commentary.py lines  core/build/commentary_audit/best_lines.jsonl
     python scripts/audit_commentary.py mutate core/build/commentary_audit/after.jsonl
+    python scripts/audit_commentary.py story  core/build/commentary_audit/story.jsonl
+    python scripts/audit_commentary.py mutate-story core/build/commentary_audit/story.jsonl
 
 `after` covers the Immortal Game, the Opera Game and game01 since C1 (the dump test writes all three),
 and exits non-zero on any WRONG claim or side variant; `mutate` is the negative control (above).
