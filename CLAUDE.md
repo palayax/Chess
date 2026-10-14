@@ -166,6 +166,9 @@ conflict.
   `libdatastore_shared_counter.so` are already 0x4000. Check after any NDK or dependency change:
   `llvm-readelf -lW <lib>.so` (Align 0x4000 on every LOAD) for each `.so` in the APK, and
   `zipalign -c -P 16 -v 4 <apk>`.
+  This applies to BOTH arm64 engine libraries: `libstockfish.so` (ARCH=armv8 baseline) and `libstockfish_dotprod.so` (ARCH=armv8-dotprod,
+  `-march=armv8.2-a+dotprod`), built by one CMake function; `NativeBridge` loads the dotprod one only when `/proc/cpuinfo` lists `asimddp`
+  (`CpuFeatures`) and falls back to the baseline (`StockfishEngine.nativeVariant` says which). Both export the same JNI symbols.
 - **R8 is on for release** (`isMinifyEnabled` + `isShrinkResources`). Keep rules that matter:
   `engine/consumer-rules.pro` pins `NativeBridge` and its `native` methods (the JNI symbols are
   `Java_net_palaya_chessanalyzer_engine_NativeBridge_*`; rename either and every engine call dies with

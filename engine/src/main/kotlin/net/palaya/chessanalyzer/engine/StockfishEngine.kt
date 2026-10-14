@@ -64,6 +64,9 @@ class StockfishEngine {
      */
     val lines: SharedFlow<String> get() = _rawLines.asSharedFlow()
 
+    /** "dotprod" or "baseline": which native library was loaded (for the diagnostic log). Loads it if needed. */
+    val nativeVariant: String get() = NativeBridge.loadedVariant
+
     @Volatile private var started = false
     private var readerJob: Job? = null
     private var currentMultiPv: Int = 1

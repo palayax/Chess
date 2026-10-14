@@ -19,6 +19,14 @@
 #    binary; the net ships as an APK asset, is copied once to the app's files
 #    dir by BundledNetProvider (Kotlin), and is pointed to via the `EvalFile`
 #    UCI option instead (Stockfish needs a real file path, not an APK entry).
+#  - arm64-v8a gets TWO libraries from the same sources: libstockfish.so (the
+#    Makefile's ARCH=armv8 baseline, runs on every arm64 phone) and
+#    libstockfish_dotprod.so (ARCH=armv8-dotprod: the same defines plus
+#    -DUSE_NEON_DOTPROD and -march=armv8.2-a+dotprod, several times faster NNUE
+#    on ARMv8.2+ cores such as Tensor G3). A dotprod binary dies with SIGILL on
+#    a CPU without the instructions, so NativeBridge (Kotlin) loads the dotprod
+#    one only when /proc/cpuinfo lists "asimddp" (CpuFeatures.kt) and falls
+#    back to the baseline otherwise. Other ABIs build only libstockfish.so.
 #  - Flags below are transcribed from vendor/Stockfish/src/Makefile's own
 #    flag tables for each target (armv8, armv7-neon, x86-64-sse41-popcnt),
 #    not guessed — see the Makefile section headers referenced in comments.
@@ -66,52 +74,65 @@ set(SF_SOURCES
     ${SF_SRC}/memory.cpp
 )
 
-add_library(stockfish SHARED
-    ${SF_SOURCES}
-    jni_bridge.cpp
-)
-
-target_include_directories(stockfish PRIVATE
-    ${SF_SRC}
-)
-
 # ---------------------------------------------------------------------------
 # Common flags (Makefile section 3.1: CXXFLAGS = ... -fno-exceptions
 # -std=c++17 ...). SF19 itself opts out of exceptions across all platforms,
 # so this is not us disabling something it needs — it's how upstream builds.
 # -DNDEBUG matches Makefile's `debug=no` default (release-mode SF drops its
 # internal assert()s this way).
+# sf_add_engine_library(<target>) creates one JNI library with exactly these
+# common flags, NNUE_EMBEDDING_OFF, the 16 KB link option and the log lib; the
+# per-ABI flags are added to each target afterwards.
 # ---------------------------------------------------------------------------
-target_compile_features(stockfish PRIVATE cxx_std_17)
-set_target_properties(stockfish PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
+find_library(log-lib log)
 
-target_compile_options(stockfish PRIVATE
-    -fno-exceptions
-    -O3
-    -DNDEBUG
-    -fno-rtti
-    -Wall
-)
+function(sf_add_engine_library target)
+    add_library(${target} SHARED
+        ${SF_SOURCES}
+        jni_bridge.cpp
+    )
+    target_include_directories(${target} PRIVATE ${SF_SRC})
+    target_compile_features(${target} PRIVATE cxx_std_17)
+    set_target_properties(${target} PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    target_compile_options(${target} PRIVATE
+        -fno-exceptions
+        -O3
+        -DNDEBUG
+        -fno-rtti
+        -Wall
+    )
+    target_compile_definitions(${target} PRIVATE NNUE_EMBEDDING_OFF)
+    # 16 KB page-size support (Android 15+, required by Google Play for targetSdk 35+). NDK r28 already
+    # aligns LOAD segments at 16 KB by default; this states it explicitly so an older NDK cannot quietly
+    # produce a 4 KB-aligned library again. Verify with: llvm-readelf -lW lib<target>.so (Align 0x4000).
+    target_link_options(${target} PRIVATE "-Wl,-z,max-page-size=16384")
+    # The Android log lib used by the JNI bridge.
+    target_link_libraries(${target} PRIVATE ${log-lib})
+endfunction()
 
-target_compile_definitions(stockfish PRIVATE
-    NNUE_EMBEDDING_OFF
-)
+sf_add_engine_library(stockfish)
 
 # ---------------------------------------------------------------------------
 # Per-ABI flags, transcribed from the Makefile's ARCH tables.
 # ---------------------------------------------------------------------------
 if(ANDROID_ABI STREQUAL "arm64-v8a")
-    # Mirrors ARCH=armv8 (NOT armv8-dotprod / i8mm — those aren't guaranteed
-    # present on all arm64 devices, only a safe universal baseline is used).
+    # `stockfish` mirrors ARCH=armv8: the safe baseline for every arm64 device (no dotprod / i8mm).
     # bits=64 -> -DIS_64BIT; popcnt=yes on arch armv8 -> plain -DUSE_POPCNT
     # (no -mpopcnt, that's an x86-only flag per the Makefile's arch filter);
     # neon=yes, arm_version=8 -> -DUSE_NEON=8, and no -mfpu=neon since AArch64
     # always has NEON and the Makefile skips that flag for arch==armv8.
     target_compile_definitions(stockfish PRIVATE IS_64BIT USE_POPCNT USE_NEON=8)
+
+    # `stockfish_dotprod` mirrors ARCH=armv8-dotprod (Makefile: dotprod=yes adds
+    # `-march=armv8.2-a+dotprod -DUSE_NEON_DOTPROD` on top of the armv8 flags). Loaded at runtime only
+    # on CPUs that report asimddp (see the header comment and CpuFeatures.kt).
+    sf_add_engine_library(stockfish_dotprod)
+    target_compile_definitions(stockfish_dotprod PRIVATE IS_64BIT USE_POPCNT USE_NEON=8 USE_NEON_DOTPROD)
+    target_compile_options(stockfish_dotprod PRIVATE -march=armv8.2-a+dotprod)
 
 elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
     # Mirrors ARCH=armv7-neon plus the Makefile's COMP=ndk/arch=armv7 block
@@ -137,12 +158,3 @@ elseif(ANDROID_ABI STREQUAL "x86_64")
 else()
     message(FATAL_ERROR "Unsupported ANDROID_ABI for libstockfish: ${ANDROID_ABI}")
 endif()
-
-# 16 KB page-size support (Android 15+, required by Google Play for targetSdk 35+). NDK r28 already
-# aligns LOAD segments at 16 KB by default; this states it explicitly so an older NDK cannot quietly
-# produce a 4 KB-aligned library again. Verify with: llvm-readelf -lW libstockfish.so (Align 0x4000).
-target_link_options(stockfish PRIVATE "-Wl,-z,max-page-size=16384")
-
-# pthreads + the Android log/dl libs used by the JNI bridge.
-find_library(log-lib log)
-target_link_libraries(stockfish PRIVATE ${log-lib})
