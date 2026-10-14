@@ -50,10 +50,13 @@ jobs:
         run: bash ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :engine:assembleDebugAndroidTest
 
       - name: Start the emulator (chess34 equivalent, 4 GB RAM)
+        env:
+          ANDROID_AVD_HOME: /home/runner/.android/avd
         run: |
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n ci34 \
             -k "system-images;android-34;google_apis;x86_64" -d pixel_6 --force
-          printf 'hw.ramSize=4096\ndisk.dataPartition.size=8G\nhw.cpu.ncore=4\n' >> ~/.android/avd/ci34.avd/config.ini
+          printf 'hw.ramSize=4096\ndisk.dataPartition.size=8G\nhw.cpu.ncore=4\n' >> "$ANDROID_AVD_HOME/ci34.avd/config.ini"
           nohup "$ANDROID_HOME/emulator/emulator" -avd ci34 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect \
             -no-snapshot -camera-back none > emulator.log 2>&1 &
           ADB="$ANDROID_HOME/platform-tools/adb"
