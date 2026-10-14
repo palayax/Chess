@@ -42,7 +42,7 @@ fun missingNarrationCount(segmentKeys: List<String>, ignoring: Set<String>, isRe
 
 /**
  * Whether a recording should start by itself, without the Video screen (the Summary, after the side was answered or a
- * plain reopen): the game asks for the prepared video, the natural voice is installed with segments to record
+ * deadline-cut recording, not a plain reopen any more, EL2): the game asks for the prepared video, the natural voice is installed with segments to record
  * ([narrationNeedsPreparation]), and this process has not tried it for this game, voice and side already
  * ([alreadyTried]: a Skip or a Cancel is the user's answer and is not asked again until something changes).
  */

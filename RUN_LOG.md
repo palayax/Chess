@@ -5089,3 +5089,36 @@ Remains / not done:
 - The spoken script is longer on bare beats in a decided position (a 50 cp swing still earns its beat, 9.2); a "nothing to say"
   SKIP was tried and reverted because it contradicts 9.2 and `NarrationSignificanceTest`.
 - Owner's ear: the new prose is unheard; part C (per-beat speed) would add the intonation the text can only hint at.
+
+
+---
+
+## EL2: whole-review deadline (2026-10-14) — NOT device-verified
+
+Owner goal: a whole review (engine + wording + narration + voice) within about 10 minutes on a Pixel 8, with honest time estimates.
+A gap review of the Elo-levels branch found that only the engine stage was bounded. No Android SDK here: `:app` was NOT compiled; only the
+host subset ran.
+
+What changed (spec §8.4, §8.6; CLAUDE.md gotcha 10 and the RF bullets):
+1. `ReviewBudget.kt` (new, pure): `REVIEW_TOTAL_BUDGET_MS` 600 s, `wordingStageBudgetMs` (min(90 s, time to the deadline - reserve)), reserves,
+   `levelEngineEstimate`, `wholeReviewEstimate`, `TimeEstimate`. `AnalysisViewModel.runRemainingStages` budgets POLISH_COMMENTARY and the beat
+   rewording of WRITE_NARRATION (`withStageBudget`: a timeout keeps the original texts, cached rewordings stay), stops RECORD_VOICE at the
+   deadline and records the rest in the background after the Summary opens (`prepareNarrationInBackground(afterDeadline = true)`). A stage cut
+   short is shown as skipped and does not feed `ReviewSpeedStore`. Each stage logs its time, budget and whether it hit it.
+2. Max: `MAX_LEVEL_MOVETIME_CEILING_MS` 8 s per position (`GameTimeBudget.ceilingMs`, passed by `AnalysisService`); a short game finishes early.
+   The cache key is unchanged on purpose (an older, longer Max search stays a valid result).
+3. Estimates: before anything is measured the Review options screen shows an upper bound ("Up to about N min for the whole review", new plural);
+   an unmeasured stage adds `ReviewStage.boundMs`, not 0; the figures are recomputed on the screen from the CURRENT options
+   (`ReviewEstimateInputs` + `levelEstimates`), so the video, wording and voice switches change them.
+4. `ChessAnalyzerNavHost`: the Summary no longer starts a background recording on every open of a reopened game.
+5. `startBackgroundWording` clears `wordingResume` only while the job is still active.
+6. `GameRepository.loadPendingOptions`: a legacy pending `AUTO` strength maps to level code 3100 (was depth 14 -> 2900).
+7. `runAnalysis` KEEP_WAITING keeps the newest `onComplete` (`pendingOnComplete`), called on the main thread at the run's end.
+
+Note on the prior: the request wrote "1/250_000 ms per node, i.e. 250k nodes/s"; those differ by 1000x. 250k nodes/s is 1/250 ms per node
+(0.004), which is what the code and spec use.
+
+Host tests: see the report of the change (`ReviewBudgetTest` and the extended `EngineLevelTest` run in the :app-model subset; the edited
+`ReviewOptionsLogicTest` and `GameRepositoryReviewOptionsTest` need classes the host subset cannot compile and were edited, not run).
+To verify on a Pixel 8: a 40-move game at 3100 and at Max with wording + video + Kokoro, first review and a later one: total wall time vs 10 min,
+the stage log lines, the background recording after the deadline, and the "Up to about" line on a fresh install.

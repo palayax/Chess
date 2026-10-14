@@ -40,6 +40,7 @@ import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GAME_ENGINE_BUDGET_MS
 import net.palaya.chessanalyzer.ui.model.GameTimeBudget
+import net.palaya.chessanalyzer.ui.model.MAX_LEVEL_MOVETIME_CEILING_MS
 import net.palaya.chessanalyzer.ui.model.SearchBudget
 
 /**
@@ -151,7 +152,8 @@ class AnalysisService(
         val variant = runCatching { engineController.engineOrNull()?.nativeVariant }.getOrNull() ?: "not loaded yet"
         val levelLog = if (level != null) {
             "level ${level.name} (${if (level.isMax) "Max" else "about ${level.code}"}), node budget ${level.nodes ?: "none"}, " +
-                "game engine budget $GAME_ENGINE_BUDGET_MS ms, min ${GameTimeBudget(GAME_ENGINE_BUDGET_MS).minPerPositionMs} ms per position"
+                "game engine budget $GAME_ENGINE_BUDGET_MS ms, min ${GameTimeBudget(GAME_ENGINE_BUDGET_MS).minPerPositionMs} ms per position" +
+                (if (level.isMax) ", ceiling $MAX_LEVEL_MOVETIME_CEILING_MS ms per position" else "")
         } else {
             "depth ${settings.depth}, node budget ${budget.nodes}, time cap ${budget.movetimeMs} ms"
         }
@@ -243,7 +245,7 @@ class AnalysisService(
                 val startedAt = nowMs()
                 var shownDepth = 0
                 val levelSearch = level != null
-                val movetime = if (levelSearch) GameTimeBudget(runBudgetMs).movetimeFor(positionsLeft, runSearchMs) else limits.movetimeMs
+                val movetime = if (levelSearch) GameTimeBudget(runBudgetMs, ceilingMs = if (level?.isMax == true) MAX_LEVEL_MOVETIME_CEILING_MS else null).movetimeFor(positionsLeft, runSearchMs) else limits.movetimeMs
                 val nodeLimit: Long? = if (levelSearch) level?.nodes else limits.nodes
                 val started = searching.copy(
                     // A level has no depth to reach: the "depth d of D" line stays hidden (targetDepth 0).

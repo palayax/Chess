@@ -80,6 +80,12 @@ conflict.
    a game-wide time budget (`GameTimeBudget`, 5 min for the whole first pass); never put the dynamic per-position movetime in the
    cache key. Auto/Quick/Standard/Deep are legacy code paths kept only for old games and pending requests: do not offer them.
    Do not use `UCI_Elo` for analysis (it does not reduce search work). The Elo labels are an approximation until measured.
+   **EL2: the whole review has a deadline** (`ui/model/ReviewBudget.kt`, spec §8.6): `REVIEW_TOTAL_BUDGET_MS` 10 min from the run start;
+   each wording stage gets `wordingStageBudgetMs` (<= 90 s, minus a reserve for the later stages) and keeps the original texts when it
+   runs out; the voice recording stops at the deadline and the rest is recorded in the background (`prepareNarrationInBackground(afterDeadline)`);
+   Max has a per-position ceiling (`MAX_LEVEL_MOVETIME_CEILING_MS` 8 s). Any time shown before a phone has measured is an upper bound
+   (`TimeEstimate.upperBound`, "Up to about N min"): never add 0 for an unmeasured stage, use `ReviewStage.boundMs`. A stage cut by its budget
+   must not feed `ReviewSpeedStore`.
 
 ## Build gotchas
 
@@ -291,6 +297,9 @@ conflict.
   priors; "About N min left" is measured only (`ReviewTimeLeftTracker`), hidden until honest. Skip cancels only the
   stage's child job. The processing screen's `whileYouWait` slot is for the insights panel (`processingGame`,
   `evalsSoFar`).
+- **The Summary starts no recording for a reopened game (EL2).** Only a side change and a RECORD_VOICE stage that hit the deadline start a
+  background recording; an old game records on the Video route (`ensureNarrationPrepared`). `runAnalysis`'s KEEP_WAITING keeps the newest
+  `onComplete` (`pendingOnComplete`), which the run calls on the main thread at its end.
 - **Deleting a game** (`deleteGame`) removes its JSON, pending options, in-memory state, its pending/waiting request and
   its eval cache when no other stored game has the same text (`deletePlan`); never the narration WAVs (shared).
 

@@ -9,6 +9,7 @@ import net.palaya.chessanalyzer.core.analysis.PositionEval
 import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
@@ -207,7 +208,10 @@ class GameRepository(
         if (!file.isFile) return@withContext null
         try {
             val json = JSONObject(file.readText())
-            val strengthDepth = AnalysisStrength.entries.firstOrNull { it.name == json.optString("strength", "") }?.depth
+            // A legacy pending strength is a depth, except Auto: it has no depth of its own and means the top level (3100).
+            val strengthDepth = AnalysisStrength.entries.firstOrNull { it.name == json.optString("strength", "") }?.let {
+                if (it.autoDepth) EngineLevel.forLegacyDepth(it.depth, autoDepth = true).code else it.depth
+            }
             StoredReviewOptions(
                 depth = strengthDepth ?: if (json.has("depth")) json.getInt("depth") else null,
                 side = SideChoice.fromStored(json.optString("side", "")),

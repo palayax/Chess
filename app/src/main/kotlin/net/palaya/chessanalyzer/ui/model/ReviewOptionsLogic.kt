@@ -136,9 +136,10 @@ fun strengthEstimateMs(positions: Int, typicalNodes: Long?, msPerNode: Double?, 
 
 /**
  * The engine time of an Elo [level] for a game of [positions] searched positions (spec §8.4, §8.6):
- * min(positions x the level's nodes x this phone's ms per node, the game budget [budgetMs]). Max has no node count, so
- * it is the budget itself, known without any measurement. Without a measurement every other level is null (nothing is
- * invented). [cached] = already on disk: 0.
+ * min(positions x the level's nodes x this phone's ms per node, the game budget [budgetMs]). Max has no node count: it is
+ * min(positions x [MAX_LEVEL_MOVETIME_CEILING_MS], the budget), known without any measurement. Without a measurement every
+ * other level is null (nothing is invented; the Review options screen then uses [levelEngineEstimate]'s bound).
+ * [cached] = already on disk: 0.
  */
 fun levelEstimateMs(
     level: EngineLevel,
@@ -148,20 +149,56 @@ fun levelEstimateMs(
     budgetMs: Long = GAME_ENGINE_BUDGET_MS,
 ): Long? {
     if (cached) return 0L
-    val nodes = level.nodes ?: return budgetMs
+    val nodes = level.nodes ?: return minOf(positions.coerceAtLeast(0) * MAX_LEVEL_MOVETIME_CEILING_MS, budgetMs)
     val byNodes = strengthEstimateMs(positions, nodes, msPerNode) ?: return null
     return minOf(byNodes, budgetMs)
 }
 
 /**
- * The time of the WHOLE review for the Review options screen (spec §8.4): the engine stage's [engineMs] plus the other
- * stages of [plan] that this phone has measured ([ReviewSpeeds.estimateMs]; a stage never measured adds nothing, it is
- * not invented). Null when the engine stage has no estimate.
+ * The time of the WHOLE review for the Review options screen (spec §8.4): the engine stage's [engine] estimate plus every
+ * other stage of [plan]: its measured time ([ReviewSpeeds.estimateMs]) or, when this phone never measured it, the stage's
+ * bound ([boundMs]; never 0). Capped at [REVIEW_TOTAL_BUDGET_MS]. An upper bound ([TimeEstimate.upperBound]) as soon as any
+ * part is one. [wording] = the game's Natural wording runs.
  */
-fun wholeReviewEstimateMs(engineMs: Long?, plan: List<ReviewStage>, speeds: ReviewSpeeds, plies: Int): Long? {
-    engineMs ?: return null
-    val others = plan.filter { it != ReviewStage.ENGINE }.sumOf { speeds.estimateMs(it, plies) ?: 0L }
-    return engineMs + others
+fun wholeReviewEstimateMs(engine: TimeEstimate, plan: List<ReviewStage>, speeds: ReviewSpeeds, plies: Int, wording: Boolean): TimeEstimate {
+    val others = plan.filter { it != ReviewStage.ENGINE }.map { stage ->
+        speeds.estimateMs(stage, plies)?.let { TimeEstimate(it, upperBound = false) }
+            ?: TimeEstimate(stage.boundMs(wording), upperBound = true)
+    }
+    return wholeReviewEstimate(engine, others)
+}
+
+/**
+ * What the Review options screen needs to time a review for ANY set of options: everything that does not depend on the
+ * options being edited. The time per level is then computed from the options as they are NOW ([levelEstimates]), so
+ * switching "Prepare the video now", Natural wording or the voice changes the stages of the plan and the figures with it.
+ */
+data class ReviewEstimateInputs(
+    /** Searched positions of the game (plies + 1). */
+    val positions: Int,
+    val plies: Int,
+    val speeds: ReviewSpeeds,
+    /** The levels whose evaluations of this game are already on the phone. */
+    val cachedLevels: Set<EngineLevel>,
+    /** The wording model is installed and supported ([wordingInEffect] with the options' switch). */
+    val wordingUsable: Boolean,
+    /** The natural voice is installed. */
+    val kokoroInstalled: Boolean,
+)
+
+/** The whole-review time per level for [options] (the plan changes with the video, wording and voice choices). */
+fun levelEstimates(inputs: ReviewEstimateInputs, options: ReviewOptions): Map<EngineLevel, TimeEstimate> {
+    val plan = reviewStagePlan(options, inputs.wordingUsable, inputs.kokoroInstalled)
+    val wording = wordingInEffect(options, inputs.wordingUsable)
+    return EngineLevel.entries.associateWith { level ->
+        val engine = levelEngineEstimate(
+            level,
+            inputs.positions,
+            inputs.speeds.engineMsPerNode,
+            cached = level in inputs.cachedLevels,
+        )
+        wholeReviewEstimateMs(engine, plan, inputs.speeds, inputs.plies, wording)
+    }
 }
 
 /**
@@ -202,11 +239,8 @@ data class ReviewOptionsDraft(
     val wording: WordingOption,
     /** The natural voice is installed (else its voices are listed as "after setup"). */
     val voiceInstalled: Boolean,
-    /**
-     * A rough time of the WHOLE review per level on this phone ([levelEstimateMs] plus the measured other stages);
-     * null = not measured, nothing shown.
-     */
-    val strengthEstimatesMs: Map<EngineLevel, Long?>,
+    /** What the whole-review time per level is computed from, with the options as edited ([levelEstimates]). */
+    val estimateInputs: ReviewEstimateInputs,
 )
 
 /** The Review options screen's load state. */

@@ -97,4 +97,35 @@ class EngineLevelTest {
         assertEquals(100_000L, b.leftMs(200_000L))
         assertEquals(0L, b.leftMs(999_999L))
     }
+
+    // ---- Max: a ceiling per position (EL2) ----
+
+    @Test
+    fun maxHasAPerPositionCeilingSoAShortGameFinishesEarly() {
+        val b = GameTimeBudget(GAME_ENGINE_BUDGET_MS, ceilingMs = MAX_LEVEL_MOVETIME_CEILING_MS)
+        assertEquals(8_000L, MAX_LEVEL_MOVETIME_CEILING_MS)
+        // 20 positions: the fair share x 1.5 is 22,500 ms, the ceiling holds it at 8 s.
+        assertEquals(8_000L, b.movetimeFor(positionsLeft = 20, spentMs = 0L))
+        // A whole short game at the ceiling is far under the budget.
+        var spent = 0L
+        for (i in 0 until 20) spent += b.movetimeFor(20 - i, spent)
+        assertEquals(160_000L, spent)
+        // A long game is bound by the share, not the ceiling.
+        assertEquals(1_875L, b.movetimeFor(positionsLeft = 240, spentMs = 0L))
+        // The last position never gets more than the ceiling either, nor less than the minimum.
+        assertEquals(8_000L, b.movetimeFor(positionsLeft = 1, spentMs = 0L))
+        assertEquals(250L, b.movetimeFor(positionsLeft = 1, spentMs = 299_900L))
+        // Without a ceiling (the node levels) nothing changes.
+        assertEquals(22_500L, GameTimeBudget(GAME_ENGINE_BUDGET_MS).movetimeFor(20, 0L))
+    }
+
+    @Test
+    fun aMaxGameStillStaysWithinTheBudget() {
+        for (n in listOf(1, 5, 41, 81, 150, 600)) {
+            val b = GameTimeBudget(GAME_ENGINE_BUDGET_MS, ceilingMs = MAX_LEVEL_MOVETIME_CEILING_MS)
+            var spent = 0L
+            for (i in 0 until n) spent += b.movetimeFor(n - i, spent)
+            assertTrue("n=$n spent=$spent", spent <= GAME_ENGINE_BUDGET_MS * 11 / 10 + n * b.minPerPositionMs)
+        }
+    }
 }

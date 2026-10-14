@@ -67,20 +67,29 @@ enum class EngineLevel(val code: Int, val nodes: Long?) {
 const val GAME_ENGINE_BUDGET_MS: Long = 300_000L
 
 /**
+ * The most one position can get at level Max (spec §8.6): Max has no node budget, so without a ceiling it always spent the
+ * whole [GAME_ENGINE_BUDGET_MS], however short the game. With 8 s per position a 20-move game (41 positions) finishes in
+ * about 5.5 minutes at the very most, and a short one early.
+ */
+const val MAX_LEVEL_MOVETIME_CEILING_MS: Long = 8_000L
+
+/**
  * How the game's engine time is shared between its positions (spec §8.6), pure and host-tested.
  *
  * Each search gets the time left divided by the positions left, times [SLACK] (a position that stops early on its
  * node budget leaves time to the later ones, so the average stays within the total), never less than [minPerPositionMs]
- * and never more than the whole time left (when that is above the minimum).
+ * and never more than the whole time left (when that is above the minimum). [ceilingMs] (level Max only,
+ * [MAX_LEVEL_MOVETIME_CEILING_MS]) caps one search whatever its share is, so a short game finishes early.
  */
-class GameTimeBudget(val totalMs: Long, val minPerPositionMs: Long = 250L) {
+class GameTimeBudget(val totalMs: Long, val minPerPositionMs: Long = 250L, val ceilingMs: Long? = null) {
 
     fun movetimeFor(positionsLeft: Int, spentMs: Long): Long {
         val left = (totalMs - spentMs).coerceAtLeast(0L)
         val n = positionsLeft.coerceAtLeast(1)
         val share = (left.toDouble() / n * SLACK).toLong()
         val capped = if (n == 1) minOf(share, left) else share
-        return maxOf(minPerPositionMs, capped)
+        val wanted = maxOf(minPerPositionMs, capped)
+        return if (ceilingMs == null) wanted else minOf(wanted, maxOf(ceilingMs, minPerPositionMs))
     }
 
     /** Time still available for the engine stage. */

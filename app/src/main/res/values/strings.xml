@@ -755,6 +755,12 @@
         <item quantity="other">About %1$d min for the whole review on this phone</item>
     </plurals>
     <string name="review_options_strength_under_minute">About a minute for the whole review on this phone</string>
+    <!-- EL2: before this phone has measured a review, only an upper bound is known; it is never shown as a measured time. -->
+    <plurals name="review_options_strength_minutes_upto">
+        <item quantity="one">Up to about %1$d min for the whole review</item>
+        <item quantity="other">Up to about %1$d min for the whole review</item>
+    </plurals>
+    <string name="review_options_strength_under_minute_upto">Under a minute for the whole review</string>
     <string name="review_options_side_help">The review then says \'you\' and \'your opponent\', and Practise uses your own mistakes.</string>
     <string name="review_options_wording_help">Rewords the commentary and the narration on this phone. Every fact is checked against the app\'s own text.</string>
     <string name="review_options_wording_download">Natural wording (on-device AI) needs the wording model, which you can download in Settings.</string>

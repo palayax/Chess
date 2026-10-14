@@ -160,4 +160,17 @@ class GameRepositoryReviewOptionsTest {
         File(folder.root, "${GameRepository.REVIEW_DIR_NAME}/${ReviewSpeedStore.FILE_NAME}").writeText("{not json")
         assertNull(ReviewSpeedStore(folder.root).load().engineMsPerNode)
     }
+
+    @Test
+    fun aLegacyPendingAutoStrengthMeansTheTopLevelNotDepth14() = runBlocking {
+        val dir = File(folder.root, "${GameRepository.REVIEW_DIR_NAME}/pending").apply { mkdirs() }
+        File(dir, "auto.json").writeText("""{"strength":"AUTO","side":"WHITE"}""")
+        File(dir, "std.json").writeText("""{"strength":"STANDARD"}""")
+        File(dir, "deep.json").writeText("""{"strength":"DEEP"}""")
+        val r = repo()
+        assertEquals(EngineLevel.L3100.code, r.loadPendingOptions("auto")!!.depth)
+        // The other legacy strengths keep their depth (the options screen pre-selects the nearest level from it).
+        assertEquals(14, r.loadPendingOptions("std")!!.depth)
+        assertEquals(18, r.loadPendingOptions("deep")!!.depth)
+    }
 }

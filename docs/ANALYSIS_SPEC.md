@@ -760,19 +760,30 @@ N of M" during the second pass ("Move x of y" before it); "Thinking deeper … d
 any search.
 
 **Elo levels (§8.6).** For a level the estimate is **min(positions left x the level's node budget x ms per node, the
-engine budget left)**; Max has no node budget, so it is the budget left, shown from the first position. The speed is
+engine budget left)**; Max has no node budget, so it is min(positions left x the 8 s ceiling of §8.6, the budget left), shown
+from the first position. The speed is
 the **last 8 searched positions** (`RecentSpeed`), not the whole run, so a phone that throttles when it heats is tracked
 (the whole-run average lagged behind). The "thinking deeper … depth d of D" line is not shown for a level (it has no
 target depth).
 
-**Overall estimate (Review options screen, processing screen).** The Review options screen shows, per level, the time of
-the **whole review** on this phone: the engine stage as above (`levelEstimateMs`; Max = the 5-minute budget even before
-anything was measured) plus the other stages of the plan that this phone has measured (`ReviewSpeeds.estimateMs`; a
-stage never measured adds nothing and nothing is invented). Cached evaluations at that level count 0 for the engine.
+**Overall estimate (Review options screen, processing screen).** The Review options screen shows, per level, the time of the
+**whole review** on this phone, computed from the options as they are edited at that moment (switching "Prepare the video
+now", Natural wording or the voice changes the stages of the plan, so the figures follow; `levelEstimates`). The engine stage
+is as above (`levelEstimateMs`; cached evaluations at that level count 0). Every other stage of the plan adds its measured
+time (`ReviewSpeeds.estimateMs`) or, **when this phone never measured it, the stage's bound** (never 0): polishing 90 s,
+writing the narration 90 s with wording (10 s without), recording up to the review deadline (§8.6). The sum is capped at
+`REVIEW_TOTAL_BUDGET_MS` (10 min).
+
+**Before this phone has measured anything** the engine part is an **upper bound** instead of nothing: min(positions x the
+level's nodes x a deliberately slow prior of **250,000 nodes per second** (`ENGINE_PRIOR_MS_PER_NODE` = 1/250 ms per node), the
+engine budget); Max is min(positions x 8 s, the budget). A figure that contains any bound (an unmeasured stage, the prior,
+Max, or a sum cut to the deadline) is worded **"Up to about N min for the whole review"**; only a figure made of measurements
+(and cached zeros) says "About N min for the whole review on this phone" (`TimeEstimate.upperBound`). The prior is chosen to
+be slower than any phone the app supports, so the bound holds and the first review can only finish sooner.
 `ReviewSpeeds.withEngine` blends the stored engine speed **0.7 latest run / 0.3 earlier** (the latest run says most about
 the next one). The processing screen's overall "about N min left" uses the engine stage's own estimate for the whole
 stage, including legacy Auto's second pass (it used to leave the second pass out and to stop updating once the first
-pass was done).
+pass was done); it stays hidden until every stage still to come has a measurement.
 
 The estimate and the "thinking deeper" line are a polite live region; the ticking clock is not.
 
@@ -929,7 +940,7 @@ levels "like DroidFish" (2500 up to the engine's maximum), and the time estimate
 | About 2700 | 2700 | 60,000 |
 | About 2900 | 2900 | 180,000 |
 | About 3100 (default) | 3100 | 600,000 |
-| Max | 4000 | none: the game time budget alone decides |
+| Max | 4000 | none: the game time budget and a per-position ceiling of 8 s decide |
 
 Every level searches with `go depth 60 nodes N movetime T` (depth 60 = no depth limit in practice; Max omits `nodes`).
 
@@ -947,10 +958,28 @@ than its label. DroidFish also analyses at full strength and uses `UCI_Elo` only
 engine time whatever the game's length, which is what keeps a whole review near 10 minutes on a slow phone (the rest goes
 to wording, narration and the voice). Position by position the search gets
 `movetime = max(250 ms, (budget - spent) / positions left x 1.5)`, and never more than the time left when it is the
-last position. A position that ends early on its node budget leaves its time to the later ones; terminal positions
+last position. **Max has a ceiling of 8 s per position** (`MAX_LEVEL_MOVETIME_CEILING_MS`; EL2): with no node limit it used
+to spend the whole 5 minutes on any game, a 20-move game now takes about 160 s at the most. A position that ends early on its node budget leaves its time to the later ones; terminal positions
 (checkmate, stalemate) are not searched and cost nothing. If every search used its whole movetime the total would still
 be at most the budget plus the 250 ms minimums (host-tested). A resumed run (§8.3) gets the budget's share of the
 positions it still has to do. Legacy depths have no game budget.
+
+**The whole-review deadline (EL2).** The engine budget bounds only the first stage. The whole review (engine, wording,
+narration, voice) must be over **10 minutes** (`REVIEW_TOTAL_BUDGET_MS`) after the run started (`runAnalysis`'s start, on the
+monotonic clock), so every later stage is bounded too:
+- **Wording** (polishing the key moments; rewording the narration beats) gets a total budget per stage of
+  **min(90 s, time to the deadline minus a reserve for the stages after it)** (`wordingStageBudgetMs`; the reserve is 10 s for
+  writing the narration script and 120 s for the recording, each only when planned). When it runs out the stage stops and the
+  texts it did not reach keep their original, verified wording: the same outcome as one 30 s item that timed out
+  (`RephraseService`'s per-item timeout stays). What was reworded stays cached.
+- **Recording the voice** stops at the deadline. The segments recorded stay; the rest is recorded **in the background after
+  the Summary opens** (`prepareNarrationInBackground`, the Video screen's own path: one recording at a time, the Video screen
+  shows the running recording, or "Watch now" plays the rest in the device voice).
+- A stage cut short by its budget is shown as skipped on the checklist and does **not** feed the stage-speed store (it
+  measured only part of the work).
+- The diagnostic log has one line per stage: its time, its budget and whether it hit it, and a line for the whole review.
+The deadline is a ceiling on the planned stages; the engine budget plus the two wording budgets (5 + 1.5 + 1.5 min) leave the
+recording its 2-minute reserve inside it. Not device-verified: no Pixel 8 timing exists yet.
 
 **Cache key.** `SHA-256(PGN, code, MultiPV, "lvl<code>:n<nodes>:g<game budget>")`, for example
 `lvl2900:n180000:g300000` (Max: `n0`). The dynamic per-position movetime is not in the key, and a changed game budget

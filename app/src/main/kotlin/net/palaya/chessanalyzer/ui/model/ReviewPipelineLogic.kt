@@ -38,6 +38,19 @@ enum class ReviewStage {
     val skippable: Boolean get() = this != ENGINE
 }
 
+/**
+ * The most time [this] stage can take in a review (EL2, spec §8.4 and §8.6): what the Review options screen adds for a stage
+ * this phone has never measured, so the figure shown is an upper bound and not a guess. [wordingInEffect] = the game's
+ * Natural wording runs (the narration stage then also rewords its beats).
+ */
+fun ReviewStage.boundMs(wordingInEffect: Boolean): Long = when (this) {
+    ReviewStage.ENGINE -> GAME_ENGINE_BUDGET_MS
+    ReviewStage.POLISH_COMMENTARY -> WORDING_STAGE_BUDGET_MS
+    ReviewStage.WRITE_NARRATION -> if (wordingInEffect) WORDING_STAGE_BUDGET_MS else NARRATION_WRITE_RESERVE_MS
+    // Runs until the deadline; what is not recorded by then is recorded in the background.
+    ReviewStage.RECORD_VOICE -> REVIEW_TOTAL_BUDGET_MS
+}
+
 enum class StageStatus { PENDING, CURRENT, DONE, SKIPPED }
 
 /** One row of the checklist. [done] of [total] items (positions, texts, beats, segments); [total] 0 = not known yet. */

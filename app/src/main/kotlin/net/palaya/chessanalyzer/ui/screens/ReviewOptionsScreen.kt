@@ -38,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -57,9 +58,13 @@ import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameHeader
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
+import net.palaya.chessanalyzer.ui.model.ReviewEstimateInputs
 import net.palaya.chessanalyzer.ui.model.ReviewOptionsDraft
+import net.palaya.chessanalyzer.ui.model.ReviewSpeeds
 import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.TimeEstimate
 import net.palaya.chessanalyzer.ui.model.WordingOption
+import net.palaya.chessanalyzer.ui.model.levelEstimates
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import net.palaya.chessanalyzer.video.ExportTimeLeft
 import net.palaya.chessanalyzer.video.VoiceSamplePlayer
@@ -134,7 +139,10 @@ fun ReviewOptionsScreen(
             OptionsCard {
                 StrengthChooser(
                     selected = options.level,
-                    estimates = draft.strengthEstimatesMs,
+                    // Recomputed from the options as edited: the plan (video, wording, voice) changes the stages added.
+                    estimates = remember(draft.estimateInputs, options.prepareVideo, options.naturalWording, options.voice) {
+                        levelEstimates(draft.estimateInputs, options)
+                    },
                     onSelect = { onOptionsChange(options.copy(level = it)) },
                 )
             }
@@ -269,7 +277,7 @@ private fun levelHintRes(level: EngineLevel): Int = when (level) {
  * phone when one was measured (or "ready at once" when this game's evaluations at that level are already on the phone).
  */
 @Composable
-private fun StrengthChooser(selected: EngineLevel, estimates: Map<EngineLevel, Long?>, onSelect: (EngineLevel) -> Unit) {
+private fun StrengthChooser(selected: EngineLevel, estimates: Map<EngineLevel, TimeEstimate>, onSelect: (EngineLevel) -> Unit) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         SectionHeading(stringResource(R.string.review_options_strength))
         Column(modifier = Modifier.selectableGroup()) {
@@ -302,14 +310,22 @@ private fun StrengthChooser(selected: EngineLevel, estimates: Map<EngineLevel, L
     }
 }
 
-/** The time line under a strength, or null when this phone has not measured one (nothing is invented). */
+/**
+ * The time line under a strength: "About N min" when this phone measured every part, "Up to about N min" when part of it
+ * is only an upper bound (nothing measured yet, or Max), "ready at once" when cached.
+ */
 @Composable
-private fun estimateText(estimateMs: Long?): String? = when {
-    estimateMs == null -> null
-    estimateMs == 0L -> stringResource(R.string.review_options_strength_ready)
-    else -> when (val t = timeLeftFor(estimateMs)) {
-        ExportTimeLeft.Hidden, ExportTimeLeft.LessThanMinute -> stringResource(R.string.review_options_strength_under_minute)
-        is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.review_options_strength_minutes, t.minutes, t.minutes)
+private fun estimateText(estimate: TimeEstimate?): String? = when {
+    estimate == null -> null
+    estimate.ms == 0L -> stringResource(R.string.review_options_strength_ready)
+    else -> when (val t = timeLeftFor(estimate.ms)) {
+        ExportTimeLeft.Hidden, ExportTimeLeft.LessThanMinute ->
+            stringResource(if (estimate.upperBound) R.string.review_options_strength_under_minute_upto else R.string.review_options_strength_under_minute)
+        is ExportTimeLeft.Minutes -> pluralStringResource(
+            if (estimate.upperBound) R.plurals.review_options_strength_minutes_upto else R.plurals.review_options_strength_minutes,
+            t.minutes,
+            t.minutes,
+        )
     }
 }
 
@@ -376,7 +392,14 @@ private fun ReviewOptionsScreenPreview() {
                 options = options,
                 wording = WordingOption.SWITCH,
                 voiceInstalled = true,
-                strengthEstimatesMs = mapOf(EngineLevel.L2500 to 120_000L, EngineLevel.L2900 to 0L, EngineLevel.MAX to 600_000L),
+                estimateInputs = ReviewEstimateInputs(
+                    positions = 34,
+                    plies = 33,
+                    speeds = ReviewSpeeds(),
+                    cachedLevels = setOf(EngineLevel.L2900),
+                    wordingUsable = true,
+                    kokoroInstalled = true,
+                ),
             ),
             options = options,
             onOptionsChange = {},

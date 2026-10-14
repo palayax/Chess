@@ -138,22 +138,74 @@ class ReviewOptionsLogicTest {
         // 81 x 600,000 x 0.002 = 97,200 ms; on a slow phone (0.01 ms per node) 486,000 ms is cut to the budget.
         assertEquals(97_200L, levelEstimateMs(EngineLevel.L3100, 81, 0.002))
         assertEquals(GAME_ENGINE_BUDGET_MS, levelEstimateMs(EngineLevel.L3100, 81, 0.01))
-        // Not measured: nothing, except Max whose time is the budget itself.
+        // Not measured: nothing, except Max whose time is min(positions x the ceiling, the budget).
         assertNull(levelEstimateMs(EngineLevel.L2500, 81, null))
         assertEquals(GAME_ENGINE_BUDGET_MS, levelEstimateMs(EngineLevel.MAX, 81, null))
         assertEquals(GAME_ENGINE_BUDGET_MS, levelEstimateMs(EngineLevel.MAX, 81, 0.001))
+        assertEquals(20 * MAX_LEVEL_MOVETIME_CEILING_MS, levelEstimateMs(EngineLevel.MAX, 20, null))
         // Already analysed at that level: ready at once.
         assertEquals(0L, levelEstimateMs(EngineLevel.MAX, 81, null, cached = true))
     }
 
     @Test
-    fun theWholeReviewAddsTheMeasuredOtherStagesOfThePlanAndInventsNone() {
+    fun theWholeReviewAddsTheMeasuredOtherStagesAndTheBoundOfAnUnmeasuredOne() {
         val speeds = ReviewSpeeds(msPerPly = mapOf(ReviewStage.WRITE_NARRATION to 100.0, ReviewStage.RECORD_VOICE to 1_000.0))
         val plan = listOf(ReviewStage.ENGINE, ReviewStage.POLISH_COMMENTARY, ReviewStage.WRITE_NARRATION, ReviewStage.RECORD_VOICE)
-        // POLISH_COMMENTARY was never measured on this phone: it adds nothing.
-        assertEquals(60_000L + 40 * 100L + 40 * 1_000L, wholeReviewEstimateMs(60_000L, plan, speeds, plies = 40))
-        assertEquals(60_000L, wholeReviewEstimateMs(60_000L, listOf(ReviewStage.ENGINE), speeds, plies = 40))
-        assertNull(wholeReviewEstimateMs(null, plan, speeds, plies = 40))
+        val engine = TimeEstimate(60_000L, upperBound = false)
+        // POLISH_COMMENTARY was never measured on this phone: it adds its bound (90 s), never 0; so the result is a bound.
+        assertEquals(
+            TimeEstimate(60_000L + WORDING_STAGE_BUDGET_MS + 40 * 100L + 40 * 1_000L, upperBound = true),
+            wholeReviewEstimateMs(engine, plan, speeds, plies = 40, wording = true),
+        )
+        // Every stage measured: a plain estimate.
+        val measured = speeds.copy(msPerPly = speeds.msPerPly + (ReviewStage.POLISH_COMMENTARY to 50.0))
+        assertEquals(TimeEstimate(60_000L + 40 * 50L + 40 * 100L + 40 * 1_000L, false), wholeReviewEstimateMs(engine, plan, measured, 40, true))
+        assertEquals(engine, wholeReviewEstimateMs(engine, listOf(ReviewStage.ENGINE), speeds, plies = 40, wording = false))
+        // An unmeasured recording is bounded by the whole review, so the total is capped at the deadline.
+        assertEquals(
+            TimeEstimate(REVIEW_TOTAL_BUDGET_MS, true),
+            wholeReviewEstimateMs(engine, listOf(ReviewStage.ENGINE, ReviewStage.RECORD_VOICE), ReviewSpeeds(), 40, false),
+        )
+    }
+
+    private fun inputs(cached: Set<EngineLevel> = emptySet(), speeds: ReviewSpeeds = ReviewSpeeds()) = ReviewEstimateInputs(
+        positions = 41, plies = 40, speeds = speeds, cachedLevels = cached, wordingUsable = true, kokoroInstalled = true,
+    )
+
+    @Test
+    fun theTimesPerLevelFollowTheOptionsAsTheyAreEdited() {
+        val speeds = ReviewSpeeds(
+            engineMsPerNode = 0.001,
+            msPerPly = mapOf(
+                ReviewStage.POLISH_COMMENTARY to 10.0, ReviewStage.WRITE_NARRATION to 20.0, ReviewStage.RECORD_VOICE to 500.0,
+            ),
+        )
+        val withVideo = defaults.let { prefillReviewOptions(null, it) }.copy(naturalWording = true, prepareVideo = true)
+        val noVideo = withVideo.copy(prepareVideo = false)
+        val noWording = withVideo.copy(naturalWording = false)
+        val l = EngineLevel.L2700
+        val full = levelEstimates(inputs(speeds = speeds), withVideo).getValue(l)
+        val engine = Math.round(41 * 60_000.0 * 0.001)
+        assertEquals(TimeEstimate(engine + 40 * 10L + 40 * 20L + 40 * 500L, false), full)
+        // Video off: no narration, no recording stage.
+        assertEquals(TimeEstimate(engine + 40 * 10L, false), levelEstimates(inputs(speeds = speeds), noVideo).getValue(l))
+        // Wording off: no polish stage.
+        assertEquals(TimeEstimate(engine + 40 * 20L + 40 * 500L, false), levelEstimates(inputs(speeds = speeds), noWording).getValue(l))
+        // The device voice records nothing.
+        val device = withVideo.copy(voice = NarrationProviderChoice.DEVICE)
+        assertEquals(TimeEstimate(engine + 40 * 10L + 40 * 20L, false), levelEstimates(inputs(speeds = speeds), device).getValue(l))
+        // A cached level is ready at once for the engine, the other stages still count.
+        val cached = levelEstimates(inputs(cached = setOf(l), speeds = speeds), withVideo).getValue(l)
+        assertEquals(TimeEstimate(40 * 10L + 40 * 20L + 40 * 500L, false), cached)
+    }
+
+    @Test
+    fun beforeAnythingIsMeasuredTheTimeIsAnUpperBoundCappedAtTheDeadline() {
+        val all = levelEstimates(inputs(), prefillReviewOptions(null, defaults).copy(naturalWording = true))
+        for ((level, e) in all) assertTrue("$level", e.upperBound && e.ms in 1..REVIEW_TOTAL_BUDGET_MS)
+        // With the video off and no wording the bound is the engine's: 41 x 20,000 nodes x 1/250 ms = 3,280 ms for 2500.
+        val engineOnly = levelEstimates(inputs(), prefillReviewOptions(null, defaults).copy(naturalWording = false, prepareVideo = false))
+        assertEquals(TimeEstimate(3_280L, true), engineOnly.getValue(EngineLevel.L2500))
     }
 
     @Test
