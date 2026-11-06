@@ -175,7 +175,7 @@ fun VideoScreen(
     voiceAndPaceSettings: (@Composable () -> Unit)? = null,
     /**
      * RF: the narration recording of this game in its voice. While [NarrationPrepState.Preparing], the player area shows
-     * "Preparing the narration in <voice>… 12 of 40 · about 1 min" with Cancel instead of the board (the player would
+     * "Preparing the narration in <voice>… 12 of 40 · about 1 min" with "Watch now" (stops the recording; the device voice reads the rest) instead of the board (the player would
      * otherwise read the missing parts with the device voice); [NarrationPrepState.Incomplete] adds a notice with
      * "Prepare the narration". Each finished recording raises [NarrationPrepState.Ready.version], which rebuilds the
      * player so it plays the new files.
@@ -562,7 +562,7 @@ private fun VoiceAndPaceSheet(onDismiss: () -> Unit, content: @Composable () -> 
 
 /**
  * RF: the player area while the narration is recorded in the game's voice: "Preparing the narration in Bella…", the bar,
- * "12 of 40 · about 1 min" (measured, ExportTimeLeft) and Cancel. Same shape as the picture, so nothing jumps when the
+ * "12 of 40 · about 1 min" (measured, ExportTimeLeft) and "Watch now". Same shape as the picture, so nothing jumps when the
  * board replaces it. The status is a polite live region (one TalkBack stop).
  */
 @Composable

@@ -152,11 +152,16 @@ class ChessAnalyzerApplication : Application() {
         }
     }
 
-    private fun rephraseThreads(): Int = RephraseSupport.recommendedThreads(
+    /** Each core's maximum frequency in kHz (0 when the phone does not say), for the thread heuristics. */
+    private fun cpuMaxFrequenciesKhz(): List<Long> =
         (0 until Runtime.getRuntime().availableProcessors()).map { i ->
             runCatching { File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrDefault(0L)
-        },
-    )
+        }
+
+    private fun rephraseThreads(): Int = RephraseSupport.recommendedThreads(cpuMaxFrequenciesKhz())
+
+    /** Kokoro's threads: the same fast-core heuristic as the wording model, 2 to 4 ([net.palaya.chessanalyzer.ui.model.kokoroThreads]). */
+    val kokoroThreads: Int by lazy { net.palaya.chessanalyzer.ui.model.kokoroThreads(cpuMaxFrequenciesKhz()) }
 
     /** The one llama.cpp model of the process. */
     val rephraseBackend: RephraseBackend by lazy {
@@ -229,6 +234,11 @@ class ChessAnalyzerApplication : Application() {
     /** RF: this phone's measured review speeds (`filesDir/review/speeds.json`). */
     val reviewSpeedStore: net.palaya.chessanalyzer.data.ReviewSpeedStore by lazy {
         net.palaya.chessanalyzer.data.ReviewSpeedStore(filesDir)
+    }
+
+    /** RF: which narration recordings were run for which voice identity, and what fell back (`filesDir/review/prepared_narration.json`). */
+    val preparedNarrationStore: net.palaya.chessanalyzer.data.PreparedNarrationStore by lazy {
+        net.palaya.chessanalyzer.data.PreparedNarrationStore(filesDir)
     }
 
     val engineController: EngineController by lazy {

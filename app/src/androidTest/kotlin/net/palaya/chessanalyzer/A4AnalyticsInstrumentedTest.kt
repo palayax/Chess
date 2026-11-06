@@ -27,7 +27,7 @@ import net.palaya.chessanalyzer.core.analysis.MaterialBalance
 import net.palaya.chessanalyzer.core.chess.Color as CoreColor
 import net.palaya.chessanalyzer.core.pgn.PgnParser
 import net.palaya.chessanalyzer.data.FamousGamesStore
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.screens.FAMOUS_SEARCH_TAG
 import org.junit.After
@@ -153,7 +153,7 @@ class A4AnalyticsInstrumentedTest {
         runBlocking {
             val before = app.settingsRepository.current()
             settingsBefore = before
-            app.settingsRepository.save(before.copy(depth = AnalysisStrength.QUICK.depth, username = ""))
+            app.settingsRepository.save(before.copy(depth = EngineLevel.L2500.code, username = ""))
             // RF: the first review goes straight to processing with the defaults (Quick, no video now).
             TestApp.reviewImportsWithDefaults()
         }
@@ -166,7 +166,7 @@ class A4AnalyticsInstrumentedTest {
         val stored = runBlocking { app.gameRepository.listRecent() }.first { it.white == whiteName && it.black == blackName }
         storedGameFile = File(app.filesDir, "games/${stored.id}.json")
         val gameId = stored.id
-        assertEquals("analysed at the Settings default", AnalysisStrength.QUICK.depth, runBlocking { app.gameRepository.load(gameId) }?.depth)
+        assertEquals("analysed at the Settings default", EngineLevel.L2500.code, runBlocking { app.gameRepository.load(gameId) }?.depth)
 
         // ---- 1. Move quality: visible without opening anything, every class, both sides ----
         waitForText(app.getString(R.string.summary_move_quality))
@@ -199,25 +199,25 @@ class A4AnalyticsInstrumentedTest {
         stage("summary_stats_material")
 
         // ---- 3. Per-game strength ----
-        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_quick))).assertExists()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at_about, 2500)).assertExists()
         summaryItem(app.getString(R.string.reanalyse_button)).performClick()
         // RF: the game's Review options screen (not a dialog), pre-filled with the game's own strength.
         waitForText(app.getString(R.string.review_options_title))
         waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
         stage("review_options")
-        compose.onNode(hasText(app.getString(R.string.settings_depth_quick)) and isSelected()).assertExists()
-        compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and hasClickAction()).performClick()
-        compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and isSelected()).assertExists()
+        compose.onNode(hasText(app.getString(R.string.level_label_2500)) and isSelected()).assertExists()
+        compose.onNode(hasText(app.getString(R.string.level_label_2900)) and hasClickAction()).performClick()
+        compose.onNode(hasText(app.getString(R.string.level_label_2900)) and isSelected()).assertExists()
         compose.onNodeWithText(app.getString(R.string.review_options_start)).performClick()
 
         // The Analysing screen with the real engine, then a new Summary.
         waitForText(app.getString(R.string.progress_title))
         stage("reanalyse_progress")
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 600_000)
-        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).assertExists()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at_about, 2900)).assertExists()
         stage("summary_after_reanalyse")
-        assertEquals("the game's own strength is stored", AnalysisStrength.STANDARD.depth, runBlocking { app.gameRepository.load(gameId) }?.depth)
-        assertEquals("the Settings default is untouched", AnalysisStrength.QUICK.depth, runBlocking { app.settingsRepository.current() }.depth)
+        assertEquals("the game's own strength is stored", EngineLevel.L2900.code, runBlocking { app.gameRepository.load(gameId) }?.depth)
+        assertEquals("the Settings default is untouched", EngineLevel.L2500.code, runBlocking { app.settingsRepository.current() }.depth)
         // The table is still complete after the second analysis.
         for (name in classNames) assertTrue("a row for $name", rowCounts(name) != null)
 
@@ -231,10 +231,10 @@ class A4AnalyticsInstrumentedTest {
         compose.onNode(hasClickAction() and hasText(blackName, substring = true)).performScrollTo().performClick()
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 120_000)
         val reopenMs = (System.nanoTime() - startedReopen) / 1_000_000
-        summaryItem(app.getString(R.string.reanalyse_analysed_at, app.getString(R.string.settings_depth_standard))).assertExists()
+        summaryItem(app.getString(R.string.reanalyse_analysed_at_about, 2900)).assertExists()
         assertTrue("reopening is answered from the cache of the game's own strength, not by the engine ($reopenMs ms)", reopenMs < 40_000)
-        assertEquals("reopening does not change the game's strength", AnalysisStrength.STANDARD.depth, runBlocking { app.gameRepository.load(gameId) }?.depth)
-        assertEquals("the Settings default is still Quick", AnalysisStrength.QUICK.depth, runBlocking { app.settingsRepository.current() }.depth)
+        assertEquals("reopening does not change the game's strength", EngineLevel.L2900.code, runBlocking { app.gameRepository.load(gameId) }?.depth)
+        assertEquals("the Settings default is still Quick", EngineLevel.L2500.code, runBlocking { app.settingsRepository.current() }.depth)
 
         // ---- 4. The Board: names, captured pieces, "+N" ----
         summaryItem(app.getString(R.string.summary_open_board)).performClick()

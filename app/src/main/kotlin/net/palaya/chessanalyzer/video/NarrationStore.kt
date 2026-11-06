@@ -2,7 +2,6 @@ package net.palaya.chessanalyzer.video
 
 import android.content.Context
 import java.io.File
-import java.security.MessageDigest
 
 /**
  * Persistent, pruneable store for narration audio that has already been synthesized.
@@ -22,6 +21,9 @@ import java.security.MessageDigest
  *    ([net.palaya.chessanalyzer.ui.video.VideoPlayerController]) and export find one ready-to-play
  *    file per segment without re-deriving it from sentence pieces every time.
  *
+ * NC: the delivery of a beat (speed, sentence gaps) is part of the key; callers that know the beat go through
+ * [NarrationKeys] (`sentenceKey` / `segmentKey`), never `keyFor` with a hand-built text.
+ *
  * Both live side by side in the same flat directory — they're just different hash inputs over the
  * same content-addressed store, so a segment made of a single sentence naturally dedups to one
  * file instead of two.
@@ -33,15 +35,8 @@ class NarrationStore private constructor(val dir: File) {
     }
 
     /** Hash key for a piece of narration text under a given provider identity. */
-    fun keyFor(text: String, providerDisplayName: String, providerFingerprint: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(providerDisplayName.toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
-        digest.update(providerFingerprint.toByteArray(Charsets.UTF_8))
-        digest.update(0.toByte())
-        digest.update(text.toByteArray(Charsets.UTF_8))
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+    fun keyFor(text: String, providerDisplayName: String, providerFingerprint: String): String =
+        NarrationKeys.hash(text, providerDisplayName, providerFingerprint)
 
     fun fileFor(key: String): File = File(dir, "$key.wav")
 

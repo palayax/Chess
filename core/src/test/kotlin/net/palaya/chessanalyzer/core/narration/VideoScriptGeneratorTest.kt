@@ -255,9 +255,11 @@ class VideoScriptGeneratorTest {
         val s = VideoScriptGenerator(null).generate(report, game, NarrationOptions())
         assertEquals(null, s.userColor)
         for (seg in s.segments) {
+            // A question to the viewer ("Can you see what White missed?") is not an address to a player.
+            val statements = seg.narration.split(Regex("(?<=[.!?])\\s+")).filter { !it.endsWith("?") }.joinToString(" ")
             assertTrue(
                 "segment ${seg.index} addressed a user that does not exist: ${seg.narration}",
-                !Regex("\\byou\\b|\\byour\\b", RegexOption.IGNORE_CASE).containsMatchIn(seg.narration) ||
+                !Regex("\\byou\\b|\\byour\\b", RegexOption.IGNORE_CASE).containsMatchIn(statements) ||
                     seg.kind == SegmentKind.OUTRO_LESSONS || seg.kind == SegmentKind.PUZZLE_PROMPT
             )
             assertTrue(seg.narration.isNotBlank())
@@ -273,7 +275,8 @@ class VideoScriptGeneratorTest {
     fun `outro lessons are built from what actually happened in this game`() {
         val s = script()
         val lessons = s.segments.filter { it.kind == SegmentKind.OUTRO_LESSONS }
-        assertTrue("expected 2 to 4 lessons, got ${lessons.size}", lessons.size in 2..4)
+        // One takeaway, tied to the move the game turned on (ANALYSIS_SPEC 9.9).
+        assertEquals("expected the one takeaway, got ${lessons.size}", 1, lessons.size)
 
         val text = lessons.joinToString(" ") { it.narration }
         // The fixture's missed motif is a fork; the lesson must name it rather than give
@@ -284,8 +287,8 @@ class VideoScriptGeneratorTest {
             "lessons never mention any motif that actually occurred ($missedTypes): $text",
             missedTypes.any { text.lowercase().contains(it) }
         )
-        // And they cite a concrete count or move number from this game.
-        assertTrue("lessons cite nothing concrete: $text", Regex("move \\d+|three|two|one").containsMatchIn(text.lowercase()))
+        // And they cite a concrete move number from this game.
+        assertTrue("lessons cite nothing concrete: $text", Regex("move \\d+").containsMatchIn(text.lowercase()))
     }
 
     @Test

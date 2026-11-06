@@ -11,6 +11,44 @@ actually been collected. The conclusion happened to be right; the proof was not 
 
 ---
 
+## CLOUD SESSION 2026-10-14..11-06: SPEED, ELO LEVELS, NARRATION STORY. OWNER: CONTINUE LOCALLY FROM HERE
+
+Owner's report: Auto took ~30 min on a Pixel 8, the Video then re-processed "forever", time estimates were wrong,
+analysis depth should be Elo (2500..Max, DroidFish as reference), and the narration was unclear and monotone.
+Merged to `main` from `claude/awesome-newton-7eee5l`. Details per item in RUN_LOG ("EL", "EL2", recording fix, "NS", "NC").
+
+**Done (in the tree):**
+- Engine: arm64 `libstockfish_dotprod.so` beside the baseline, picked at runtime by `/proc/cpuinfo` asimddp (CLAUDE.md 16 KB bullet).
+- Elo levels 2500/2700/2900/3100(default)/Max replace Quick/Standard/Deep/Auto for new reviews (spec §8.6, CLAUDE.md gotcha 10);
+  node budget per level; 5 min engine budget per game; Max capped at 8 s per position; legacy depths/Auto still open old games.
+- Whole-review deadline 10 min (`ReviewBudget`): wording stages <= 90 s each, recording stops at the deadline and finishes in the
+  background. Estimates: sliding-window speed, never above the budget, whole review on Review options, "Up to about N min"
+  before anything was measured.
+- Narration recording before the Video screen: background recording after a side answer; fallback ledger
+  (`PreparedNarrationStore`); the wording model can no longer reload during a recording; "Watch now"; Kokoro threads by fast cores.
+- Narration story + rhythm (NS): `GamePhases` + `StoryArc` (stakes, phase turns with causes, errors with what they allowed,
+  mate announced once, takeaway); audited (`audit_commentary.py story` / `mutate-story`, 0 WRONG).
+- Per-beat delivery (NC): speed 0.90..1.10 and pause scale per beat, in the narration cache key (`NarrationKeys`).
+- CI: `.github/workflows/android-debug-apk.yml` (side-by-side debug APK `net.palaya.chessanalyzer.dev` + unit tests) and
+  `emulator-tests.yml` (API 34; push with `[emulator]` in the message).
+
+**Verified:** `:core` 650 host tests; CI build green; emulator API 34: `:engine` 20/20, `:app` 210/210, 0 skipped
+(Actions run "Emulator tests" #4, commit eff68a9).
+
+**Open (owner / local machine):**
+1. **Phone install.** The CI debug APK (debug key) was refused on the Pixel 8 as "unknown developer" (likely Android developer
+   verification). Locally: `adb install -r app-debug.apk`, or build release-signed with your keystore (`keystore.properties`).
+2. **Pixel 8 measurement (none done):** whole review <= 10 min at 3100 and Max; analysis log shows `dotprod`; per-stage times.
+3. **chess36 (API 36)** instrumented run: edge to edge, mediaProcessing FGS type (CI covered API 34 only).
+4. **Listen and tune** the NC delivery numbers (spec §9.10) and the NS prose by ear; a release build on a device (R8 rules unchanged).
+5. **Elo labels are approximations** (±150): measure with a gauntlet on the app's own binary (spec §8.6).
+6. **Wording-model measurements** (`docs/audit/rephrase/raw_*.jsonl` narration rows) are stale after NS: re-run `scripts/rephrase_measure.py`.
+7. The processing screen's live "About N min left" still hides until every pending stage is measured (only Review options shows
+   the upper bound); game01's video no longer plays a best line (budget thinning, NS).
+8. versionCode is still 2: raise it before any Play upload.
+
+---
+
 ## G1 DONE (2026-10-08): THE FAMOUS GAMES LIBRARY
 
 Home has a **Famous games** card: 91 classic games inside the app (the Immortal Game, the Opera Game, Byrne - Fischer

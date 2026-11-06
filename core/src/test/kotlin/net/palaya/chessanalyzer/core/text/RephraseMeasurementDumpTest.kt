@@ -119,7 +119,13 @@ class RephraseMeasurementDumpTest {
         appendLine()
         val narrAccepted = rows.filter { it.surface == RephraseSurface.NARRATION && it.verdict == ClaimChecker.Verdict.Accepted }
             .associate { it.text to ClaimChecker.normalize(it.candidate) }
-        if (rows.count { it.surface == RephraseSurface.NARRATION } >= 300) {
+        val narrationStale = (staleCounts[label] ?: 0) > rows.count { it.surface == RephraseSurface.NARRATION } / 50
+        if (narrationStale) {
+            appendLine("**The narration rows of this run are of the script before NS (story + rhythm): they are judged, but the post-pass table")
+            appendLine("below is not produced from them. Re-run `scripts/rephrase_measure.py` against today's corpus to refresh them.**")
+            appendLine()
+        }
+        if (!narrationStale && rows.count { it.surface == RephraseSurface.NARRATION } >= 300) {
             appendLine("## The narrated story after the post-pass (Normal pace, 169 wpm, no side; design §6.2's cap: <= 1.10 x and the §9.7 budget)")
             appendLine()
             appendLine("| Game | Beats reworded | Story before | Story after | Change | Budget |")
@@ -183,8 +189,16 @@ class RephraseMeasurementDumpTest {
             // A run is of the current corpus: (nearly) every text it judged is a recorded text of today's generator. V4
             // replaced three narration connectives after the runs ("Back to the game now."): up to 2 % may be stale, and
             // the report says how many; more means the generator moved and the runs must be redone.
+            //
+            // NS (narration story + rhythm) rewrote the narration on purpose, so the NARRATION rows of every run are
+            // stale until the models are run again on a host that has them (scripts/rephrase_measure.py, llama.cpp):
+            // they are still judged (the verdict of an old original/candidate pair does not depend on today's
+            // generator, and the Python twin agrees on each) and the report says so, but they no longer describe
+            // today's script. The CARD rows are untouched by NS and keep the 2 % bar.
             val stale = rows.filter { (it.surface to it.text) !in corpus }
-            assertTrue("$label: ${stale.size} texts not in today's corpus: ${stale.take(3).map { it.id }}", stale.size <= rows.size / 50)
+            val staleCards = stale.filter { it.surface == RephraseSurface.CARD }
+            val cardRows = rows.count { it.surface == RephraseSurface.CARD }
+            assertTrue("$label: ${staleCards.size} card texts not in today's corpus: ${staleCards.take(3).map { it.id }}", staleCards.size <= cardRows / 50)
             staleCounts[label] = stale.size
             File(out, "measure_$label.jsonl").writeText(rows.joinToString("") { r ->
                 val v = r.verdict

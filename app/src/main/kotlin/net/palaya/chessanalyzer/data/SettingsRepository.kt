@@ -14,6 +14,7 @@ import net.palaya.chessanalyzer.core.narration.NarrationOptions
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.AppLanguage
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 
 private val Context.dataStore by preferencesDataStore(
     name = "chess_analyzer_settings",
@@ -71,22 +72,23 @@ class SettingsRepository(private val context: Context) {
     /** Live stream of settings, backed by real persisted values (falls back to defaults). */
     val settingsFlow: Flow<EngineSettings> = context.dataStore.data.map { prefs ->
         EngineSettings(
-            depth = prefs[Keys.DEPTH] ?: DEFAULT_DEPTH,
+            depth = defaultLevelCode(prefs[Keys.DEPTH], prefs[Keys.AUTO_DEPTH] ?: false),
             multiPv = DEFAULT_MULTI_PV,
             username = prefs[Keys.USERNAME] ?: "",
             narrationThresholdCp = prefs[Keys.NARRATION_THRESHOLD_CP] ?: DEFAULT_NARRATION_THRESHOLD_CP,
             language = AppLanguage.fromTag(prefs[Keys.LANGUAGE]),
             videoPace = VideoPace.fromPersistedOrNull(prefs[Keys.VIDEO_PACE]) ?: VideoPace.DEFAULT,
-            autoDepth = prefs[Keys.AUTO_DEPTH] ?: false,
+            // Auto is no longer offered (owner 2026-10-14): a stored Auto is mapped to a level above, never kept.
+            autoDepth = false,
         )
     }
 
     suspend fun current(): EngineSettings = settingsFlow.first()
 
-    /** A fixed search depth (Quick/Standard/Deep or a custom one): Auto is switched off. */
+    /** The default engine level (a level code, ANALYSIS_SPEC §8.6) or a legacy fixed depth: Auto is switched off. */
     suspend fun setDepth(depth: Int) {
         context.dataStore.edit {
-            it[Keys.DEPTH] = depth.coerceIn(6, 30)
+            it[Keys.DEPTH] = clampDepth(depth)
             it[Keys.AUTO_DEPTH] = false
         }
     }
@@ -107,7 +109,7 @@ class SettingsRepository(private val context: Context) {
     /** Persists a whole [EngineSettings] snapshot in one go (used by the settings screen callback). */
     suspend fun save(settings: EngineSettings) {
         context.dataStore.edit { prefs ->
-            prefs[Keys.DEPTH] = settings.depth.coerceIn(6, 30)
+            prefs[Keys.DEPTH] = clampDepth(settings.depth)
             prefs[Keys.AUTO_DEPTH] = settings.autoDepth
             prefs[Keys.USERNAME] = settings.username
             prefs[Keys.NARRATION_THRESHOLD_CP] = settings.narrationThresholdCp.coerceIn(0, 300)
@@ -122,8 +124,23 @@ class SettingsRepository(private val context: Context) {
     }
 
     companion object {
-        /** "Standard" preset per docs/ANALYSIS_SPEC.md §8 (12 fast / 18 standard / 24 deep). */
-        const val DEFAULT_DEPTH = 14
+        /** The default engine level for a new install (ANALYSIS_SPEC §8.6): 3100. */
+        val DEFAULT_DEPTH: Int = EngineLevel.DEFAULT.code
+
+        /** What a game saved before the levels, with no depth stored, was analysed at (Standard). */
+        const val LEGACY_DEFAULT_DEPTH = 14
+
+        /** A level code stays as it is; any other value is a legacy depth, clamped to 6..30 as before. */
+        fun clampDepth(depth: Int): Int = if (EngineLevel.isLevelCode(depth)) depth else depth.coerceIn(6, 30)
+
+        /**
+         * The default level code for a stored Settings value: absent = 3100; a level code as it is; a legacy depth
+         * (or the Auto flag) is migrated with [EngineLevel.forLegacyDepth]. The stored value is not rewritten.
+         */
+        fun defaultLevelCode(storedDepth: Int?, storedAuto: Boolean): Int = when {
+            storedDepth == null -> if (storedAuto) EngineLevel.L3100.code else DEFAULT_DEPTH
+            else -> EngineLevel.fromStored(storedDepth, storedAuto).code
+        }
         const val DEFAULT_MULTI_PV = 3
 
         /** Half a pawn — ANALYSIS_SPEC §9.2, mirroring `NarrationOptions`' own default. */

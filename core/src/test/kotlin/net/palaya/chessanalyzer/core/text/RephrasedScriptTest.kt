@@ -26,6 +26,13 @@ class RephrasedScriptTest {
     }
     private val budget by lazy { VideoScriptGenerator.budgetMs((RealGameFixture.immortal.pgn.moves.size + 1) / 2) }
 
+    /**
+     * Since NC (ANALYSIS_SPEC 9.10) the Immortal Game's story sits within about 8 s of its budget (the slower beats
+     * made the budget loop demote until it fit), so a test of the 10 % speech cap, which needs room under the
+     * story budget, gives it that room explicitly.
+     */
+    private val roomyBudget by lazy { budget + 60_000L }
+
     /** Every eligible beat with " Indeed." style growth of [extraWords] words. */
     private fun grown(extraWords: Int): Map<String, String> =
         RephrasedScript.beats(script).associateWith { it.dropLast(1) + List(extraWords) { " now" }.joinToString("") + "." }
@@ -45,7 +52,7 @@ class RephrasedScriptTest {
             assertEquals(a.copy(narration = "", estimatedSpeechMs = 0), b.copy(narration = "", estimatedSpeechMs = 0))
             if (a.narration == beat) {
                 assertEquals(shorter, b.narration)
-                assertEquals(VideoScriptGenerator.estimateSpeechMs(shorter, wpm), b.estimatedSpeechMs)
+                assertEquals(VideoScriptGenerator.estimateSpeechMs(shorter, wpm, b.delivery), b.estimatedSpeechMs)
             } else {
                 assertEquals(a, b)
             }
@@ -80,18 +87,18 @@ class RephrasedScriptTest {
 
     @Test
     fun `the script-level cap reverts the largest growth first until the story fits`() {
-        val out = RephrasedScript.apply(script, grown(12), wpm, budget)
+        val out = RephrasedScript.apply(script, grown(12), wpm, roomyBudget)
         val before = script.segments.sumOf { it.estimatedSpeechMs }
         val after = out.segments.sumOf { it.estimatedSpeechMs }
         assertTrue("$after <= 1.1 x $before", after <= (before * RephrasedScript.MAX_GROWTH).toLong())
-        assertTrue(out.storyMs <= maxOf(budget, script.storyMs))
+        assertTrue(out.storyMs <= maxOf(roomyBudget, script.storyMs))
         // something was kept and something reverted
         val changed = script.segments.zip(out.segments).count { (a, b) -> a.narration != b.narration }
         assertTrue("changed $changed", changed in 1 until RephrasedScript.beats(script).size)
         // the reverted beats are the ones that grew most: every kept beat grew no more than any reverted one
         val deltas = script.segments.zip(out.segments).filter { (a, _) -> RephrasedScript.eligible(a) }.map { (a, b) ->
             val grownText = grown(12).getValue(a.narration)
-            Triple(a.narration != b.narration, VideoScriptGenerator.estimateSpeechMs(grownText, wpm) - a.estimatedSpeechMs, a.index)
+            Triple(a.narration != b.narration, VideoScriptGenerator.estimateSpeechMs(grownText, wpm, a.delivery) - a.estimatedSpeechMs, a.index)
         }
         val keptMax = deltas.filter { it.first }.maxOf { it.second }
         val revertedMin = deltas.filter { !it.first }.minOf { it.second }
@@ -105,7 +112,7 @@ class RephrasedScriptTest {
 
     @Test
     fun `a small growth everywhere is kept whole`() {
-        val out = RephrasedScript.apply(script, grown(1), wpm, budget)
+        val out = RephrasedScript.apply(script, grown(1), wpm, roomyBudget)
         val changed = script.segments.zip(out.segments).count { (a, b) -> a.narration != b.narration }
         assertEquals(script.segments.count { RephrasedScript.eligible(it) }, changed)
     }

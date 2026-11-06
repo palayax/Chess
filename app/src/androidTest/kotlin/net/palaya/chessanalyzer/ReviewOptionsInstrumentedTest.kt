@@ -24,6 +24,7 @@ import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.data.FamousGamesStore
 import net.palaya.chessanalyzer.data.GameRepository
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.screens.FAMOUS_SEARCH_TAG
@@ -92,7 +93,7 @@ class ReviewOptionsInstrumentedTest {
             TestApp.ensureSetUp()
             val before = app.settingsRepository.current()
             settingsBefore = before
-            app.settingsRepository.save(before.copy(depth = AnalysisStrength.STANDARD.depth, videoPace = VideoPace.NORMAL))
+            app.settingsRepository.save(before.copy(depth = EngineLevel.L2900.code, videoPace = VideoPace.NORMAL))
             app.settingsRepository.setRephraseEnabled(false)
             TestApp.restoreReviewDefaults()
         }
@@ -100,15 +101,15 @@ class ReviewOptionsInstrumentedTest {
         waitForText(app.getString(R.string.home_title))
         reviewFamousGame("Tartakower")
 
-        // Pre-filled from Settings: Standard, "Prepare the video now" on, the famous game's "Not me".
+        // Pre-filled from Settings: about 2900, "Prepare the video now" on, the famous game's "Not me".
         waitForText(app.getString(R.string.review_options_title))
         waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
-        compose.onNode(hasText(app.getString(R.string.settings_depth_standard)) and isSelected()).assertExists()
+        compose.onNode(hasText(app.getString(R.string.level_label_2900)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOn()
         compose.onNode(hasText(app.getString(R.string.summary_side_neither)) and isSelected()).assertExists()
 
-        // This game: Quick, no video now, Relaxed.
-        compose.onNode(hasText(app.getString(R.string.settings_depth_quick)) and hasClickAction()).performClick()
+        // This game: about 2500, no video now, Relaxed.
+        compose.onNode(hasText(app.getString(R.string.level_label_2500)) and hasClickAction()).performClick()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).performClick()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOff()
         compose.onNode(hasText(app.getString(R.string.settings_pace_relaxed)) and hasClickAction()).performScrollTo().performClick()
@@ -123,12 +124,12 @@ class ReviewOptionsInstrumentedTest {
         waitForText(app.getString(R.string.summary_which_side), timeoutMs = 300_000)
         val stored = runBlocking { app.gameRepository.listRecent() }.first { it.black.contains("Tartakower") }
         val game = runBlocking { app.gameRepository.load(stored.id) }!!
-        assertEquals("the game's strength is the one picked", AnalysisStrength.QUICK.depth, game.depth)
+        assertEquals("the game's strength is the one picked", EngineLevel.L2500.code, game.depth)
         assertEquals(false, game.prepareVideo)
         assertEquals(VideoPace.RELAXED.name, game.pace)
         assertEquals(false, game.naturalWording)
         // Settings are only the defaults: untouched by the game's choices.
-        assertEquals(AnalysisStrength.STANDARD.depth, runBlocking { app.settingsRepository.current() }.depth)
+        assertEquals(EngineLevel.L2900.code, runBlocking { app.settingsRepository.current() }.depth)
         assertEquals(VideoPace.NORMAL, runBlocking { app.settingsRepository.current() }.videoPace)
     }
 
@@ -172,7 +173,7 @@ class ReviewOptionsInstrumentedTest {
 
         waitForText(app.getString(R.string.review_options_title))
         waitForText(app.getString(R.string.review_options_start)) // the title also shows while the options load
-        compose.onNode(hasText(app.getString(R.string.settings_depth_deep)) and isSelected()).assertExists()
+        compose.onNode(hasText(app.getString(R.string.level_label_3100)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.side_black)) and isSelected()).assertExists()
         compose.onNode(hasText(app.getString(R.string.review_options_prepare_video)) and isToggleable()).assertIsOff()
         compose.onNode(hasText(app.getString(R.string.settings_pace_relaxed)) and isSelected()).performScrollTo().assertExists()

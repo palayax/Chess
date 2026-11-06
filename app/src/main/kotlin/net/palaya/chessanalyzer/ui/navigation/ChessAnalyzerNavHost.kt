@@ -471,6 +471,9 @@ fun ChessAnalyzerNavHost(
             // "Which side were you?" (the answer swaps the stored report for a re-mapped one).
             val sideKey = viewModel.reports[gameId]?.let { it.userColor to it.notMe }
             val report = remember(gameId, thresholdCp, sideKey) { viewModel.uiReportFor(gameId, thresholdCp) }
+            // EL2: no recording is started from here for a reopened game any more (it started one on EVERY Summary open).
+            // Its missing audio is recorded on the Video route ([AnalysisViewModel.ensureNarrationPrepared]); a side change
+            // and a review whose recording hit the deadline start theirs in the ViewModel.
             if (report != null) {
                 // The practice row and the "Try it" buttons. Both read snapshot state (the report's
                 // side, the solved map), so they follow the side chooser and a finished Practise.

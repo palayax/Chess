@@ -16,14 +16,19 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import net.palaya.chessanalyzer.ChessAnalyzerApplication
 import net.palaya.chessanalyzer.data.AnalysisService
 import net.palaya.chessanalyzer.data.GameRepository
@@ -41,6 +46,12 @@ import net.palaya.chessanalyzer.data.mapper.toUiReport
 import net.palaya.chessanalyzer.rephrase.RephraseService
 import net.palaya.chessanalyzer.ui.model.AnalysisPhase
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
+import net.palaya.chessanalyzer.ui.model.deepPositionsLeft
+import net.palaya.chessanalyzer.ui.model.levelEstimateMs
+import net.palaya.chessanalyzer.ui.model.reserveAfterWordingMs
+import net.palaya.chessanalyzer.ui.model.timeToDeadlineMs
+import net.palaya.chessanalyzer.ui.model.wordingStageBudgetMs
 import net.palaya.chessanalyzer.ui.model.AnalysisLevel
 import net.palaya.chessanalyzer.ui.model.AutoDepthBudget
 import net.palaya.chessanalyzer.ui.model.gameAnalysisLevel
@@ -54,7 +65,9 @@ import net.palaya.chessanalyzer.ui.model.NarrationVoiceSettings
 import net.palaya.chessanalyzer.ui.model.PieceColor
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
 import net.palaya.chessanalyzer.ui.model.ReviewDefaults
+import net.palaya.chessanalyzer.ui.model.REVIEW_TOTAL_BUDGET_MS
 import net.palaya.chessanalyzer.ui.model.ReviewEntry
+import net.palaya.chessanalyzer.ui.model.ReviewEstimateInputs
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
 import net.palaya.chessanalyzer.ui.model.ReviewOptionsDraft
 import net.palaya.chessanalyzer.ui.model.ReviewOptionsLoad
@@ -72,7 +85,13 @@ import net.palaya.chessanalyzer.ui.model.initialStageStates
 import net.palaya.chessanalyzer.ui.model.isKeyOfGame
 import net.palaya.chessanalyzer.ui.model.libraryAfterDelete
 import net.palaya.chessanalyzer.ui.model.narrationNeedsPreparation
+import net.palaya.chessanalyzer.ui.model.RunRequestAction
+import net.palaya.chessanalyzer.ui.model.backgroundPreparationKey
+import net.palaya.chessanalyzer.ui.model.backgroundPreparationWanted
+import net.palaya.chessanalyzer.ui.model.narrationIdentity
+import net.palaya.chessanalyzer.ui.model.narrationScriptKey
 import net.palaya.chessanalyzer.ui.model.overallFraction
+import net.palaya.chessanalyzer.ui.model.runRequestAction
 import net.palaya.chessanalyzer.ui.model.prefillReviewOptions
 import net.palaya.chessanalyzer.ui.model.resolveSide
 import net.palaya.chessanalyzer.ui.model.reviewStagePlan
@@ -100,6 +119,7 @@ import net.palaya.chessanalyzer.core.pgn.PgnParser
 import net.palaya.chessanalyzer.ui.model.SearchBudget
 import net.palaya.chessanalyzer.video.DeviceTtsProvider
 import net.palaya.chessanalyzer.video.ExportTimeLeftTracker
+import net.palaya.chessanalyzer.video.NarrationCoordinator
 import net.palaya.chessanalyzer.video.NarrationPreparer
 import net.palaya.chessanalyzer.video.NarrationProviderSelection
 import net.palaya.chessanalyzer.video.NarrationStore
@@ -173,6 +193,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     fun clearNarrationStorage() {
         viewModelScope.launch(Dispatchers.IO) {
             narrationStore.clear()
+            // Nothing is recorded any more, so nothing counts as prepared (or as fallen back) either.
+            app.preparedNarrationStore.clear()
             _narrationStorageBytes.value = narrationStore.totalSizeBytes()
         }
     }
@@ -283,6 +305,27 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
 
     @Volatile private var backgroundWording: Job? = null
 
+    /**
+     * The newest "the review is done" callback of the running review (the screen's navigation). The run calls it, on the
+     * main thread, when it ends; a screen recreated while the run goes on replaces it ([runAnalysis], KEEP_WAITING).
+     */
+    @Volatile private var pendingOnComplete: (() -> Unit)? = null
+
+    /**
+     * What the background wording is working on (game, ply) until it has finished, so a pause for a recording can start
+     * it again afterwards ([resumeBackgroundWording]).
+     */
+    @Volatile private var wordingResume: Pair<String, Int>? = null
+
+    /**
+     * Recordings of the narration running now (RF). While there is one, the background wording does not run: the 1.1 GB
+     * wording model and the voice are never loaded together, and the voice gets the CPU.
+     */
+    private val recordingClaims = AtomicInteger(0)
+
+    /** Only one recording at a time: one Kokoro instance per process, and the run's stage and the Video screen share it. */
+    private val recordingMutex = Mutex()
+
     /** RF: whether [gameId]'s own Natural wording option is on and the model can run (never the global switch). */
     private fun wordingFor(gameId: String): Boolean {
         val options = gameOptions[gameId] ?: return false
@@ -319,12 +362,51 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     fun startBackgroundWording(gameId: String, aroundPly: Int = 0) {
         val artifacts = coreArtifacts[gameId] ?: return
         backgroundWording?.cancel()
+        wordingResume = gameId to aroundPly
+        // RF: not while the narration is recorded; it starts again when the last recording is over.
+        if (recordingClaims.get() > 0) return
         backgroundWording = viewModelScope.launch(Dispatchers.Default) {
-            if (!wordingFor(gameId)) return@launch
-            val items = RephraseService.cardOrder(artifacts.report, aroundPly)
-            if (app.gameRephraseService.pending(items) == 0) return@launch
-            app.gameRephraseService.polish(items)
-            applyCachedWording(gameId)
+            if (wordingFor(gameId)) {
+                val items = RephraseService.cardOrder(artifacts.report, aroundPly)
+                if (app.gameRephraseService.pending(items) > 0) {
+                    app.gameRephraseService.polish(items)
+                    applyCachedWording(gameId)
+                }
+            }
+            // Only while still active: a pause for a recording cancels this job, but the wording may swallow the
+            // cancellation and return normally, and [wordingResume] must survive that or the wording never resumes.
+            if (isActive && wordingResume?.first == gameId) wordingResume = null
+        }
+    }
+
+    /** Starts the background wording that a recording paused (nothing if none was running, or a recording still is). */
+    private fun resumeBackgroundWording() {
+        if (recordingClaims.get() > 0) return
+        wordingResume?.let { (gameId, ply) -> startBackgroundWording(gameId, ply) }
+    }
+
+    /**
+     * Records [script] in [provider]'s voice (RF): the one place the narration is recorded, for the processing run's
+     * stage and the Video screen / Summary alike. One recording at a time; the background wording is stopped first
+     * (cancelled and joined, so its llama call is over) and the wording model is released before the voice loads; the
+     * wording starts again afterwards. A job that still holds the released model gets "no result" from it
+     * ([net.palaya.chessanalyzer.rephrase.LlamaRephraser.retire]).
+     */
+    private suspend fun recordNarration(
+        script: VideoScript,
+        provider: NarrationVoiceProvider,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): NarrationCoordinator.Outcome {
+        recordingClaims.incrementAndGet()
+        try {
+            return recordingMutex.withLock {
+                backgroundWording?.cancelAndJoin()
+                // The wording model holds ~1.2 GB of native memory; the voice model needs its own. Free it first.
+                releaseWordingModel()
+                narrationPreparer.prepare(script, provider, onProgress)
+            }
+        } finally {
+            if (recordingClaims.decrementAndGet() == 0) resumeBackgroundWording()
         }
     }
 
@@ -389,6 +471,10 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             .copy(cappedPositions = updated.cappedPositions)
         viewModelScope.launch {
             applyCachedWording(gameId)
+            // RF: the sentences of the video are written for this side now, so the narration is recorded again: start
+            // it here, in the background, instead of when the Video screen opens. Before the wording job, which a
+            // recording stops anyway.
+            prepareNarrationInBackground(gameId, afterSideChange = true)
             startBackgroundWording(gameId)
             app.gameRepository.load(gameId)?.let { stored ->
                 app.gameRepository.save(stored.copy(userColorName = choice.storedName))
@@ -553,12 +639,23 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         )
         val positions = game.moves.size + 1
         val speeds = withContext(Dispatchers.IO) { app.reviewSpeedStore.load() }
-        val estimates = AnalysisStrength.entries.associateWith { strength ->
-            val budget = runCatching { strength.budget }.getOrNull()
-            val cached = budget != null && strength.depth > 0 &&
-                app.gameRepository.hasEvalCache(app.gameRepository.cacheKey(text, strength.depth, settingsNow.multiPv, budget.cacheKeyPart))
-            strengthEstimateMs(positions, budget?.typicalNodes, speeds.engineMsPerNode, cached)
-        }
+        // The WHOLE review per level (spec §8.4, §8.6) is computed on the screen from the options as they are edited
+        // (the plan changes with the video, wording and voice choices): here only what does not depend on them.
+        val wordingUsable = app.wordingModelUsable()
+        val kokoro = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+        val cachedLevels = EngineLevel.entries.filter { level ->
+            app.gameRepository.hasEvalCache(
+                app.gameRepository.cacheKey(text, level.code, settingsNow.multiPv, SearchBudget.forLevel(level).cacheKeyPart),
+            )
+        }.toSet()
+        val estimateInputs = ReviewEstimateInputs(
+            positions = positions,
+            plies = game.moves.size,
+            speeds = speeds,
+            cachedLevels = cachedLevels,
+            wordingUsable = wordingUsable,
+            kokoroInstalled = kokoro,
+        )
         val supported = app.wordingModelSupported()
         ReviewOptionsLoad.Ready(
             ReviewOptionsDraft(
@@ -568,7 +665,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                 options = prefilled,
                 wording = wordingOption(supported, app.wordingModelUsable()),
                 voiceInstalled = voiceStore.isInstalled(),
-                strengthEstimatesMs = estimates,
+                estimateInputs = estimateInputs,
             ),
         )
     }
@@ -580,7 +677,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     fun startReview(gameId: String, options: ReviewOptions) {
         pendingOptionsByGameId[gameId] = options
-        pendingLevelByGameId[gameId] = AnalysisLevel.of(options.strength)
+        pendingLevelByGameId[gameId] = AnalysisLevel.of(options.level)
         // The options' side is the user's answer; the side the game opened with must not come back.
         if (options.side != SideChoice.UNKNOWN) pendingSideByGameId.remove(gameId)
         games[gameId]?.pgnText?.takeIf { it.isNotBlank() }?.let { pendingPgnByGameId[gameId] = it }
@@ -593,7 +690,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.gameRepository.savePendingOptions(gameId, options) }
         diagnostics.log(
             AppDiagnostics.TAG_ANALYSIS,
-            "review options for $gameId: ${options.strength.name.lowercase()}, side ${options.side}, wording ${options.naturalWording}, " +
+            "review options for $gameId: ${options.level.name.lowercase()}, side ${options.side}, wording ${options.naturalWording}, " +
                 "video ${options.prepareVideo}, voice ${options.voice}/${options.speakerId}, pace ${options.pace}",
         )
     }
@@ -631,6 +728,9 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * same settings (same eval-cache key) instead of whatever Settings says now.
      */
     @Volatile private var activeRequest: PendingAnalysisStore.Request? = null
+
+    /** The game [analysisJob] works on (valid while that job is active). */
+    @Volatile private var runningGameId: String? = null
 
     /** Set once this ViewModel has run or offered an analysis, so a resume is offered at most once. */
     @Volatile private var resumeChecked = false
@@ -754,7 +854,13 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * run cancels it too. A stage that fails is logged and treated as skipped (the originals stay). Records the stage's
      * measured time for later estimates when it ran to the end.
      */
-    private suspend fun runStage(state: RunState, stage: ReviewStage, plies: Int, block: suspend (report: (Int, Int) -> Unit) -> Unit) {
+    private suspend fun runStage(
+        state: RunState,
+        stage: ReviewStage,
+        plies: Int,
+        note: StageNote = StageNote(null),
+        block: suspend (report: (Int, Int) -> Unit) -> Unit,
+    ) {
         val startedAt = SystemClock.elapsedRealtime()
         var failed = false
         val skipped = coroutineScope {
@@ -775,11 +881,34 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             stageJobStage = null
             job.isCancelled
         }
-        if (!skipped && !failed) {
-            val took = SystemClock.elapsedRealtime() - startedAt
+        val took = SystemClock.elapsedRealtime() - startedAt
+        diagnostics.log(
+            AppDiagnostics.TAG_ANALYSIS,
+            "stage ${stage.name.lowercase()}: $took ms" +
+                (note.budgetMs?.let { ", budget $it ms, " + if (note.hitBudget) "hit its budget" else "within budget" } ?: "") +
+                (if (skipped) ", skipped by the user" else "") + (if (failed) ", failed" else ""),
+        )
+        // A stage cut short by its budget measured only part of the work: it must not teach the estimates a too-small time.
+        if (!skipped && !failed && !note.hitBudget) {
             withContext(Dispatchers.IO) { app.reviewSpeedStore.update { it.withStage(stage, took, plies) } }
         }
-        state.finish(stage, skipped || failed)
+        state.finish(stage, skipped || failed || note.hitBudget)
+    }
+
+    /** What a stage tells about its time budget (EL2): the total it was given (null = none) and whether it ran out. */
+    private class StageNote(val budgetMs: Long?) {
+        @Volatile var hitBudget = false
+    }
+
+    /**
+     * Runs [block] for at most [note]'s budget. False = the budget ran out first: [block] was cancelled, what it had
+     * finished stays (cached rewordings, recorded segments) and [StageNote.hitBudget] is set. A cancellation from outside
+     * (the user's Skip or Cancel) is not a timeout and propagates.
+     */
+    private suspend fun withStageBudget(note: StageNote, block: suspend () -> Unit): Boolean {
+        val finished = withTimeoutOrNull(note.budgetMs ?: Long.MAX_VALUE) { block(); true } != null
+        if (!finished) note.hitBudget = true
+        return finished
     }
 
     /**
@@ -798,10 +927,23 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     fun runAnalysis(gameId: String, onComplete: () -> Unit) {
         _error.value = null
         resumeChecked = true
-        if (games.containsKey(gameId)) {
-            onComplete()
-            return
+        // RF: the engine stage stores the game before the other stages run. A second call while the run is still in
+        // them (the screen's effect ran again) must not report completion: the run's own completion does, at its end.
+        when (runRequestAction(games.containsKey(gameId), runningGameId == gameId && analysisJob?.isActive == true)) {
+            RunRequestAction.COMPLETE_NOW -> {
+                onComplete()
+                return
+            }
+            RunRequestAction.KEEP_WAITING -> {
+                // A recreated screen (rotation, process of the activity) asks again: the newest callback is the one that
+                // can still navigate, so it replaces the one of the screen that is gone.
+                pendingOnComplete = onComplete
+                return
+            }
+            RunRequestAction.START -> Unit
         }
+        pendingOnComplete = onComplete
+        runningGameId = gameId
         analysisJob?.cancel()
         // A retry starts from the top; without this the screen would flash the previous run's
         // last "Move 12 of 34" until the first new progress update arrives.
@@ -842,9 +984,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             val engineCached = app.gameRepository.hasEvalCache(
                 app.gameRepository.cacheKey(pgnText, currentSettings.depth, currentSettings.multiPv, budget.cacheKeyPart),
             )
+            val runLevel = currentSettings.level
             val estimates = plan.associateWith { stage ->
-                if (stage == ReviewStage.ENGINE) strengthEstimateMs(plies + 1, budget.typicalNodes, speeds.engineMsPerNode, engineCached)
-                else speeds.estimateMs(stage, plies)
+                if (stage == ReviewStage.ENGINE) {
+                    if (runLevel != null) levelEstimateMs(runLevel, plies + 1, speeds.engineMsPerNode, engineCached)
+                    else strengthEstimateMs(plies + 1, budget.typicalNodes, speeds.engineMsPerNode, engineCached)
+                } else speeds.estimateMs(stage, plies)
             }
             val runStartedAt = SystemClock.elapsedRealtime()
             val state = RunState(plan, stageWeights(plan, estimates), ReviewTimeLeftTracker(speeds, plies), runStartedAt)
@@ -857,7 +1002,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             val timeLeft = AnalysisTimeLeftTracker(
                 typicalNodes = currentSettings.searchBudget.typicalNodes,
                 // Auto-depth's second pass (ANALYSIS_SPEC §8.5) is counted in its own, dearer positions.
-                deepTypicalNodes = if (currentSettings.autoDepth) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                deepTypicalNodes = if (currentSettings.autoDepth && runLevel == null) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                levelRun = runLevel != null,
             )
             var lastEngine = AnalysisProgress(phase = AnalysisPhase.PREPARING_ENGINE)
             val outcome = analysisService.analyze(
@@ -871,15 +1017,24 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     _progress.value = withTime
                     if (p.runPositionsSearched > 0) lastEngine = p
                     state.engine = withTime
-                    if (p.phase == AnalysisPhase.ANALYZING_MOVES && p.totalMoves > 0 && p.currentMoveIndex < p.totalMoves) {
-                        state.engineRemainingMs = estimateAnalysisRemainingMs(
-                            done = p.currentMoveIndex,
-                            total = p.totalMoves,
-                            runNodes = p.runNodes,
-                            runMs = p.runSearchMs,
-                            runPositions = p.runPositionsSearched,
-                            typicalNodes = currentSettings.searchBudget.typicalNodes,
-                        ) ?: state.engineRemainingMs
+                    if (p.phase == AnalysisPhase.ANALYZING_MOVES && p.totalMoves > 0) {
+                        // The same terms as the tracker's own line, including legacy Auto's second pass (which this
+                        // used to leave out, and which stopped updating once the first pass was done).
+                        val deepLeft = deepPositionsLeft(p)
+                        state.engineRemainingMs = if (p.currentMoveIndex >= p.totalMoves && deepLeft == 0) 0L else {
+                            estimateAnalysisRemainingMs(
+                                done = p.currentMoveIndex,
+                                total = p.totalMoves,
+                                runNodes = p.runNodes,
+                                runMs = p.runSearchMs,
+                                runPositions = p.runPositionsSearched,
+                                typicalNodes = currentSettings.searchBudget.typicalNodes,
+                                deepLeft = deepLeft,
+                                deepTypicalNodes = if (currentSettings.autoDepth && runLevel == null) AutoDepthBudget.TYPICAL_DEEPENED_NODES else 0L,
+                                recentMsPerNode = timeLeft.recentMsPerNode(),
+                                budgetLeftMs = if (runLevel != null) (p.engineBudgetMs - p.runSearchMs).coerceAtLeast(0L) else null,
+                            ) ?: state.engineRemainingMs
+                        }
                     }
                     // "Starting…" and the final DONE update carry no counts: they must not reset the stage's own.
                     if (p.totalMoves > 0) state.stageProgress(ReviewStage.ENGINE, p.currentMoveIndex, p.totalMoves) else state.emit()
@@ -902,6 +1057,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     )
                     val side = if (fullReview && options.side != SideChoice.UNKNOWN) options.side else resolved
                     if (options.side != side) gameOptions[gameId] = options.copy(side = side)
+                    // This run does the recording stage itself (or the user skipped it): the Summary does not repeat it.
+                    if (fullReview) backgroundPreparationTried += backgroundPreparationKey(gameId, gameOptions[gameId] ?: options)
                     val sideColor = side.color?.toCoreColor()
                     // The analysis wrote the card texts for the side it detected; the side that wins
                     // may differ ("Not me", or an earlier answer), so the texts are written for it.
@@ -966,9 +1123,20 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                             app.settingsRepository.save(current.copy(username = name))
                         }
                     }
+                    diagnostics.log(
+                        AppDiagnostics.TAG_ANALYSIS,
+                        "stage engine: ${SystemClock.elapsedRealtime() - runStartedAt} ms into the run, search time ${lastEngine.runSearchMs} of " +
+                            "${lastEngine.engineBudgetMs} ms budget" +
+                            if (lastEngine.engineBudgetMs > 0L && lastEngine.runSearchMs >= lastEngine.engineBudgetMs) ", hit its budget" else ", within budget",
+                    )
                     state.finish(ReviewStage.ENGINE, skipped = false)
 
-                    runRemainingStages(state, gameId, plan, sidedReport, plies)
+                    val recordingCutShort = runRemainingStages(state, gameId, plan, sidedReport, plies, runStartedAt)
+                    diagnostics.log(
+                        AppDiagnostics.TAG_ANALYSIS,
+                        "review of $gameId finished in ${SystemClock.elapsedRealtime() - runStartedAt} ms (deadline $REVIEW_TOTAL_BUDGET_MS ms)" +
+                            if (recordingCutShort) "; the voice recording hit the deadline and goes on in the background" else "",
+                    )
                     applyCachedWording(gameId)
                     startBackgroundWording(gameId)
                     _processingGame.value = null
@@ -977,7 +1145,14 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     // "setCurrentState must be called on the main thread" off the main thread.
                     // Without this hop every *successful* analysis crashed the app at the moment
                     // it finished — the one path a user always takes.
-                    withContext(Dispatchers.Main) { onComplete() }
+                    withContext(Dispatchers.Main) {
+                        val done = pendingOnComplete
+                        pendingOnComplete = null
+                        (done ?: onComplete)()
+                    }
+                    // The voice recording ran into the deadline: the rest is recorded now, in the background, while the
+                    // Summary opens (the Video screen shows the running recording, or "Watch now").
+                    if (recordingCutShort) prepareNarrationInBackground(gameId, afterDeadline = true)
                 }
                 is AnalysisService.Outcome.ParseError -> {
                     Log.w(TAG, "analysis failed: ${outcome.reason} ${outcome.detail.orEmpty()}")
@@ -1006,42 +1181,69 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /** Stages 2 to 4 of [plan], in order, each skippable; the engine stage is done when this runs. */
-    private suspend fun runRemainingStages(state: RunState, gameId: String, plan: List<ReviewStage>, report: CoreGameReport, plies: Int) {
+    /**
+     * Stages 2 to 4 of [plan], in order, each skippable; the engine stage is done when this runs. EL2: the whole review has
+     * a deadline ([REVIEW_TOTAL_BUDGET_MS] from [runStartedAt], spec §8.6). Each wording stage gets
+     * min([WORDING_STAGE_BUDGET_MS], the time to the deadline minus a reserve for the stages after it) and keeps the
+     * original (verified) texts for what it did not reach; the recording stops at the deadline. Returns true when the
+     * recording was cut short (the caller then records the rest in the background).
+     */
+    private suspend fun runRemainingStages(
+        state: RunState,
+        gameId: String,
+        plan: List<ReviewStage>,
+        report: CoreGameReport,
+        plies: Int,
+        runStartedAt: Long,
+    ): Boolean {
+        var recordingCutShort = false
+        fun elapsed() = SystemClock.elapsedRealtime() - runStartedAt
+        val narrationPlanned = ReviewStage.WRITE_NARRATION in plan
+        val recordingPlanned = ReviewStage.RECORD_VOICE in plan
         if (ReviewStage.POLISH_COMMENTARY in plan) {
             // C2: the key moments of the current side, now; the rest lazily in the background afterwards.
-            runStage(state, ReviewStage.POLISH_COMMENTARY, plies) { progress ->
+            val note = StageNote(wordingStageBudgetMs(elapsed(), reserveAfterWordingMs(narrationPlanned, recordingPlanned)))
+            runStage(state, ReviewStage.POLISH_COMMENTARY, plies, note) { progress ->
                 val items = RephraseService.keyMomentTexts(report)
                 progress(0, items.size)
-                if (app.gameRephraseService.pending(items) > 0) app.gameRephraseService.polish(items, progress)
+                if (app.gameRephraseService.pending(items) > 0) withStageBudget(note) { app.gameRephraseService.polish(items, progress) }
                 progress(items.size, items.size)
             }
             applyCachedWording(gameId)
         }
-        if (ReviewStage.WRITE_NARRATION in plan) {
+        if (narrationPlanned) {
             // The paced script for this game's voice and pace, its beats reworded when the game's wording is on.
-            runStage(state, ReviewStage.WRITE_NARRATION, plies) { progress ->
+            val wording = wordingFor(gameId)
+            val note = StageNote(if (wording) wordingStageBudgetMs(elapsed(), reserveAfterWordingMs(false, recordingPlanned)) else null)
+            runStage(state, ReviewStage.WRITE_NARRATION, plies, note) { progress ->
                 val base = videoScriptFor(gameId) ?: return@runStage
-                if (wordingFor(gameId)) {
+                if (wording) {
                     val items = RephraseService.narrationOrder(base)
                     progress(0, items.size)
-                    if (app.gameRephraseService.pending(items) > 0) polishNarration(gameId, progress)
+                    if (app.gameRephraseService.pending(items) > 0) withStageBudget(note) { polishNarration(gameId, progress) }
                     progress(items.size, items.size)
                 } else {
                     progress(1, 1)
                 }
             }
         }
-        if (ReviewStage.RECORD_VOICE in plan) {
-            runStage(state, ReviewStage.RECORD_VOICE, plies) { progress ->
+        if (recordingPlanned) {
+            val note = StageNote(timeToDeadlineMs(elapsed()))
+            runStage(state, ReviewStage.RECORD_VOICE, plies, note) { progress ->
                 val script = finishedVideoScriptFor(gameId) ?: return@runStage
                 val provider = buildNarrationProvider(gameId) ?: return@runStage
-                // The wording model holds ~1.2 GB of native memory; the voice model needs its own. Free it first.
-                releaseWordingModel()
-                narrationPreparer.prepare(script, provider, progress)
-                markNarrationPrepared(gameId, script, provider)
+                // Stops the background wording, frees the wording model, records one script at a time.
+                var outcome: NarrationCoordinator.Outcome? = null
+                val finished = withStageBudget(note) { outcome = recordNarration(script, provider, progress) }
+                if (finished) {
+                    outcome?.let { markNarrationPrepared(gameId, script, provider, it) }
+                } else {
+                    // Segments already recorded stay; the rest is recorded in the background (not marked prepared).
+                    recordingCutShort = true
+                }
             }
         }
+        return recordingCutShort
     }
 
     /** Frees the wording model before the voice is loaded (design §2.2: one big model at a time). */
@@ -1056,6 +1258,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      * forgotten with its pending options; a stored game keeps its old result and options.
      */
     fun cancelAnalysis() {
+        pendingOnComplete = null
         analysisJob?.cancel()
         stageJob?.cancel()
         val request = activeRequest
@@ -1204,6 +1407,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
                     modelDir = voiceStore.modelDir,
                     speakerId = selection.speakerId,
                     voiceVersionId = voiceStore.installedVersionId(),
+                    numThreads = app.kokoroThreads,
                 )
         }
 
@@ -1238,6 +1442,8 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             if (plan.deleteEvalCache && stored != null) {
                 val keys = AnalysisStrength.entries.mapNotNull { s ->
                     runCatching { repo.cacheKey(stored.pgnText, s.depth, stored.multiPv, s.budget.cacheKeyPart) }.getOrNull()
+                } + EngineLevel.entries.map { l ->
+                    repo.cacheKey(stored.pgnText, l.code, stored.multiPv, SearchBudget.forLevel(l).cacheKeyPart)
                 } + repo.cacheKey(stored.pgnText, stored.depth, stored.multiPv, SearchBudget.forDepth(stored.depth).cacheKeyPart)
                 val deleted = repo.deleteEvalCacheFor(keys.distinct())
                 diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "deleted $deleted eval-cache file(s) of $gameId")
@@ -1255,7 +1461,7 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
             pendingSideByGameId.remove(gameId)
             pendingLevelByGameId.remove(gameId)
             pendingOptionsByGameId.remove(gameId)
-            preparedNarration.removeAll { it.startsWith("$gameId|") }
+            backgroundPreparationTried.removeAll { it.startsWith("$gameId|") }
             diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "game $gameId deleted by the user")
             refreshRecentGames()
         }
@@ -1403,9 +1609,12 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
      */
     suspend fun polishNarration(gameId: String, onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): RephraseService.Stats? {
         val base = videoScriptFor(gameId) ?: return null
-        val stats = app.gameRephraseService.polish(RephraseService.narrationOrder(base), onProgress)
-        videoScripts.keys.removeAll { it.startsWith("rephrased:$gameId:") }
-        return stats
+        try {
+            return app.gameRephraseService.polish(RephraseService.narrationOrder(base), onProgress)
+        } finally {
+            // Also when the run's budget or a Skip stopped it: the rewordings cached so far must reach the next script.
+            videoScripts.keys.removeAll { it.startsWith("rephrased:$gameId:") }
+        }
     }
 
     // ---- RF: the Video screen's inline narration recording ----
@@ -1418,67 +1627,124 @@ class AnalysisViewModel(application: Application) : AndroidViewModel(application
     @Volatile private var prepJob: Job? = null
     private val prepVersion = AtomicInteger(0)
 
+    /** What [prepJob] records now ("game|voice|speaker"), so the Video screen opening does not restart a running recording. */
+    @Volatile private var prepSignature: String? = null
+
     /**
-     * (game, voice fingerprint, script) triples recorded in this process, so an attempt that left segments unrecorded
-     * (the device voice reads them) is not repeated every time the screen opens; "Prepare the narration" forces it.
+     * (game, voice, speaker, side) combinations a recording was already tried for in this process by a run or in the
+     * background ([backgroundPreparationKey]): a Skip, a Cancel or "Watch now" is the user's answer, so the Summary does
+     * not start the same recording again until the voice, the speaker or the side changes.
      */
-    private val preparedNarration: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+    private val backgroundPreparationTried: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
 
-    private fun preparationKey(gameId: String, script: VideoScript, provider: NarrationVoiceProvider): String =
-        "$gameId|${provider.displayName}|${provider.narrationCacheFingerprint()}|${script.hashCode()}"
-
-    private fun markNarrationPrepared(gameId: String, script: VideoScript, provider: NarrationVoiceProvider) {
-        preparedNarration += preparationKey(gameId, script, provider)
+    private fun markNarrationPrepared(gameId: String, script: VideoScript, provider: NarrationVoiceProvider, outcome: NarrationCoordinator.Outcome) {
+        val identity = narrationIdentity(provider.displayName, provider.narrationCacheFingerprint())
+        val scriptKey = narrationScriptKey(gameId, script.segments.map { it.narration })
+        val segmentKeys = narrationPreparer.segmentKeys(script, provider).toSet()
+        val fallback = narrationPreparer.fallbackKeys(script, provider, outcome)
+        app.preparedNarrationStore.update { it.record(identity, scriptKey, segmentKeys, fallback) }
     }
 
     /**
      * Makes sure the narration of [gameId]'s finished script is recorded in the game's voice before it plays: when it
      * is ([narrationNeedsPreparation] says no) the state is Ready at once; otherwise the missing segments are recorded
      * here, with progress and a measured time left, then Ready. The Video route calls it when it opens and whenever the
-     * game's voice or pace changes; [force] = the user's "Prepare the narration" after a Cancel.
+     * game's voice or pace changes; [force] = the user's "Prepare the narration" after a Cancel. A recording of the same
+     * game, voice and speaker that is already running (started from the Summary) is left running, unless [restart].
+     *
+     * Segments that fell back to the device voice in an earlier attempt for this voice identity (also before a restart:
+     * [net.palaya.chessanalyzer.data.PreparedNarrationStore]) are not recorded again; they show as Incomplete with
+     * "Prepare the narration".
      */
-    fun ensureNarrationPrepared(gameId: String, force: Boolean = false) {
-        prepJob?.cancel()
+    fun ensureNarrationPrepared(gameId: String, force: Boolean = false, restart: Boolean = false) {
+        val options = gameOptions[gameId]
+        val signature = "$gameId|${options?.voice}|${options?.speakerId}"
+        if (!force && !restart && prepJob?.isActive == true && prepSignature == signature) return
+        val previous = prepJob
+        prepSignature = signature
         prepJob = viewModelScope.launch(Dispatchers.Default) {
-            val script = finishedVideoScriptFor(gameId) ?: return@launch
-            val voice = gameOptions[gameId]?.voice ?: narrationVoiceSettings.value.provider
-            val provider = buildNarrationProvider(gameId)
-            val installed = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
-            val missing = if (provider == null) 0 else withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
-            if (provider == null || !narrationNeedsPreparation(voice, installed, missing)) {
-                _narrationPrep.value = NarrationPrepState.Ready(gameId, prepVersion.get())
-                return@launch
+            // One Kokoro instance: the recording being replaced is over (its segments done stay) before the next starts.
+            previous?.cancelAndJoin()
+            prepareNarration(gameId, force)
+        }
+    }
+
+    private suspend fun prepareNarration(gameId: String, force: Boolean) {
+        val script = finishedVideoScriptFor(gameId) ?: return
+        val voice = gameOptions[gameId]?.voice ?: narrationVoiceSettings.value.provider
+        val provider = buildNarrationProvider(gameId)
+        val installed = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+        val missing = if (provider == null) 0 else withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+        if (provider == null || !narrationNeedsPreparation(voice, installed, missing)) {
+            _narrationPrep.value = NarrationPrepState.Ready(gameId, prepVersion.get())
+            return
+        }
+        val identity = narrationIdentity(provider.displayName, provider.narrationCacheFingerprint())
+        val scriptKey = narrationScriptKey(gameId, script.segments.map { it.narration })
+        if (!force) {
+            val ledger = withContext(Dispatchers.IO) { app.preparedNarrationStore.load() }
+            val onlyKnownFallbacks = withContext(Dispatchers.IO) {
+                narrationPreparer.missingSegments(script, provider, ledger.fallbackKeys(identity)) == 0
             }
-            val key = preparationKey(gameId, script, provider)
-            if (!force && key in preparedNarration) {
+            if (onlyKnownFallbacks || ledger.isPrepared(identity, scriptKey)) {
                 _narrationPrep.value = NarrationPrepState.Incomplete(gameId, missing)
-                return@launch
+                return
             }
-            releaseWordingModel()
-            val timeLeft = ExportTimeLeftTracker()
-            _narrationPrep.value = NarrationPrepState.Preparing(gameId, 0, script.segments.size, net.palaya.chessanalyzer.video.ExportTimeLeft.Hidden)
-            try {
-                narrationPreparer.prepare(script, provider) { done, total ->
-                    val left = timeLeft.onProgress(done, total, SystemClock.elapsedRealtime())
-                    _narrationPrep.value = NarrationPrepState.Preparing(gameId, done, total, left)
-                }
-                preparedNarration += key
-                val after = withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
-                _narrationPrep.value = if (after == 0) {
-                    NarrationPrepState.Ready(gameId, prepVersion.incrementAndGet())
-                } else {
-                    NarrationPrepState.Incomplete(gameId, after)
-                }
-            } catch (e: CancellationException) {
-                val after = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
-                _narrationPrep.value = NarrationPrepState.Incomplete(gameId, after)
-                prepVersion.incrementAndGet()
-                throw e
+        }
+        val timeLeft = ExportTimeLeftTracker()
+        _narrationPrep.value = NarrationPrepState.Preparing(gameId, 0, script.segments.size, net.palaya.chessanalyzer.video.ExportTimeLeft.Hidden)
+        try {
+            val outcome = recordNarration(script, provider) { done, total ->
+                val left = timeLeft.onProgress(done, total, SystemClock.elapsedRealtime())
+                _narrationPrep.value = NarrationPrepState.Preparing(gameId, done, total, left)
+            }
+            withContext(Dispatchers.IO) { markNarrationPrepared(gameId, script, provider, outcome) }
+            val after = withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+            _narrationPrep.value = if (after == 0) {
+                NarrationPrepState.Ready(gameId, prepVersion.incrementAndGet())
+            } else {
+                NarrationPrepState.Incomplete(gameId, after)
+            }
+        } catch (e: CancellationException) {
+            val after = withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+            _narrationPrep.value = NarrationPrepState.Incomplete(gameId, after)
+            prepVersion.incrementAndGet()
+            throw e
+        }
+    }
+
+    /**
+     * Record the narration in the background, before the Video screen asks for it, when the game asks for the prepared
+     * video ([backgroundPreparationWanted]): with [afterSideChange], right after the Summary's "Which side were you?" answer
+     * rewrote the sentences, and with [afterDeadline] when the review's recording stage ran into the whole-review deadline
+     * (EL2). A reopened game is NOT recorded from the Summary any more (EL2): its audio is made on the Video route
+     * ([ensureNarrationPrepared]). It uses the Video screen's path and
+     * state ([ensureNarrationPrepared], [narrationPrep]), so the Video screen shows the running recording if it is
+     * opened, and never runs two at once.
+     */
+    fun prepareNarrationInBackground(gameId: String, afterSideChange: Boolean = false, afterDeadline: Boolean = false) {
+        val options = gameOptions[gameId] ?: return
+        if (coreArtifacts[gameId] == null) return
+        val key = backgroundPreparationKey(gameId, options)
+        // Claimed now, before the checks below suspend. A side change and a run whose recording hit the deadline are
+        // new reasons to record, whatever was tried before.
+        if (!backgroundPreparationTried.add(key) && !afterSideChange && !afterDeadline) return
+        viewModelScope.launch(Dispatchers.Default) {
+            val installed = withContext(Dispatchers.IO) { voiceStore.isInstalled() }
+            val provider = buildNarrationProvider(gameId)
+            val script = finishedVideoScriptFor(gameId)
+            val missing = if (provider == null || script == null) 0 else withContext(Dispatchers.IO) { narrationPreparer.missingSegments(script, provider) }
+            // Re-read: the options may have changed while this waited (the voice picker, another side answer).
+            val current = gameOptions[gameId] ?: return@launch
+            if (backgroundPreparationKey(gameId, current) != key) return@launch
+            if (backgroundPreparationWanted(current.prepareVideo, current.voice, installed, missing, alreadyTried = false)) {
+                diagnostics.log(AppDiagnostics.TAG_ANALYSIS, "recording the narration of $gameId in the background ($missing segments missing)")
+                ensureNarrationPrepared(gameId, restart = afterSideChange)
             }
         }
     }
 
-    /** Cancel in the player area, or the Video screen closing: stops the recording (what is done stays). */
+    /** Cancel / "Watch now" in the player area, or the Video screen closing: stops the recording (what is done stays). */
     fun cancelNarrationPreparation() {
         prepJob?.cancel()
         prepJob = null

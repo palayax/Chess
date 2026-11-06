@@ -4,6 +4,7 @@ import java.io.File
 import kotlinx.coroutines.runBlocking
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
 import net.palaya.chessanalyzer.ui.model.ReviewSpeeds
@@ -32,7 +33,7 @@ class GameRepositoryReviewOptionsTest {
     )
 
     private val options = ReviewOptions(
-        strength = AnalysisStrength.DEEP,
+        level = EngineLevel.L3100,
         side = SideChoice.BLACK,
         naturalWording = true,
         prepareVideo = false,
@@ -65,13 +66,26 @@ class GameRepositoryReviewOptionsTest {
     fun theOptionsStoredWithAGameComeBackInANewProcess() = runBlocking {
         repo().save(stored("g1").withReviewOptions(options))
         val o = repo().load("g1")!!.reviewOptions()
-        assertEquals(AnalysisStrength.DEEP.depth, o.depth)
+        assertEquals(EngineLevel.L3100.code, o.depth)
         assertEquals(SideChoice.BLACK, o.side)
         assertEquals(true, o.naturalWording)
         assertEquals(false, o.prepareVideo)
         assertEquals(NarrationProviderChoice.NEURAL, o.voice)
         assertEquals(9, o.speakerId)
         assertEquals(VideoPace.RELAXED, o.pace)
+    }
+
+    @Test
+    fun aTimeCappedEvalSurvivesTheCacheAndAnOldCacheReadsAsNotCapped() = runBlocking {
+        val r = repo()
+        val capped = net.palaya.chessanalyzer.core.analysis.PositionEval(fen = "f", lines = emptyList(), depth = 17, timeCapped = true)
+        val plain = net.palaya.chessanalyzer.core.analysis.PositionEval(fen = "g", lines = emptyList(), depth = 17)
+        r.saveEvalCache("k", listOf(capped, plain), prefix)
+        val back = r.loadEvalCache("k", prefix)!!
+        assertEquals(true, back[0].timeCapped)
+        assertEquals(true, back[0].isCapped)
+        assertEquals(false, back[1].timeCapped)
+        assertEquals(false, back[1].isCapped)
     }
 
     @Test
@@ -87,7 +101,7 @@ class GameRepositoryReviewOptionsTest {
     fun pendingOptionsSurviveARestartAndAreClearedOnDemand() = runBlocking {
         repo().savePendingOptions("new", options)
         val o = repo().loadPendingOptions("new")!!
-        assertEquals(AnalysisStrength.DEEP.depth, o.depth)
+        assertEquals(EngineLevel.L3100.code, o.depth)
         assertEquals(SideChoice.BLACK, o.side)
         assertEquals(9, o.speakerId)
         assertEquals(VideoPace.RELAXED, o.pace)
@@ -145,5 +159,18 @@ class GameRepositoryReviewOptionsTest {
         // A damaged file is dropped, not a crash.
         File(folder.root, "${GameRepository.REVIEW_DIR_NAME}/${ReviewSpeedStore.FILE_NAME}").writeText("{not json")
         assertNull(ReviewSpeedStore(folder.root).load().engineMsPerNode)
+    }
+
+    @Test
+    fun aLegacyPendingAutoStrengthMeansTheTopLevelNotDepth14() = runBlocking {
+        val dir = File(folder.root, "${GameRepository.REVIEW_DIR_NAME}/pending").apply { mkdirs() }
+        File(dir, "auto.json").writeText("""{"strength":"AUTO","side":"WHITE"}""")
+        File(dir, "std.json").writeText("""{"strength":"STANDARD"}""")
+        File(dir, "deep.json").writeText("""{"strength":"DEEP"}""")
+        val r = repo()
+        assertEquals(EngineLevel.L3100.code, r.loadPendingOptions("auto")!!.depth)
+        // The other legacy strengths keep their depth (the options screen pre-selects the nearest level from it).
+        assertEquals(14, r.loadPendingOptions("std")!!.depth)
+        assertEquals(18, r.loadPendingOptions("deep")!!.depth)
     }
 }

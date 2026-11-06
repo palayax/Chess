@@ -25,7 +25,11 @@ import net.palaya.chessanalyzer.video.timeLeftFor
  * underestimated; the display then rises once it is off by 2 minutes or 25%. Replayed on that run's log it shows 14 min after 6 positions
  * (19.3 left), 14 after 20 (16.6 left), 12 after 30 (12.5 left) and 6 after 50 (4.6 left).
  *
- * Auto-depth (ANALYSIS_SPEC §8.4, §8.5) adds its second pass to the work left: the positions it will search again
+ * Elo levels (§8.6): remaining = min(positions left x the level's nodes x ms per node, the engine budget left). The speed
+ * is that of the last 8 searched positions ([RecentSpeed]), not the whole run, so thermal throttling is tracked. Max has
+ * no node budget: the budget left is the estimate and is shown from the first position.
+ *
+ * Legacy Auto-depth (ANALYSIS_SPEC §8.4, §8.5, no longer offered) adds its second pass to the work left: the positions it will search again
  * x the nodes a deepened position typically takes. Before the second pass that count is the expected share of the
  * game ([AnalysisProgress.deepPassExpected]); during it, the positions picked and not yet searched. So the estimate
  * never reaches "less than a minute" at the end of the first pass while a second one is still to come.
@@ -55,12 +59,55 @@ fun estimateAnalysisRemainingMs(
     typicalNodes: Long,
     deepLeft: Int = 0,
     deepTypicalNodes: Long = 0L,
+    /**
+     * The speed of the LAST positions only ([RecentSpeed], ms per node), so a phone that slows down when it heats is
+     * tracked; null = the whole run's average.
+     */
+    recentMsPerNode: Double? = null,
+    /**
+     * An Elo level's remaining engine budget (spec §8.6): the estimate is min(positions left x [typicalNodes] x speed,
+     * this). With [typicalNodes] 0 (Max, no node budget) the budget itself is the estimate, shown from the start.
+     * Null for a legacy fixed-depth run.
+     */
+    budgetLeftMs: Long? = null,
 ): Long? {
+    if (budgetLeftMs != null && typicalNodes <= 0L) return budgetLeftMs.coerceAtLeast(0L)
     if (runPositions < MIN_POSITIONS_FOR_ESTIMATE || runNodes <= 0L || runMs <= 0L || total <= 0) return null
-    val msPerNode = runMs.toDouble() / runNodes
+    val msPerNode = recentMsPerNode?.takeIf { it > 0.0 } ?: (runMs.toDouble() / runNodes)
     val left = (total - done).coerceAtLeast(0)
     val nodesLeft = left * typicalNodes.toDouble() + deepLeft.coerceAtLeast(0) * deepTypicalNodes.toDouble()
-    return Math.round(nodesLeft * msPerNode)
+    val byNodes = Math.round(nodesLeft * msPerNode)
+    return if (budgetLeftMs != null) minOf(byNodes, budgetLeftMs.coerceAtLeast(0L)) else byNodes
+}
+
+/**
+ * The engine's speed over the last [window] searched positions (ms per node), from cumulative run totals fed once per
+ * searched position: the average of the whole run hides a phone that throttles after a minute (spec §8.4).
+ */
+class RecentSpeed(private val window: Int = WINDOW) {
+    private class Sample(val positions: Int, val nodes: Long, val ms: Long)
+
+    private val samples = ArrayDeque<Sample>()
+
+    /** Feed the run's cumulative totals; a repeat of the same position count is ignored. */
+    fun add(runPositions: Int, runNodes: Long, runMs: Long) {
+        if (runPositions <= 0) return
+        if (samples.lastOrNull()?.let { runPositions <= it.positions } == true) return
+        samples.addLast(Sample(runPositions, runNodes, runMs))
+        while (samples.size > window + 1) samples.removeFirst()
+    }
+
+    /** ms per node over the window, or null with fewer than two samples or no nodes in the window. */
+    fun msPerNode(): Double? {
+        if (samples.size < 2) return null
+        val dn = samples.last().nodes - samples.first().nodes
+        val dt = samples.last().ms - samples.first().ms
+        return if (dn > 0L && dt > 0L) dt.toDouble() / dn else null
+    }
+
+    companion object {
+        const val WINDOW = 8
+    }
 }
 
 /**
@@ -73,12 +120,18 @@ fun deepPositionsLeft(progress: AnalysisProgress): Int =
 
 /**
  * The running estimate for one analysis run: feed it every progress update, read the line to show.
- * [deepTypicalNodes] is Auto-depth's per-position cost of its second pass (`AutoDepthBudget.TYPICAL_DEEPENED_NODES`),
- * 0 for the other strengths.
+ * [deepTypicalNodes] is legacy Auto-depth's per-position cost of its second pass (`AutoDepthBudget.TYPICAL_DEEPENED_NODES`),
+ * 0 for the other strengths. [levelRun]: an Elo-level run (spec §8.6), whose estimate is bounded by the run's engine
+ * budget ([AnalysisProgress.engineBudgetMs]); [typicalNodes] is the level's node budget (0 for Max).
  */
-class AnalysisTimeLeftTracker(private val typicalNodes: Long, private val deepTypicalNodes: Long = 0L) {
+class AnalysisTimeLeftTracker(private val typicalNodes: Long, private val deepTypicalNodes: Long = 0L, private val levelRun: Boolean = false) {
     private var shown: ExportTimeLeft = ExportTimeLeft.Hidden
     private var lastDone = -1
+    private val recent = RecentSpeed()
+
+    /** The speed over the last positions (ms per node), for the engine stage's own estimate; null until measured. */
+    @Synchronized
+    fun recentMsPerNode(): Double? = recent.msPerNode()
 
     /** Returns what to show for [progress]; recomputed only when another position is done. */
     @Synchronized
@@ -86,6 +139,7 @@ class AnalysisTimeLeftTracker(private val typicalNodes: Long, private val deepTy
         if (progress.phase != AnalysisPhase.ANALYZING_MOVES || progress.totalMoves <= 0) return shown
         // Positions done across both of Auto's passes (the second pass counts on after the first).
         val done = progress.currentMoveIndex + progress.deepPassDone
+        recent.add(progress.runPositionsSearched, progress.runNodes, progress.runSearchMs)
         if (done <= lastDone) return shown
         lastDone = done
         val deepLeft = deepPositionsLeft(progress)
@@ -102,6 +156,8 @@ class AnalysisTimeLeftTracker(private val typicalNodes: Long, private val deepTy
             typicalNodes = typicalNodes,
             deepLeft = deepLeft,
             deepTypicalNodes = deepTypicalNodes,
+            recentMsPerNode = recent.msPerNode(),
+            budgetLeftMs = if (levelRun) (progress.engineBudgetMs - progress.runSearchMs).coerceAtLeast(0L) else null,
         ) ?: return shown
         shown = nextDisplayedTimeLeft(shown, timeLeftFor(remaining))
         return shown

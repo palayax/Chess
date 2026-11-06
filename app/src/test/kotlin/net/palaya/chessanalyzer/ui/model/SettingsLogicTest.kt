@@ -20,10 +20,31 @@ class SettingsLogicTest {
     }
 
     @Test
-    fun standardIsTheStoredDefaultDepth() {
-        // Two defaults for one concept drift apart; the preset and the repository default are one number.
-        assertEquals(SettingsRepository.DEFAULT_DEPTH, AnalysisStrength.STANDARD.depth)
-        assertEquals(AnalysisStrength.STANDARD, AnalysisStrength.fromDepth(EngineSettings().depth))
+    fun the3100LevelIsTheDefaultOfANewInstallAndOfAnEmptySettingsObject() {
+        // Two defaults for one concept drift apart; the level and the repository default are one number.
+        assertEquals(EngineLevel.L3100.code, SettingsRepository.DEFAULT_DEPTH)
+        assertEquals(EngineLevel.L3100, EngineSettings().level)
+        assertEquals(EngineLevel.L3100.code, SettingsRepository.defaultLevelCode(storedDepth = null, storedAuto = false))
+        // A game saved before the levels, with no depth stored, was Standard.
+        assertEquals(AnalysisStrength.STANDARD.depth, SettingsRepository.LEGACY_DEFAULT_DEPTH)
+    }
+
+    @Test
+    fun aLegacyStoredSettingsDepthIsMigratedToTheNearestLevelAndALevelCodeStays() {
+        assertEquals(EngineLevel.L2700.code, SettingsRepository.defaultLevelCode(12, false))
+        assertEquals(EngineLevel.L2900.code, SettingsRepository.defaultLevelCode(14, false))
+        assertEquals(EngineLevel.L3100.code, SettingsRepository.defaultLevelCode(18, false))
+        assertEquals(EngineLevel.L3100.code, SettingsRepository.defaultLevelCode(14, true))
+        assertEquals(EngineLevel.L3100.code, SettingsRepository.defaultLevelCode(null, true))
+        for (l in EngineLevel.entries) assertEquals(l.code, SettingsRepository.defaultLevelCode(l.code, false))
+    }
+
+    @Test
+    fun theSettingsClampKeepsLevelCodesAndClampsLegacyDepthsTo6To30() {
+        for (l in EngineLevel.entries) assertEquals(l.code, SettingsRepository.clampDepth(l.code))
+        assertEquals(6, SettingsRepository.clampDepth(2))
+        assertEquals(30, SettingsRepository.clampDepth(99))
+        assertEquals(18, SettingsRepository.clampDepth(18))
     }
 
     @Test

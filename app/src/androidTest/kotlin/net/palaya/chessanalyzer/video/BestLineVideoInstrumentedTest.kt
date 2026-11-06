@@ -145,7 +145,7 @@ class BestLineVideoInstrumentedTest {
             // The speech lengths the timeline uses: the cached clips' own lengths, with the timeline's floor.
             val store = NarrationStore.forApp(context)
             fun speechOf(seg: ScriptSegment): Long {
-                val file = requireNotNull(store.get(store.keyFor(seg.narration, provider.displayName, provider.narrationCacheFingerprint()))) { "no cached clip for ${seg.index}" }
+                val file = requireNotNull(store.get(NarrationKeys.segmentKey(seg, provider.displayName, provider.narrationCacheFingerprint()))) { "no cached clip for ${seg.index}" }
                 return WavUtil.readHeader(file)!!.durationMs.coerceAtLeast(TimelineBuilder.MIN_SEGMENT_MS)
             }
             val starts = ArrayList<Long>()

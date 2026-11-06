@@ -9,6 +9,7 @@ import net.palaya.chessanalyzer.core.analysis.PositionEval
 import net.palaya.chessanalyzer.engine.NetStore
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.RecentGameSummary
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
@@ -99,8 +100,8 @@ class GameRepository(
 
         /** This game with [options] stored (the strength goes to [depth], the side to [userColorName]). */
         fun withReviewOptions(options: ReviewOptions): StoredGame = copy(
-            depth = options.strength.depth,
-            autoDepth = options.strength.autoDepth,
+            depth = options.level.code,
+            autoDepth = false,
             userColorName = options.side.storedName ?: userColorName,
             voiceProvider = options.voice.name,
             speakerId = options.speakerId,
@@ -185,8 +186,7 @@ class GameRepository(
     suspend fun savePendingOptions(id: String, options: ReviewOptions) = withContext(Dispatchers.IO) {
         pendingOptionsDir.mkdirs()
         val json = JSONObject().apply {
-            put("depth", options.strength.depth)
-            put("strength", options.strength.name)
+            put("depth", options.level.code)
             options.side.storedName?.let { put("side", it) }
             put("naturalWording", options.naturalWording)
             put("prepareVideo", options.prepareVideo)
@@ -208,7 +208,10 @@ class GameRepository(
         if (!file.isFile) return@withContext null
         try {
             val json = JSONObject(file.readText())
-            val strengthDepth = AnalysisStrength.entries.firstOrNull { it.name == json.optString("strength", "") }?.depth
+            // A legacy pending strength is a depth, except Auto: it has no depth of its own and means the top level (3100).
+            val strengthDepth = AnalysisStrength.entries.firstOrNull { it.name == json.optString("strength", "") }?.let {
+                if (it.autoDepth) EngineLevel.forLegacyDepth(it.depth, autoDepth = true).code else it.depth
+            }
             StoredReviewOptions(
                 depth = strengthDepth ?: if (json.has("depth")) json.getInt("depth") else null,
                 side = SideChoice.fromStored(json.optString("side", "")),
@@ -267,7 +270,7 @@ class GameRepository(
             result = json.optString("result", "*"),
             date = json.optString("date", ""),
             plyCount = json.optInt("plyCount", 0),
-            depth = json.optInt("depth", SettingsRepository.DEFAULT_DEPTH),
+            depth = json.optInt("depth", SettingsRepository.LEGACY_DEFAULT_DEPTH),
             multiPv = json.optInt("multiPv", SettingsRepository.DEFAULT_MULTI_PV),
             userColorName = json.optString("userColorName", null).takeUnless { it.isNullOrEmpty() },
             savedAtMs = json.optLong("savedAtMs", file.lastModified()),
@@ -364,6 +367,7 @@ class GameRepository(
         put("fen", eval.fen)
         put("depth", eval.depth)
         eval.requestedDepth?.let { put("requestedDepth", it) }
+        if (eval.timeCapped) put("timeCapped", true)
         val lines = JSONArray()
         eval.lines.forEach { line ->
             lines.put(
@@ -396,6 +400,7 @@ class GameRepository(
             lines = lines,
             depth = json.getInt("depth"),
             requestedDepth = if (json.has("requestedDepth")) json.getInt("requestedDepth") else null,
+            timeCapped = json.optBoolean("timeCapped", false),
         )
     }
 

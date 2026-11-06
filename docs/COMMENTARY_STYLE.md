@@ -47,6 +47,22 @@ numbers) at generation time; the Kotlin generator re-checks it (`CommentaryGener
 | **sacrifice** "Nxb5 sacrifices the knight on b5." / "Rb8 offers the knight on d7: a sacrifice the engine rates among the best moves here." | card (BRILLIANT) | the opponent can take the named piece for a net of at least 200 by exchange; the third wording also needs the class's loss of at most 2 |
 | **the engine's line** "In the engine's line, ..." / "The engine's line shows it: ..." | card | deflection, decoy, clearance, removing the defender, interference, Greek gift, windmill, zwischenzug, overload: proved by replaying the recorded PV, and said as the engine's line because the opponent may reply differently |
 | **a spoken line move** (V4) "Knight takes the pawn on f seven, with check." / "Castles queenside, with check." / "The rook on a one to d one." | narration (the video's best line) | the move is the engine's line's next move, legal on the board it is played on (the Board's line, `BestLines`); the piece named stands on its from-square; "the X on <square>" only when another piece of that kind could also reach the target; "takes the Y on" names the piece standing on the target (en passant said as such); the promotion piece; "with check" / "and that is checkmate" read off the position after the move. One wording, no rotation. |
+| **the stakes** (NS) "Black won, but for 16 moves this was White's game." / "White was on top from the opening and never let go." / "It was level until move 11, and then White took over for good." / "Neither side ever got more than a slight edge." / "White was clearly better for 12 moves, but it ended in a draw." | narration (the cold open) | the phases of the game (§9.9: seven standings from the White win-percent of every position, 3-point hysteresis, merging under four positions) and the result: the other side held a clear standing for N moves in a row (N >= 6, positions / 2) and lost; or never led, and the winner led in every phase from move M on; or a draw with no phase above an edge / with a clear lead for N >= 6 moves |
+| **how it ended** (NS) "It ended in mate on move 33." / "It lasted 40 moves." / "Black won by checkmate on move 33." / "White won after 40 moves." | narration | the result tag and the board after the last ply (checkmate or not); the move count is the full moves of the game |
+| **the hook** (NS) "One move, around move 20, swings the whole game ..." / "One moment, around move 9, matters more than any other." / "The biggest slip is small, but it is worth a look." | narration | the move of the largest win-percent loss (neither BOOK nor FORCED) is at that move number, and its loss is >= 30 / 12 to 30 / under 12 |
+| **where the opening left the game** (NS) "Theory runs out around move 4, and the position is about level." / "Out of the opening, White is slightly better." | narration | the last book move is that ply; the band of the White win-percent after it (balanced 43 to 57, edge 57, clear 68, winning 82 for the side ahead) |
+| **a phase turn** (NS) "White built a clear edge, after Black's blunder on move 11." / "Black fought back to level." / "The game turned: Black was winning now." / "White's grip loosened: only clearly better now." / "White was winning now, with a forced mate in three." | narration | the game's phases have a boundary at that ply and the sentence states the new standing and who gained; its cause only when proven: the side that lost ground played a MISTAKE, MISS or BLUNDER in the two moves up to it; or the gaining side started the engine's forced mate; or came out ahead on settled material (named by the 40 cp rule or as "the exchange") |
+| **a skipped stretch** (NS) "A few quiet moves follow, no captures and no checks ..." / "There are trades along the way ..." / "Let's jump to move 14." | narration | quiet: no capture, no check and no ply that moved the White win-percent by more than 5 in the plies between; trades: a capture by each side; the move number is the next told move's |
+| **a remark on a quiet move** (NS) "That helps White." / "It costs Black a little." | narration | the move changed the mover's win-percent by at least 4, up or down |
+| **a small slip** (NS) "White plays X, a small slip." / "... which is slightly off." | narration | the move is classified an inaccuracy (§2) |
+| **what a move let in** (NS) "That allows a forced mate in four." / "Black takes ..., and now White has queen takes the rook on a one, with check, winning a rook." | narration | the engine's mate for the opponent after the move, with its distance; or the engine's best reply is a capture that static exchange nets at least a pawn by, not a recapture on the square just taken on; "winning a rook" only within 40 cp of the unit |
+| **the better move and what it did** (NS) "Rook takes the pawn on h seven was the move, winning a pawn." / "The move was queen to h five, forcing mate in three." | narration | the engine's first move; mate: the engine's distance for the mover before the move; wins: the mover's settled net material at any of the first four plies of the engine's line, within 40 cp of the unit; otherwise the move alone |
+| **a mating sequence** (NS) "This is a forced mate in three." then "Queen to f six, with check." then "... and that is checkmate. Game over. White wins!" | narration | the engine's mate distance for the mover before the first move (counting it); each later bare move is the move played, by the same side at most one move after the previous told one; the last is checkmate on the board and the result agrees |
+| **the consequence in bands** (NS, rephrased from the old turning-point sentence) "White was clearly better. Now White is about level." / "That takes White from winning to clearly better." | narration | the mover's win-percent before and after, by the bands of §9 (as the card says them) |
+| **the turning point** (NS) "That was the turning point. No other move in this game cost as much. From there, White never gave the lead back." | narration | the move of the largest loss; "the turning point" from a loss of 12, else "the biggest slip"; "never gave the lead back": every phase from the move's is led by the other side; "was back to level by move N": the first later phase that is not |
+| **a question** (NS) "Can you see what White missed?" | narration (a missed tactic with no pause) | the move has a recorded missed motif, and the engine's first move is not the move played |
+| **the finish** (NS) "The decisive moment was White's blunder on move 28, which took White from about level to losing." | narration | the largest swing, at least 12 and a band crossed, in the mover's own bands; else "There was no single decisive mistake." |
+| **the takeaway** (NS) "At move 28, White missed an x-ray. Rook to e one was the move." / "Move 28 let Black in. It allowed a forced mate in three." / "Move 28 gave up most of the advantage, from clearly better to level." | narration | the viewer's worst error (else the error of the largest swing; at least 10 win-percent or with a missed motif): its missed motif, what it let in (as above), or what it gave up in bands and by the loss bands; the habit sentence fits the same facts |
 | **back to the game** (V4) "Back to the game now." | narration (after the video's best line; first sentence of a detour's pivot-out) | a simulated line (the best line's last move, or a detour's payoff) has just ended, and the board this sentence is said over is the game's own position before the move the moment is about |
 
 **Terms not added, and why.** "Simplifies", "liquidates", "trades into a winning endgame" need an endgame
@@ -250,3 +266,28 @@ Both sentences are claims and are verified like the rest: the spoken move agains
 is flagged (`docs/COMMENTARY_AUDIT.md`, "V4"). A line move has one wording on purpose: a move is a fact, and the
 same move must sound the same wherever it is said.
 
+## 8. The story and the rhythm (NS, 2026-10-14)
+
+The owner, after the phone test: "The narration voice is great but the script is pretty terrible: it's not clear what is going
+on during the game, everything is read with the same intonation." NS gives the narrated video a story arc and a cadence
+(ANALYSIS_SPEC §9.9); the rows above marked NS are its sentences, each with its proof, each re-derived by
+`scripts/audit_commentary.py story` and broken one at a time by `mutate-story`.
+
+What the sentences do: say who stood better and how that changed (phases, with the move that did it and, when the boards
+prove it, why); tell an error as cause and consequence (what it let in, the better move and what that did); announce a
+mating sequence once and say its moves bare; describe a skipped stretch by what is in it; say how the game ended and
+which move decided it, and leave the statistics to the cards; give one takeaway tied to the move the game turned on. What
+they stopped doing: reading accuracy, ratings and counts; "The evaluation moves against White" after every quiet move;
+"That's losing turning into decisively lost" for a move that crossed a band by a hair; "gives nothing away" after every
+better move; "nothing is captured, and nothing has to be" and "the toughest try in the position" after every move of a
+line; "forced mate" three times in a row; "development and shuffling" over a stretch nobody checked.
+
+Rhythm rules (no sentence is verified by them, but the generator follows them and `NarrationClaimsTest` pins them):
+sentence length varies (bare moves of two to four words next to comma-linked cause and effect); a question only where it
+is true that something was missed; an exclamation mark only for the checkmate and a Brilliant move; no lead-in glued onto an
+interjection; no remark repeated on every beat (`thinned`); every phrasing rotates through `PhrasePicker`, a pure function
+of the report, so the text stays reproducible and the narration cache keeps hitting.
+
+Reference (chess.com, pattern only): Game Review's coach text opens on the result and the swing of the game, says in a
+sentence what a move allowed and what the better move was, and keeps the numbers on the summary; taken: that hierarchy, in
+our own words.

@@ -44,6 +44,8 @@ class NarrationTacticGateTest {
                 mateInBefore = null, mateInAfter = null,
                 tacticsFound = listOfNotNull(found[a.ply]),
                 tacticsMissed = listOfNotNull(missed[a.ply]),
+                // A move that missed a tactic is not the engine's best move: the lesson reads that off the annotation.
+                bestMoveUci = missed[a.ply]?.moveUci ?: a.bestMoveUci,
                 threatsAllowed = emptyList(), simulation = null
             )
         }

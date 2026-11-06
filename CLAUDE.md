@@ -75,6 +75,18 @@ conflict.
    analysis stored under the Standard key; a deep result is accepted only for the same FEN and requestedDepth 18.
    The host measurement harness is `desktop/src/test/.../bench/` (run with `java` outside Gradle; see its KDoc).
 
+10. **Analysis depth is an Elo level now (EL, `docs/ANALYSIS_SPEC.md` §8.6).** The stored `depth` Int is a legacy fixed depth
+   (6..30) or a level code (>= 1000: 2500/2700/2900/3100/4000 = Max, `ui/model/EngineLevel`). A level searches with a node budget and
+   a game-wide time budget (`GameTimeBudget`, 5 min for the whole first pass); never put the dynamic per-position movetime in the
+   cache key. Auto/Quick/Standard/Deep are legacy code paths kept only for old games and pending requests: do not offer them.
+   Do not use `UCI_Elo` for analysis (it does not reduce search work). The Elo labels are an approximation until measured.
+   **EL2: the whole review has a deadline** (`ui/model/ReviewBudget.kt`, spec §8.6): `REVIEW_TOTAL_BUDGET_MS` 10 min from the run start;
+   each wording stage gets `wordingStageBudgetMs` (<= 90 s, minus a reserve for the later stages) and keeps the original texts when it
+   runs out; the voice recording stops at the deadline and the rest is recorded in the background (`prepareNarrationInBackground(afterDeadline)`);
+   Max has a per-position ceiling (`MAX_LEVEL_MOVETIME_CEILING_MS` 8 s). Any time shown before a phone has measured is an upper bound
+   (`TimeEstimate.upperBound`, "Up to about N min"): never add 0 for an unmeasured stage, use `ReviewStage.boundMs`. A stage cut by its budget
+   must not feed `ReviewSpeedStore`.
+
 ## Build gotchas
 
 - Stockfish source is **not** committed. Run `scripts/fetch_stockfish.sh` (pinned to tag `sf_19`)
@@ -136,6 +148,14 @@ conflict.
   `TimelineBuilder`, `SegmentFrameBuilder`, the exporter's PCM track and the player; a new timeline consumer must
   honour it too. A voice from an update is accepted by `VoiceStore.isInstalled()`
   through its `kokoro/.compat` record (layout + sherpa-onnx range) while this build still matches it.
+- **Delivery (NC, ANALYSIS_SPEC §9.10) is part of the narration cache key.** `ScriptSegment.delivery` (speed, gapScale; set by
+  `DeliveryPlan.apply` at the end of `ScriptBuilder.build`, a pure function of the story) changes the audio for the same words, so
+  every clip key is built by `video/NarrationKeys` (`sentenceKey`: speed; `segmentKey`: speed + gap scale; neutral adds nothing, so
+  old caches stay valid). A new caller never calls `NarrationStore.keyFor` with a segment's or sentence's text: it uses the shared
+  function, or the player, the preparer's "missing" count and the coordinator disagree. The speed goes to
+  `NarrationVoiceProvider.synthesize(text, file, speed)` (Kokoro: per-call `speed`; device voice: speech rate); the stitch gap is
+  `Delivery.gapMs(base)` (clamped 120..600 ms). `estimateSpeechMs` takes the delivery, so a path that re-estimates a segment
+  (`RephrasedScript`, the best line) passes `segment.delivery`. Speeds stay within 0.90..1.10; the values are a first guess to tune by ear.
 - **Only `data/models/ModelDownloader.kt` may open a network connection** (`NetworkCallSitesTest` scans
   `:app` and `:engine` main sources). The manifest has INTERNET + ACCESS_NETWORK_STATE since D2b; the app
   must still make no network call on its own: downloads start only from a user tap.
@@ -166,6 +186,9 @@ conflict.
   `libdatastore_shared_counter.so` are already 0x4000. Check after any NDK or dependency change:
   `llvm-readelf -lW <lib>.so` (Align 0x4000 on every LOAD) for each `.so` in the APK, and
   `zipalign -c -P 16 -v 4 <apk>`.
+  This applies to BOTH arm64 engine libraries: `libstockfish.so` (ARCH=armv8 baseline) and `libstockfish_dotprod.so` (ARCH=armv8-dotprod,
+  `-march=armv8.2-a+dotprod`), built by one CMake function; `NativeBridge` loads the dotprod one only when `/proc/cpuinfo` lists `asimddp`
+  (`CpuFeatures`) and falls back to the baseline (`StockfishEngine.nativeVariant` says which). Both export the same JNI symbols.
 - **R8 is on for release** (`isMinifyEnabled` + `isShrinkResources`). Keep rules that matter:
   `engine/consumer-rules.pro` pins `NativeBridge` and its `native` methods (the JNI symbols are
   `Java_net_palaya_chessanalyzer_engine_NativeBridge_*`; rename either and every engine call dies with
@@ -230,7 +253,9 @@ conflict.
   n_ctx 2048 (about 57 MB of f16 KV on the 1.5B). It is freed on `onTrimMemory(RUNNING_LOW+)` and a minute after a
   job. A load is journaled (`rephrase/loading.json`): found at start, the file is re-hashed before its next use; two
   deaths in a row turn the feature off (the low-memory killer is a likelier cause than a bad file, so one crash does
-  not delete 1.1 GB).
+  not delete 1.1 GB). `RephraseBackend.release()` *retires* the instance (`LlamaRephraser.retire()`): a job still holding it gets
+  "no result" and never reloads the model behind the backend's back; the next `get()` makes a new one. The background card wording
+  (`startBackgroundWording`) is cancelled for every recording (`recordNarration`) and started again after it.
 - **The GGUF is checked in Kotlin before llama.cpp sees it** (`GgufHeader`: magic, version 3, counts, known tensor
   types, every tensor inside the file, `general.architecture`) on install, on update activation and once per
   process with the full SHA-256. llama.cpp b11190 refused a truncated and a corrupted file cleanly on the emulator
@@ -240,6 +265,11 @@ conflict.
   `release.tag`). Downloading it at setup switches the feature on (owner decision §12.3). The cache lives in
   `filesDir/rephrase/cache/<model>/` (NOT `rephrase/<model>/`: `rephrase/models/` holds the GGUF and a model switch
   purges every other cache folder). `rephrase/` is excluded from backup in all three rule sets.
+- **Recording narration is one path, one at a time** (`AnalysisViewModel.recordNarration`: mutex, stops the background wording, releases
+  the wording model, `NarrationPreparer`). The Summary starts it in the background (`prepareNarrationInBackground`) after a side answer
+  (the sentences changed) and after a plain reopen with `prepareVideo` on, with the Video screen's state; `PreparedNarrationStore`
+  (`review/prepared_narration.json`) remembers per voice identity which segments fell back to the device voice, so a restart does not retry
+  them. Kokoro threads come from `kokoroThreads` (fast cores, 2..4). `runAnalysis` does not report completion while its own stages run.
 - **The narration post-pass runs inside the review's processing run (RF), never at watch time.** The stage "Writing the
   video narration" (only when the game's "Prepare the video now" is on) builds the paced script and, with the GAME's
   Natural wording on, rewords its beats (`polishNarration`). The Video route only reads `finishedVideoScriptFor(gameId)`
@@ -275,6 +305,9 @@ conflict.
   priors; "About N min left" is measured only (`ReviewTimeLeftTracker`), hidden until honest. Skip cancels only the
   stage's child job. The processing screen's `whileYouWait` slot is for the insights panel (`processingGame`,
   `evalsSoFar`).
+- **The Summary starts no recording for a reopened game (EL2).** Only a side change and a RECORD_VOICE stage that hit the deadline start a
+  background recording; an old game records on the Video route (`ensureNarrationPrepared`). `runAnalysis`'s KEEP_WAITING keeps the newest
+  `onComplete` (`pendingOnComplete`), which the run calls on the main thread at its end.
 - **Deleting a game** (`deleteGame`) removes its JSON, pending options, in-memory state, its pending/waiting request and
   its eval cache when no other stored game has the same text (`deletePlan`); never the narration WAVs (shared).
 
@@ -323,6 +356,8 @@ conflict.
   adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   adb shell am instrument -w -r -e class '<fqcn>#<method>'     net.palaya.chessanalyzer.test/androidx.test.runner.AndroidJUnitRunner
   ```
+- **"Watch now"** (the player area's button while the narration is recorded) is `cancelNarrationPreparation`: what is recorded stays, the
+  rest is read by the device voice (state Incomplete). It is the same as the old Cancel; there is no streaming player.
 - **The player (`VideoPlayerController`) never synthesizes**: it plays WAVs already in `files/narration/` for its
   voice's identity and speaks any other segment with the live device voice. Since RF the narration is RECORDED on
   purpose by `NarrationPreparer` (through `NarrationCoordinator`, the export's path): the processing run's "Recording
@@ -367,6 +402,12 @@ conflict.
 
 ## Testing standards
 
+- **CI (GitHub Actions, `.github/workflows/`).** `android-debug-apk.yml` builds a downloadable debug APK on every
+  `claude/**` push with `-PpalayaSideBySide` (package `net.palaya.chessanalyzer.dev`, so it installs beside the
+  release-signed app on the owner's phone) and runs the host unit tests. `emulator-tests.yml` runs the instrumented
+  suites on an API 34 x86_64 emulator; a push runs it only when the commit message contains `[emulator]`. The
+  cloud development container has no Android SDK (dl.google.com is blocked), so CI is where `:app` is compiled.
+
 - **Instrumented tests share one real DataStore.** Preferences written by one test survive into the
   next, so a test that needs a pristine value must *establish* it, not assume it (see
   `NarrationSettingsRepository.clearProviderChoiceForTesting`). A test that passed alone and fails
@@ -386,6 +427,11 @@ conflict.
   professional term is used only where its definition is proved (C1). Phrasings rotate by
   `Variety(ply)`, never by randomness, so the text is a pure function of the annotation and the
   viewer's side, is rewritten when the user picks a side, and keeps the narration cache reproducible.
+- **The narrated story is verified too (NS, ANALYSIS_SPEC 9.9).** `core.analysis.GamePhases` + `core.narration.StoryArc` give the video its
+  arc (stakes, phase turns, causes); every story sentence is recorded by `VideoScriptGenerator.generateWithStory` and re-derived by
+  `scripts/audit_commentary.py story` (and broken one claim at a time by `mutate-story`). A new story sentence needs a verifier there, a
+  template in `NarrationStoryTest`, a row in `docs/COMMENTARY_STYLE.md` and a catalogue sample. Gotcha: never put `lets`, `let`, `hands`,
+  `can play` or `allows` next to a move in narration prose; `ClaimChecker` reads those as a charge and mis-attributes it.
 - Move generation is verified by **perft** against the five standard positions: **depth 5** on the
   start position and Position 3, **depth 4** on Kiwipete, Position 4 and Position 5. If you
   touch move generation, those numbers must stay exact — they are the correctness oracle.

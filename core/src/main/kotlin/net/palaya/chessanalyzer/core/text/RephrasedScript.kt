@@ -50,7 +50,7 @@ object RephrasedScript {
             val text = accepted[s.narration] ?: continue
             if (text.isBlank() || text == s.narration) continue
             newText[i] = text
-            newEstimate[i] = VideoScriptGenerator.estimateSpeechMs(text, wpm)
+            newEstimate[i] = VideoScriptGenerator.estimateSpeechMs(text, wpm, s.delivery)
         }
         if (newText.isEmpty()) return script
 

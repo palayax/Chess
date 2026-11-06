@@ -11,8 +11,27 @@ package net.palaya.chessanalyzer.engine
  * that pipe pair as seen from the JVM.
  */
 internal object NativeBridge {
+    /**
+     * Which build of the engine is loaded: "dotprod" (libstockfish_dotprod.so, arm64 CPUs with
+     * asimddp) or "baseline" (libstockfish.so). Both export the same JNI symbols, so the keep rule
+     * in consumer-rules.pro covers either.
+     */
+    internal val loadedVariant: String
+
     init {
-        System.loadLibrary("stockfish")
+        var variant = "baseline"
+        var loaded = false
+        if (CpuFeatures.deviceSupportsDotProd()) {
+            try {
+                System.loadLibrary("stockfish_dotprod")
+                variant = "dotprod"
+                loaded = true
+            } catch (_: UnsatisfiedLinkError) {
+                // fall through to the baseline library
+            }
+        }
+        if (!loaded) System.loadLibrary("stockfish")
+        loadedVariant = variant
     }
 
     /** Starts the engine: redirects stdin/stdout to pipes and launches the UCI loop thread. */

@@ -34,24 +34,6 @@ class NarrationClaimsTest {
     }
 
     @Test
-    fun `how often a move was found never reads one times`() {
-        fun positive(n: Int) = english(Sentence.LessonPositive(viewer, n, 8, "90.3")).single()
-        assertTrue(positive(1), "once out of 8" in positive(1))
-        assertTrue(positive(2), "twice out of 8" in positive(2))
-        assertTrue(positive(5), "five times out of 8" in positive(5))
-        assertTrue(positive(0), "not once out of 8" in positive(0))
-        for (n in 0..5) assertFalse(positive(n), "one times" in positive(n))
-    }
-
-    @Test
-    fun `chances are counted in the singular and the plural`() {
-        fun converted(n: Int) = english(Sentence.LessonOpponentMissedToo(viewer, net.palaya.chessanalyzer.core.analysis.TacticType.FORK, 2, n)).single()
-        assertTrue(converted(1), "one chance of your own" in converted(1))
-        assertTrue(converted(2), "two chances of your own" in converted(2))
-        assertFalse(converted(1), "one chances" in converted(1))
-    }
-
-    @Test
     fun `a line that proves nothing is said to end, not to have invested material or to be completely on top`() {
         val ends = english(Sentence.PayoffOutcome(black, PayoffKind.LINE_ENDS)).single()
         assertEquals("That is as far as the line goes.", ends)

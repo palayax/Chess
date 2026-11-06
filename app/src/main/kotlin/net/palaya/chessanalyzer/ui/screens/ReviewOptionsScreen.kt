@@ -38,6 +38,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -52,14 +53,18 @@ import net.palaya.chessanalyzer.R
 import net.palaya.chessanalyzer.core.narration.VideoPace
 import net.palaya.chessanalyzer.ui.a11y.AppBarTitle
 import net.palaya.chessanalyzer.ui.a11y.asHeading
-import net.palaya.chessanalyzer.ui.model.AnalysisStrength
+import net.palaya.chessanalyzer.ui.model.EngineLevel
 import net.palaya.chessanalyzer.ui.model.EngineSettings
 import net.palaya.chessanalyzer.ui.model.GameHeader
 import net.palaya.chessanalyzer.ui.model.NarrationProviderChoice
 import net.palaya.chessanalyzer.ui.model.ReviewOptions
+import net.palaya.chessanalyzer.ui.model.ReviewEstimateInputs
 import net.palaya.chessanalyzer.ui.model.ReviewOptionsDraft
+import net.palaya.chessanalyzer.ui.model.ReviewSpeeds
 import net.palaya.chessanalyzer.ui.model.SideChoice
+import net.palaya.chessanalyzer.ui.model.TimeEstimate
 import net.palaya.chessanalyzer.ui.model.WordingOption
+import net.palaya.chessanalyzer.ui.model.levelEstimates
 import net.palaya.chessanalyzer.ui.theme.ChessAnalyzerTheme
 import net.palaya.chessanalyzer.video.ExportTimeLeft
 import net.palaya.chessanalyzer.video.VoiceSamplePlayer
@@ -133,9 +138,12 @@ fun ReviewOptionsScreen(
             GameHeaderLine(draft.header, draft.plies)
             OptionsCard {
                 StrengthChooser(
-                    selected = options.strength,
-                    estimates = draft.strengthEstimatesMs,
-                    onSelect = { onOptionsChange(options.copy(strength = it)) },
+                    selected = options.level,
+                    // Recomputed from the options as edited: the plan (video, wording, voice) changes the stages added.
+                    estimates = remember(draft.estimateInputs, options.prepareVideo, options.naturalWording, options.voice) {
+                        levelEstimates(draft.estimateInputs, options)
+                    },
+                    onSelect = { onOptionsChange(options.copy(level = it)) },
                 )
             }
             OptionsCard {
@@ -247,46 +255,48 @@ private fun GameHeaderLine(header: GameHeader, plies: Int) {
 }
 
 @StringRes
-private fun strengthLabelRes(strength: AnalysisStrength): Int = when (strength.name) {
-    "QUICK" -> R.string.settings_depth_quick
-    "STANDARD" -> R.string.settings_depth_standard
-    "DEEP" -> R.string.settings_depth_deep
-    else -> R.string.settings_depth_auto
+private fun levelLabelRes(level: EngineLevel): Int = when (level) {
+    EngineLevel.L2500 -> R.string.level_label_2500
+    EngineLevel.L2700 -> R.string.level_label_2700
+    EngineLevel.L2900 -> R.string.level_label_2900
+    EngineLevel.L3100 -> R.string.level_label_3100
+    EngineLevel.MAX -> R.string.level_label_max
 }
 
 @StringRes
-private fun strengthHintRes(strength: AnalysisStrength): Int = when (strength.name) {
-    "QUICK" -> R.string.reanalyse_hint_quick
-    "STANDARD" -> R.string.reanalyse_hint_standard
-    "DEEP" -> R.string.reanalyse_hint_deep
-    else -> R.string.reanalyse_hint_auto
+private fun levelHintRes(level: EngineLevel): Int = when (level) {
+    EngineLevel.L2500 -> R.string.level_hint_2500
+    EngineLevel.L2700 -> R.string.level_hint_2700
+    EngineLevel.L2900 -> R.string.level_hint_2900
+    EngineLevel.L3100 -> R.string.level_hint_3100
+    EngineLevel.MAX -> R.string.level_hint_max
 }
 
 /**
- * Every [AnalysisStrength] as a radio row: its name, a one-line description, and the rough time on this phone when one
- * was measured (or "ready at once" when this game's evaluations at that strength are already on the phone).
+ * Every [EngineLevel] as a radio row: its name, a one-line description, and the rough time of the whole review on this
+ * phone when one was measured (or "ready at once" when this game's evaluations at that level are already on the phone).
  */
 @Composable
-private fun StrengthChooser(selected: AnalysisStrength, estimates: Map<AnalysisStrength, Long?>, onSelect: (AnalysisStrength) -> Unit) {
+private fun StrengthChooser(selected: EngineLevel, estimates: Map<EngineLevel, TimeEstimate>, onSelect: (EngineLevel) -> Unit) {
     Column(modifier = Modifier.padding(vertical = 8.dp)) {
         SectionHeading(stringResource(R.string.review_options_strength))
         Column(modifier = Modifier.selectableGroup()) {
-            for (strength in AnalysisStrength.entries) {
-                val estimate = estimates[strength]
+            for (level in EngineLevel.entries) {
+                val estimate = estimates[level]
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 56.dp)
-                        .selectable(selected = strength == selected, role = Role.RadioButton) { onSelect(strength) }
+                        .selectable(selected = level == selected, role = Role.RadioButton) { onSelect(level) }
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RadioButton(selected = strength == selected, onClick = null)
+                    RadioButton(selected = level == selected, onClick = null)
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text(text = stringResource(strengthLabelRes(strength)), style = MaterialTheme.typography.bodyLarge)
+                        Text(text = stringResource(levelLabelRes(level)), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text = stringResource(strengthHintRes(strength)),
+                            text = stringResource(levelHintRes(level)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -300,14 +310,22 @@ private fun StrengthChooser(selected: AnalysisStrength, estimates: Map<AnalysisS
     }
 }
 
-/** The time line under a strength, or null when this phone has not measured one (nothing is invented). */
+/**
+ * The time line under a strength: "About N min" when this phone measured every part, "Up to about N min" when part of it
+ * is only an upper bound (nothing measured yet, or Max), "ready at once" when cached.
+ */
 @Composable
-private fun estimateText(estimateMs: Long?): String? = when {
-    estimateMs == null -> null
-    estimateMs == 0L -> stringResource(R.string.review_options_strength_ready)
-    else -> when (val t = timeLeftFor(estimateMs)) {
-        ExportTimeLeft.Hidden, ExportTimeLeft.LessThanMinute -> stringResource(R.string.review_options_strength_under_minute)
-        is ExportTimeLeft.Minutes -> pluralStringResource(R.plurals.review_options_strength_minutes, t.minutes, t.minutes)
+private fun estimateText(estimate: TimeEstimate?): String? = when {
+    estimate == null -> null
+    estimate.ms == 0L -> stringResource(R.string.review_options_strength_ready)
+    else -> when (val t = timeLeftFor(estimate.ms)) {
+        ExportTimeLeft.Hidden, ExportTimeLeft.LessThanMinute ->
+            stringResource(if (estimate.upperBound) R.string.review_options_strength_under_minute_upto else R.string.review_options_strength_under_minute)
+        is ExportTimeLeft.Minutes -> pluralStringResource(
+            if (estimate.upperBound) R.plurals.review_options_strength_minutes_upto else R.plurals.review_options_strength_minutes,
+            t.minutes,
+            t.minutes,
+        )
     }
 }
 
@@ -357,7 +375,7 @@ private fun SideChooser(selected: SideChoice, onSelect: (SideChoice) -> Unit) {
 @Composable
 private fun ReviewOptionsScreenPreview() {
     val options = ReviewOptions(
-        strength = AnalysisStrength.STANDARD,
+        level = EngineLevel.L2900,
         side = SideChoice.WHITE,
         naturalWording = true,
         prepareVideo = true,
@@ -374,7 +392,14 @@ private fun ReviewOptionsScreenPreview() {
                 options = options,
                 wording = WordingOption.SWITCH,
                 voiceInstalled = true,
-                strengthEstimatesMs = mapOf(AnalysisStrength.QUICK to 40_000L, AnalysisStrength.STANDARD to 0L, AnalysisStrength.DEEP to 600_000L),
+                estimateInputs = ReviewEstimateInputs(
+                    positions = 34,
+                    plies = 33,
+                    speeds = ReviewSpeeds(),
+                    cachedLevels = setOf(EngineLevel.L2900),
+                    wordingUsable = true,
+                    kokoroInstalled = true,
+                ),
             ),
             options = options,
             onOptionsChange = {},

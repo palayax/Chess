@@ -971,12 +971,12 @@ private fun AnalysisStrengthCard(level: AnalysisLevel, onReanalyse: () -> Unit) 
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = stringResource(R.string.settings_depth),
+                text = stringResource(R.string.settings_level),
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.asHeading(),
             )
             Text(
-                text = stringResource(R.string.reanalyse_analysed_at, strengthLabel(level)),
+                text = analysedAtText(level),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -988,7 +988,18 @@ private fun AnalysisStrengthCard(level: AnalysisLevel, onReanalyse: () -> Unit) 
 }
 
 @Composable
-private fun strengthLabel(level: AnalysisLevel): String = when (level.strength) {
+private fun analysedAtText(level: AnalysisLevel): String {
+    val engine = level.engineLevel
+    return when {
+        engine == null -> stringResource(R.string.reanalyse_analysed_at, legacyStrengthLabel(level))
+        engine.isMax -> stringResource(R.string.reanalyse_analysed_at_max)
+        else -> stringResource(R.string.reanalyse_analysed_at_about, engine.code)
+    }
+}
+
+/** A game analysed before the Elo levels keeps its old name: Quick / Standard / Deep / Auto / Custom (N). */
+@Composable
+private fun legacyStrengthLabel(level: AnalysisLevel): String = when (level.strength) {
     AnalysisStrength.QUICK -> stringResource(R.string.settings_depth_quick)
     AnalysisStrength.STANDARD -> stringResource(R.string.settings_depth_standard)
     AnalysisStrength.DEEP -> stringResource(R.string.settings_depth_deep)

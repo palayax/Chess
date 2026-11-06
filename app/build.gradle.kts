@@ -83,6 +83,12 @@ android {
     }
     buildTypes {
         debug {
+            // -PpalayaSideBySide: a debug APK that installs NEXT TO the released app (another package id, so a phone
+            // holding the release-signed app accepts it). CI's downloadable APK only; local and test builds keep the id.
+            if (providers.gradleProperty("palayaSideBySide").isPresent) {
+                applicationIdSuffix = ".dev"
+                versionNameSuffix = "-dev"
+            }
             val base = modelBaseUrlOverride ?: defaultModelBaseUrl
             buildConfigField("String", "MODEL_BASE_URL", "\"$base\"")
             buildConfigField("String", "MODEL_MANIFEST_URL", "\"${base}models/models.json\"")

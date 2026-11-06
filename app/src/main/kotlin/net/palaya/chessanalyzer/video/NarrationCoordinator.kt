@@ -60,6 +60,12 @@ class NarrationCoordinator(
         val sentenceSynthesisCalls: Int,
         /** A single non-blocking, user-facing summary of what happened — null if nothing to report. */
         val notice: String?,
+        /**
+         * [ScriptSegment.index] of every segment that was read by the fallback voice (or stayed silent) because [primary]
+         * could not record it. Segments not reached because of a cancel are not in it. The caller remembers them, so a
+         * restart does not load the primary voice again for the same failure (RF).
+         */
+        val fallbackSegmentIndexes: List<Int> = emptyList(),
     ) {
         /** 0..100, or null if no sentence was ever attempted through [primary] at all. */
         val sentenceCacheHitRatePercent: Double?
@@ -89,6 +95,7 @@ class NarrationCoordinator(
 
         val results = ArrayList<NarrationSynthesizer.Result>(script.segments.size)
         var fallbackCount = 0
+        val fallbackIndexes = ArrayList<Int>()
         var primaryUsedCount = 0
         var segmentCacheHits = 0
         var sentenceCacheHits = 0
@@ -110,7 +117,7 @@ class NarrationCoordinator(
             var primaryFailure: String? = null
 
             if (primaryReady) {
-                val segmentKey = store.keyFor(segment.narration, primary.displayName, primary.narrationCacheFingerprint())
+                val segmentKey = NarrationKeys.segmentKey(segment, primary.displayName, primary.narrationCacheFingerprint())
                 val wholeSegmentCached = store.get(segmentKey)
                 val wholeSegmentInfo = wholeSegmentCached?.let(WavUtil::readHeader)
                 if (wholeSegmentCached != null && wholeSegmentInfo != null) {
@@ -141,11 +148,12 @@ class NarrationCoordinator(
                 if (fallbackReady == null) fallbackReady = fallback.prepare()
                 val fallbackFile = File(outputDir, "fallback_%03d.wav".format(segment.index))
                 val fallbackResult = if (fallbackReady == true) {
-                    fallback.synthesize(segment.narration, fallbackFile)
+                    fallback.synthesize(segment.narration, fallbackFile, segment.delivery.speed)
                 } else {
                     SynthesisResult.Failure("device TTS unavailable")
                 }
                 fallbackCount++
+                fallbackIndexes.add(segment.index)
                 when (fallbackResult) {
                     is SynthesisResult.Success ->
                         results.add(NarrationSynthesizer.Result.Synthesized(segment.index, fallbackResult.file, fallbackResult.durationMs))
@@ -176,7 +184,7 @@ class NarrationCoordinator(
                     (failureReasons.firstOrNull()?.let { " ($it)" } ?: "")
         }
 
-        Outcome(results, fallbackCount, primaryUsedCount, segmentCacheHits, sentenceCacheHits, sentenceMisses, notice)
+        Outcome(results, fallbackCount, primaryUsedCount, segmentCacheHits, sentenceCacheHits, sentenceMisses, notice, fallbackIndexes)
     }
 
     private data class SentenceAssembly(
@@ -210,7 +218,7 @@ class NarrationCoordinator(
         var misses = 0
 
         for ((i, sentence) in sentences.withIndex()) {
-            val key = store.keyFor(sentence, primary.displayName, fingerprint)
+            val key = NarrationKeys.sentenceKey(sentence, primary.displayName, fingerprint, segment.delivery)
             val cached = store.get(key)
             if (cached != null) {
                 hits++
@@ -218,7 +226,7 @@ class NarrationCoordinator(
                 continue
             }
             val tmpFile = File(outputDir, "primary_seg%03d_s%02d.wav".format(segment.index, i))
-            when (val attempt = primary.synthesize(sentence, tmpFile)) {
+            when (val attempt = primary.synthesize(sentence, tmpFile, segment.delivery.speed)) {
                 is SynthesisResult.Success -> {
                     misses++
                     rendered.add(SentenceAudio(store.put(key, attempt.file), sentence))
@@ -243,11 +251,13 @@ class NarrationCoordinator(
         for ((i, entry) in rendered.withIndex()) {
             pcmParts.add(WavUtil.readAsMono16(entry.file, targetSampleRate))
             if (i < rendered.size - 1) {
-                val gapMs = if (entry.text.trimEnd().endsWith("?")) {
+                val baseGapMs = if (entry.text.trimEnd().endsWith("?")) {
                     NarrationSynthesizer.QUESTION_GAP_MS
                 } else {
                     NarrationSynthesizer.SENTENCE_GAP_MS
                 }
+                // NC: the beat's gap scale, clamped (Delivery.gapMs); this WAV is what the player and the export use.
+                val gapMs = segment.delivery.gapMs(baseGapMs)
                 pcmParts.add(ShortArray(((gapMs * targetSampleRate) / 1000L).toInt().coerceAtLeast(0)))
             }
         }
@@ -281,7 +291,7 @@ class NarrationCoordinator(
             val fingerprint = provider.narrationCacheFingerprint()
             return script.segments.all { segment ->
                 segment.narration.isBlank() ||
-                    store.get(store.keyFor(segment.narration, provider.displayName, fingerprint)) != null
+                    store.get(NarrationKeys.segmentKey(segment, provider.displayName, fingerprint)) != null
             }
         }
     }

@@ -65,7 +65,9 @@ class PacingTiersTest {
     fun `a seventeen-move game lands between three and six minutes, not eleven`() {
         val (_, s) = script(RealGameFixture.chesscom)
         val minutes = s.totalEstimatedMs / 60_000.0
-        assertTrue("17-move game ran $minutes min, ${s.segments.size} beats", s.totalEstimatedMs in 180_000..360_000)
+        // NC (ANALYSIS_SPEC 9.10): the calmer delivery lengthens the speech by about 5 %, so the ceiling of the total
+        // (story plus pace time) is 6.25 min; the story itself is held to the 9.7 budget by the tests next to this one.
+        assertTrue("17-move game ran $minutes min, ${s.segments.size} beats", s.totalEstimatedMs in 180_000..375_000)
         assertTrue("was 70 beats before the rework; got ${s.segments.size}", s.segments.size <= 40)
     }
 
@@ -491,19 +493,27 @@ class PacingTiersTest {
         fun ply(san: String, color: Color) = report.annotations.first { it.san == san && it.color == color }.ply
         // 22.Qf6+ is the queen sacrifice, 21.Nxg7+ the knight sacrifice that opens the mate, and 18.Bd6
         // the move that leaves both rooks en prise (the rook sacrifice). A DWELL beat is at least nine
-        // seconds; a BRIEF one is about five.
+        // seconds; a BRIEF one is about five. The mating sequence is the exception since NS: its first move is
+        // announced ("mate in five") and the ones after it are said bare on purpose (three words and the hold), so
+        // what is pinned for them is the tier, not a length: both are FOUND_TACTIC beats of their own that carry the
+        // pace's key-move hold, which a BRIEF beat never does.
+        val bd6 = ply("Bd6", Color.WHITE)
+        assertTrue("rook sacrifice 18.Bd6 got ${spentOn(s, bd6)}ms", spentOn(s, bd6) >= 9_000)
         for ((label, p) in listOf(
             "queen sacrifice 22.Qf6+" to ply("Qf6+", Color.WHITE),
-            "knight sacrifice 21.Nxg7+" to ply("Nxg7+", Color.WHITE),
-            "rook sacrifice 18.Bd6" to ply("Bd6", Color.WHITE)
+            "knight sacrifice 21.Nxg7+" to ply("Nxg7+", Color.WHITE)
         )) {
-            assertTrue("$label got ${spentOn(s, p)}ms", spentOn(s, p) >= 9_000)
+            val beat = s.segments.single { it.ply == p }
+            assertEquals("$label: ${beat.narration}", SegmentKind.FOUND_TACTIC, beat.kind)
+            assertTrue("$label has no key-move hold", beat.holdAfterMs >= 1_000)
         }
+        // Black's 20...Na6 already said "there is a forced mate in five", so the first mating move is said bare.
+        assertTrue(s.segments.any { it.ply == ply("Na6", Color.BLACK) && it.narration.lowercase().contains("forced mate in") })
         // Slower speech squeezes the budget harder; the protected beats still stand.
         val (_, slow) = script(RealGameFixture.immortal, NarrationOptions(speechWpm = 110))
         for (san in listOf("Qf6+", "Nxg7+")) {
             val p = report.annotations.first { it.san == san && it.color == Color.WHITE }.ply
-            assertTrue("$san at 110 wpm got ${spentOn(slow, p)}ms", spentOn(slow, p) >= 9_000)
+            assertEquals("$san at 110 wpm", SegmentKind.FOUND_TACTIC, slow.segments.single { it.ply == p }.kind)
         }
     }
 
@@ -513,7 +523,12 @@ class PacingTiersTest {
             for (wpm in listOf(165, 110)) {
                 val (report, s) = script(g, NarrationOptions(speechWpm = wpm))
                 for (a in report.annotations.filter { it.classification == MoveClassification.BRILLIANT }) {
-                    assertTrue("$name ply ${a.ply} ${a.san} at $wpm wpm got ${spentOn(s, a.ply)}ms", spentOn(s, a.ply) >= 9_000)
+                    // DWELL length used to be pinned as nine seconds of speech; since NS the brilliancy flavour is a
+                    // single exclamation and the beat is a few seconds shorter, so what is pinned is that the beat is
+                    // the told-in-full one: it says the move is brilliant, and it holds the position afterwards.
+                    val told = s.segments.filter { it.ply == a.ply }
+                    assertTrue("$name ply ${a.ply} ${a.san} at $wpm wpm: ${told.map { it.narration }}", told.any { "brilliant" in it.narration })
+                    assertTrue("$name ply ${a.ply} ${a.san} at $wpm wpm got ${spentOn(s, a.ply)}ms", spentOn(s, a.ply) >= 6_000)
                 }
             }
         }

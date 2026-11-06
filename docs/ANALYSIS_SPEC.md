@@ -576,7 +576,12 @@ advantage" from 95 (a MISS needs 90 win-percent or a mate before the move, §2).
 
 ## 8. Analysis engine settings
 
-- Strength presets in Settings: **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**,
+- **Engine levels (owner, 2026-10-14; §8.6).** New analyses use an Elo level, **2500 / 2700 / 2900 / 3100 (default) /
+  Max**, with a hard time budget for the whole engine stage (5 minutes for any game on any phone). Quick / Standard /
+  Deep / Auto below are **legacy**: they are no longer offered, but a game analysed with one is still read, resumed and
+  reopened from its cache exactly as before (a stored depth 6..30 is a legacy depth; a stored value of 1000 or more is a
+  level code).
+- Legacy strength presets (no longer offered): **Quick = depth 12, Standard = depth 14 (default), Deep = depth 18**,
   and **Auto** = every position at Standard, then the critical positions again at Deep (§8.5)
   (`SettingsLogic.AnalysisStrength`). MultiPV 3, Threads `min(cores, 4)`, Hash 96 MB, one position at
   a time, the hash kept from position to position. A stored custom depth (6..30, from older versions)
@@ -754,9 +759,39 @@ reaches the end before the report. The status line says "Taking a deeper look at
 N of M" during the second pass ("Move x of y" before it); "Thinking deeper … depth d of 18" works as for
 any search.
 
+**Elo levels (§8.6).** For a level the estimate is **min(positions left x the level's node budget x ms per node, the
+engine budget left)**; Max has no node budget, so it is min(positions left x the 8 s ceiling of §8.6, the budget left), shown
+from the first position. The speed is
+the **last 8 searched positions** (`RecentSpeed`), not the whole run, so a phone that throttles when it heats is tracked
+(the whole-run average lagged behind). The "thinking deeper … depth d of D" line is not shown for a level (it has no
+target depth).
+
+**Overall estimate (Review options screen, processing screen).** The Review options screen shows, per level, the time of the
+**whole review** on this phone, computed from the options as they are edited at that moment (switching "Prepare the video
+now", Natural wording or the voice changes the stages of the plan, so the figures follow; `levelEstimates`). The engine stage
+is as above (`levelEstimateMs`; cached evaluations at that level count 0). Every other stage of the plan adds its measured
+time (`ReviewSpeeds.estimateMs`) or, **when this phone never measured it, the stage's bound** (never 0): polishing 90 s,
+writing the narration 90 s with wording (10 s without), recording up to the review deadline (§8.6). The sum is capped at
+`REVIEW_TOTAL_BUDGET_MS` (10 min).
+
+**Before this phone has measured anything** the engine part is an **upper bound** instead of nothing: min(positions x the
+level's nodes x a deliberately slow prior of **250,000 nodes per second** (`ENGINE_PRIOR_MS_PER_NODE` = 1/250 ms per node), the
+engine budget); Max is min(positions x 8 s, the budget). A figure that contains any bound (an unmeasured stage, the prior,
+Max, or a sum cut to the deadline) is worded **"Up to about N min for the whole review"**; only a figure made of measurements
+(and cached zeros) says "About N min for the whole review on this phone" (`TimeEstimate.upperBound`). The prior is chosen to
+be slower than any phone the app supports, so the bound holds and the first review can only finish sooner.
+`ReviewSpeeds.withEngine` blends the stored engine speed **0.7 latest run / 0.3 earlier** (the latest run says most about
+the next one). The processing screen's overall "about N min left" uses the engine stage's own estimate for the whole
+stage, including legacy Auto's second pass (it used to leave the second pass out and to stop updating once the first
+pass was done); it stays hidden until every stage still to come has a measurement.
+
 The estimate and the "thinking deeper" line are a polite live region; the ticking clock is not.
 
 ### 8.5 Auto-depth: deeper on the critical moves (owner, 2026-10-11)
+
+> **Legacy: no longer offered (owner 2026-10-14: Auto took half an hour on a Pixel 8; the Elo levels of §8.6
+> replace it).** The code path stays so that an old pending Auto request can resume and a game analysed with Auto
+> reopens from its cache; Settings, the Review options screen and the Summary never offer it again.
 
 The owner asked for "different moves analyzed with different depth based on complexity and engine scoring".
 **Auto** (`AnalysisStrength.AUTO`, stored as depth 14 + `autoDepth`) does that in two passes:
@@ -891,6 +926,78 @@ the two estimate constants: **EXPECTED_DEEP_FRACTION 0.24** (24% calibration, 22
 and a deepened one again when its deep result replaces the first one.
 
 ---
+
+### 8.6 Engine levels in Elo and the game time budget (owner, 2026-10-14)
+
+The owner: a review must take up to 10 minutes on a Pixel 8 (Auto took half an hour), the depth choices should be Elo
+levels "like DroidFish" (2500 up to the engine's maximum), and the time estimate was far from the truth.
+
+**Levels** (`ui/model/EngineLevel.kt`; the stored `depth` Int holds the code):
+
+| Level | Code | Node budget per position (all threads, MultiPV 3) |
+|---|---|---|
+| About 2500 | 2500 | 20,000 |
+| About 2700 | 2700 | 60,000 |
+| About 2900 | 2900 | 180,000 |
+| About 3100 (default) | 3100 | 600,000 |
+| Max | 4000 | none: the game time budget and a per-position ceiling of 8 s decide |
+
+Every level searches with `go depth 60 nodes N movetime T` (depth 60 = no depth limit in practice; Max omits `nodes`).
+
+**[approximation] The Elo labels are not measured.** The node counts come from extrapolation, not from a gauntlet:
+a hobbyist fixed-node table for Stockfish 16.1 (single thread, MultiPV 1: 512 nodes about 1709, up to 8192 nodes about
+2779; talkchess thread 83654), continued with the diminishing returns Stockfish's own discussion #3402 / the wiki
+"Useful data" give (about 200, then 130, then 90 Elo per doubling), and multiplied by about 4 because this app searches
+MultiPV 3 and 4 threads (lazy SMP wastes nodes). Treat the labels as "about", plus or minus 150 Elo. They should be
+measured with a gauntlet of the app's own binary at these node counts before anyone quotes them as strengths. Why not
+`UCI_Elo`: in Stockfish it does not reduce search work, it makes the engine pick a worse move at the end of a full-strength
+search (`Skill::time_to_pick`, `search.cpp`), so it would be as slow as full strength and would make the analysis worse
+than its label. DroidFish also analyses at full strength and uses `UCI_Elo` only when the engine plays.
+
+**Game time budget** (`GameTimeBudget`, `GAME_ENGINE_BUDGET_MS` = 300,000 ms): the whole first pass gets 5 minutes of
+engine time whatever the game's length, which is what keeps a whole review near 10 minutes on a slow phone (the rest goes
+to wording, narration and the voice). Position by position the search gets
+`movetime = max(250 ms, (budget - spent) / positions left x 1.5)`, and never more than the time left when it is the
+last position. **Max has a ceiling of 8 s per position** (`MAX_LEVEL_MOVETIME_CEILING_MS`; EL2): with no node limit it used
+to spend the whole 5 minutes on any game, a 20-move game now takes about 160 s at the most. A position that ends early on its node budget leaves its time to the later ones; terminal positions
+(checkmate, stalemate) are not searched and cost nothing. If every search used its whole movetime the total would still
+be at most the budget plus the 250 ms minimums (host-tested). A resumed run (§8.3) gets the budget's share of the
+positions it still has to do. Legacy depths have no game budget.
+
+**The whole-review deadline (EL2).** The engine budget bounds only the first stage. The whole review (engine, wording,
+narration, voice) must be over **10 minutes** (`REVIEW_TOTAL_BUDGET_MS`) after the run started (`runAnalysis`'s start, on the
+monotonic clock), so every later stage is bounded too:
+- **Wording** (polishing the key moments; rewording the narration beats) gets a total budget per stage of
+  **min(90 s, time to the deadline minus a reserve for the stages after it)** (`wordingStageBudgetMs`; the reserve is 10 s for
+  writing the narration script and 120 s for the recording, each only when planned). When it runs out the stage stops and the
+  texts it did not reach keep their original, verified wording: the same outcome as one 30 s item that timed out
+  (`RephraseService`'s per-item timeout stays). What was reworded stays cached.
+- **Recording the voice** stops at the deadline. The segments recorded stay; the rest is recorded **in the background after
+  the Summary opens** (`prepareNarrationInBackground`, the Video screen's own path: one recording at a time, the Video screen
+  shows the running recording, or "Watch now" plays the rest in the device voice).
+- A stage cut short by its budget is shown as skipped on the checklist and does **not** feed the stage-speed store (it
+  measured only part of the work).
+- The diagnostic log has one line per stage: its time, its budget and whether it hit it, and a line for the whole review.
+The deadline is a ceiling on the planned stages; the engine budget plus the two wording budgets (5 + 1.5 + 1.5 min) leave the
+recording its 2-minute reserve inside it. Not device-verified: no Pixel 8 timing exists yet.
+
+**Cache key.** `SHA-256(PGN, code, MultiPV, "lvl<code>:n<nodes>:g<game budget>")`, for example
+`lvl2900:n180000:g300000` (Max: `n0`). The dynamic per-position movetime is not in the key, and a changed game budget
+re-analyses.
+
+**Capped positions.** A level has no depth to reach, so a position is never "capped by depth". `PositionEval.timeCapped`
+(cache JSON key `timeCapped`, absent = false) is set when the clock ended a level search before it spent 95% of its node
+budget (and it ran at least 80% of its movetime, so a search that stopped for another reason is not flagged). Max is
+defined by time and is never capped. `PositionEval.isCapped` = depth-capped or `timeCapped`, so the Summary's "searched
+less deeply" line keeps working.
+
+**Legacy mapping** (`EngineLevel.forLegacyDepth`), used only to pre-select a level for a re-analysis of an old game and to
+migrate the Settings default (the stored game and its cache are not rewritten): depth 12 or less -> 2700, 13..14 -> 2900,
+18, deeper and Auto -> 3100.
+
+**Diagnostics.** The "analysis start" line names the level, its node budget, the game budget, the minimum per position and
+the native Stockfish variant (`StockfishEngine.nativeVariant`; the engine's variant is also logged as "engine ready" once
+the engine has loaded).
 
 ## 9. Narration significance and move sequences
 
@@ -1090,6 +1197,7 @@ this order and the first that matches wins:
 | a found tactic with `confidence >= 0.95` (`FOUND_TACTIC_CONFIDENCE`; the §9.6 gate already requires it) | **DWELL** |
 | significant (§9.2: swing `>= significanceThresholdCp`, or a member of a §9.3 sequence — the plies where the plan changes) but none of the above | **BRIEF** |
 | anything else: routine best/excellent/good moves with a small swing | **SKIP** |
+| a phase boundary (§9.9), whatever the rows above said (not in `MISTAKES_ONLY`, and not inside the opening book) | **BRIEF** at least; the length budget never takes it to SKIP |
 
 A missed tactic **wins material or mates** when its own `materialSwing >= 150`
 (`PUZZLE_MIN_SWING_CP`), or it is a mating motif (`BACK_RANK_MATE`, `SMOTHERED_MATE`, `MATE_NET`,
@@ -1101,11 +1209,15 @@ worth nothing by itself while the line it opens wins a rook).
 
 - **SKIP** — no beat of its own. A run of **three or more** consecutive skipped plies becomes one
   "skip ahead" connective; one or two get a lead-in ("two moves on") on the next beat.
-- **BRIEF** — one or two sentences, and the second one has to *say* something: an inaccuracy gets
-  the better move; any other move gets the tactic it carries, or what it did to the evaluation
-  ("White has gone from clearly better to winning", or "The evaluation moves in White's favour").
-  Never a pleasantry such as "Top of the engine's list" or "No complaints": those survive only in
-  `EVERY_MOVE`, the complete walkthrough, which is never budget-demoted. No excursion.
+- **BRIEF** — the move, and a second sentence only when it *says* something: an inaccuracy gets
+  the better move; any other move gets the tactic it carries, or the phase boundary it caused (§9.9), or a
+  short remark on the evaluation when the move changed the mover's win-percent by at least
+  `REMARK_MIN_SWING` (4) points ("That helps White", "It costs Black a little"; before NS: "The evaluation moves
+  against White", and "That's losing turning into decisively lost" for a move that crossed a band by a hair).
+  A move that did less than that is the move alone (a swing of 50 cp in a position already decided still earns its
+  beat, §9.2). Never a pleasantry such as "Top of the engine's list" or
+  "No complaints": those survive only in `EVERY_MOVE`, the complete walkthrough, which is never budget-demoted.
+  No excursion.
 - **DWELL** — the fuller explanation (the error beat, the found-tactic beat, the threat beat). A
   missed tactic still gets its reveal and a variation, but **at most 4 plies**
   (`DWELL_EXCURSION_PLIES`) and **no puzzle pause**.
@@ -1169,14 +1281,16 @@ re-measuring until it fits:
 4. only then **the turning point itself**: FULL to DWELL, then DWELL to BRIEF (one beat, no puzzle, no
    walk, no separate "turning point" segment). A protected move and the checkmate stay at DWELL;
 5. only then **the structure around the story**, one level per round (`ScriptBuilder.trim`):
-   1. all lessons but the first, and no textbook offer after it;
-   2. the rating and error-count sentences of the summary, and the caveat about the ratings;
+   1. the textbook offer after the takeaway (since NS there is one takeaway, §9.9);
+   2. the outro's sentence about the decisive moment;
    3. the opening summary;
    4. the intro's hook sentence;
-   5. the last lesson.
-   The result and the players in the intro, the accuracy line and the mating beat are never trimmed.
+   5. the takeaway.
+   The players in the intro, the stakes and the ending sentences, the outro's "how it ended" sentence and the
+   mating beat are never trimmed. (Before NS level 1 dropped all lessons but the first and level 2 the rating and
+   error-count sentences of the summary and the caveat about the ratings; the summary no longer speaks them, §9.9.)
 
-The checkmate and every protected beat are never demoted below DWELL, and at least one body beat always
+The checkmate, every protected beat and every phase boundary's beat (BRIEF) are never demoted further, and at least one body beat always
 survives. Because protected beats are exempt, a game rich in brilliant and great moves may
 legitimately **overrun the budget** by the cost of those beats; the budget is not raised for that, and
 nothing is added to fill the space either. The lesson lead counts its lessons truthfully ("Three
@@ -1410,7 +1524,161 @@ jumped. Taken: the pause on the position before the key move with the move's squ
 appearing only with the move, the hold on the result, and a steady per-move rate for a sequence with no
 skipped replies. Our own timing values and words; no assets.
 
+### 9.10 Delivery (NC): per-beat speed and pauses
+
+The owner heard the narration "read with the same intonation". Parts A and B fixed the words; this fixes how
+they are said. Each beat has a `Delivery(speed, gapScale)` (`core/.../narration/Delivery.kt`, field
+`ScriptSegment.delivery`, default speed 1 and gapScale 1 = the delivery before NC). **The words never change.**
+
+**Assignment.** `DeliveryPlan.apply` runs at the end of `ScriptBuilder.build`, on the finished story and before
+the §9.7 budget measures it. It is a pure function of each segment (kind, classification, board, narration) and of
+the next segment: no clock, no randomness. First matching rule wins:
+
+| Rule | Beats | speed | gapScale |
+|---|---|---|---|
+| none | blank narration | 1 | 1 |
+| weighty | a played move that gives checkmate (`PlayMove.san` ends in `#`), a BRILLIANT move; not a move of a line | 0.95 | 1.5 |
+| brisk | a BEST_LINE move, a played-out MISSED_TACTIC move (`PlayMove`), a FORCED move, a later move of an announced forced mate (`ScriptSegment.mateStep`, §9.9: the moves said bare) | 1.08 | 0.8 |
+| cards | intro (it carries the §9.9 cold open), opening summary, outro summary, lessons (the §9.9 takeaways) (calm even right before a key move) | 0.94 | 1.25 |
+| set-up | a PUZZLE_PROMPT; the beat right before a key move (an error: BLUNDER/MISTAKE/MISS; a found tactic; a mate; a BRILLIANT or GREAT move) when it is not itself a key move (the moves of a sequence keep the normal pace) | 0.90 | 1.4 |
+| quiet | a NORMAL_MOVE with a verdict and a swing of at most 25 cp | 0.94 | 1.25 |
+| normal | everything else: normal moves, a phase-shift sentence (inside a move's beat it takes that beat's delivery; a standalone phase beat is a NORMAL_MOVE hold and so normal, or set-up when a key move follows), chapter/skip-ahead hops, errors, found tactics (including the beat that announces a forced mate), the turning point | 1 | 1 |
+
+The §9.9 beats map as: cold open = INTRO (calm); phase shift = normal; mate announcement (the move that starts the forced mate) = normal; the bare moves that follow = brisk; the final "Game over, X wins!" mating move = weighty; takeaways = lessons (calm).
+
+Speeds stay within 0.90 to 1.10 (`Delivery` refuses others; Kokoro makes artefacts outside it). The best line's
+spoken moves (added by `paced`, §9.8) are brisk too; its "back to the game" sentence is normal.
+**These numbers are a first guess, chosen without listening; tune them by ear.** Measured on the host (estimates
+only): the 17-move Opera Game's total grew from about 5.7 to 5.9 min at the Normal pace (6.01 at the default), the
+Immortal Game's story from 424 s to 434 s of its 442 s budget; the story still fits the §9.7 budget everywhere.
+
+**Where it acts.** (1) Speech: `NarrationVoiceProvider.synthesize(text, file, speed)`; Kokoro passes it as the
+per-call `speed` of `OfflineTts.generate` (effective length = lengthScale / speed, no reload), the device voice
+multiplies its speech rate. (2) Gaps: the silence stitched between a segment's sentences is the base gap (220 ms,
+320 ms after a question) times `gapScale`, clamped to 120..600 ms (`Delivery.gapMs`). The stitched segment WAV is what
+the player and the exporter play, so neither computes gaps itself; `TimelineBuilder`, `SegmentFrameBuilder`, the
+exporter's PCM track and the player still honour `leadIn` and use the real clip length, unchanged. (3) Estimate:
+`estimateSpeechMs(text, wpm, delivery)` = words at `wpm` divided by `speed`, plus the 240 ms sentence pauses times
+`gapScale`; the §9.7 budget, the pace holds (§9.8) and the rephrase cap measure the story as it will be spoken. The
+pace is still laid over the finished story and does not touch the delivery, so every pace has the same words,
+deliveries and cached clips.
+
+**Cache key.** The delivery is different audio for the same words, so it is part of the narration key, built only by
+`video/NarrationKeys.kt`: a sentence clip's key text gets `/spd0.94` appended (two decimals, `Locale.ROOT`) when its
+speed is not 1; a segment clip's key text gets that and `/gap1.25` when its gap scale is not 1 (the stitched gaps are
+in it). A neutral delivery appends nothing, so clips made before NC stay valid. Every caller goes through it
+(`NarrationCoordinator` sentence and segment keys and `isFullyPrepared`, `NarrationPreparer.missingSegments`, the
+player); the desktop producer does not use `ScriptSegment.delivery` yet and keeps its own 220/320 ms gaps.
+
 ---
+
+### 9.9 The story of the game (NS, owner's phone test 2026-10-13)
+
+The owner: "The narration voice is great but the script is pretty terrible: it's not clear what is going on
+during the game, everything is read with the same intonation." The script told every move with the same shape
+("White plays X. One clause."), never said who was better or why, and read statistics. NS (narration story +
+rhythm) gives it an arc and a cadence. **Every sentence it adds is a verified claim**: the generator says a thing
+only when the engine's recorded numbers or the board prove it, `scripts/audit_commentary.py story` re-derives each
+one with python-chess and the recorded engine data (a second implementation of the phases and the arc below), and
+`mutate-story` breaks one claim of one sentence at a time and shows every break flagged.
+
+**Phases (`core.analysis.GamePhases`, pure and deterministic).** A phase is a stretch of the game in which the same
+side holds the same standing. The input is the White win-percent of every position (`GameReport.evalGraph`, position
+`k` = the board after ply `k`). Seven standings from White's point of view, by the cut-offs of the spoken evaluation
+bands (§9.3a) folded to three levels: *edge* 57, *clear* 68, *decisive* 82 win-percent for the side that is ahead
+(mirrored for Black; "decisively winning" is folded into "winning"), else *balanced*. Then:
+
+1. **Hysteresis.** The standing changes only when the win-percent has gone `MARGIN` = 3 points past the edge of the
+   band the game is in, so a position sitting on a cut-off does not flicker.
+2. **Runs.** A run of positions in one standing is a phase.
+3. **Merging.** A phase shorter than `MIN_LENGTH` = 4 positions is not one (the last phase: `MIN_LAST_LENGTH` = 2, so a
+   game that ends in a swing can say so). The shortest is merged first, the earlier on a tie: a dip between two equal
+   standings joins both; a short stretch on the way from one standing to another (a transit) joins the standing it leads
+   to, so the boundary stays on the move that caused it; the first phase joins the second.
+
+A **phase shift** is the boundary between two phases; it is *at* ply `p` when position `p` is the first of the new phase.
+A shift is told at its ply: the beat of that ply carries one sentence (`PhaseTurn`: "White built a clear edge",
+"Black fought back to level", "The game turned: Black was winning now", "White's grip loosened: only clearly better
+now"), or, when the ply's own beat tells the standing in its own words (an error beat does), nothing more is said. A
+shift the plan had made a SKIP is promoted to BRIEF, the budget never takes it away, and a shift inside the opening
+book is not told (the opening summary says where the book left the game). It replaces the "The evaluation moves
+against X" line, which was said about fifteen times in game01.
+
+**The cause of a shift**, said only when the boards prove it, in this order, over the shift's ply and the one before:
+the side that lost ground played a MISTAKE, MISS or BLUNDER (", after Black's blunder on move 11"; the largest loss
+wins); the side that gained ground started a forced mate (the engine's distance, ", with a forced mate in three"); the
+side that gained ground came out ahead on material across those two moves, settled by the opponent's best take-back and
+named by the 40 cp rule or as "the exchange" (§6.1, ", after winning a knight"). Otherwise the sentence states the new
+standing and no reason.
+
+**The arc (`core.narration.StoryArc`).** The cold open's one sentence about the stakes, read off the phases and the result,
+for a game of at least 16 plies, and only when one of these holds (in this order):
+
+| Kind | Condition | Said |
+|---|---|---|
+| comeback | the loser held a clear standing (level 2 or more) for at least 6 moves in a row, consecutive phases counted together, N = positions / 2 | "Black won, but for 16 moves this was White's game." |
+| took over | the loser never led; the winner led in every phase from some phase to the end, over at least 8 positions; M = the move the first of them began at | "White was on top from the opening and never let go." (M <= 6) / "It was level until move 11, and then White took over for good." |
+| tight draw | a draw in which no phase is above an edge | "Neither side ever got more than a slight edge." |
+| wasted lead | a draw in which a side was clearly better for at least 6 moves in a row | "White was clearly better for 12 moves, but it ended in a draw." |
+
+Any other game keeps the plain result sentence. The ending follows ("It ended in mate on move 33." / "It lasted 40
+moves." / the draw sentence), then the hook; the hook says only that the largest swing is at move N
+("swings the whole game" from a loss of 30, "matters more than any other" from 12, "The biggest slip is small" below):
+the old "closer than the result makes it look" claimed something the data did not hold and is gone. The opening
+summary ends with where the book left the game: "Theory runs out around move 4, and the position is about level."
+(the band of the board after the last book move).
+
+**An error is told as cause and consequence** (`errorBeat`, and the beat that resumes the game after a detour): the
+opener, the move, what it let in, how the standing changed (the mover's own bands, §9.3a), the better move and what it did.
+*What it let in* is stated only as one of: the engine's forced mate for the opponent after the move ("That allows a forced
+mate in four."), or the engine's best answer to it when that answer is a capture the static exchange nets at least a pawn
+by and is not the other half of a trade ("Black takes the bishop on b five with the pawn, and now White has queen takes
+the rook on a one, with check, winning a rook."). *What the better move did*: it started a forced mate for the mover
+(the engine's distance, ", forcing mate in three"), or along the first 4 plies of the engine's line it nets at least a pawn
+settled (", winning a rook"), else the move alone. "Which gives nothing away" is gone: it was a claim about the engine's
+evaluation of a position that is rarely level. A missed tactic that gets no pause asks its question once ("Can you see
+what White missed?"), after a short rewind cue; the viewer's pause is still the puzzle prompt of a FULL moment. The
+excursion's moves are said bare unless a move has a reason of its own (a capture, a check answered, the line first
+being up material, the tactic's own move); the standing at the end of a line that wins nothing is the engine's
+evaluation of the best play ("The line ends there, with Black clearly worse"). The turning point says that it was
+(a loss of 12 or more: "the turning point", else "the biggest slip"), that no other move cost as much, and what the
+phases prove followed: "From there, White never gave the lead back." (every phase from the move's is led by the
+other side) or "It wasn't over: Black was back to level by move 31."
+
+**A mating sequence is announced once.** The first told move of a side that has a forced mate says it with the
+engine's own distance, counting that move ("This is a forced mate in three."); the moves after it, while the same side
+keeps its mate and at most one move apart, are said bare ("Queen to f six, with check."); the checkmate ends it ("... and
+that is checkmate. Game over. White wins!"). The old script said "forced mate" three times.
+
+**A skipped stretch** is described only by what the board proves: no capture and no check and no ply that moved the White
+win-percent by more than 5 ("A few quiet moves follow, no captures and no checks, and we pick it up at move 14."), a
+capture by each side ("There are trades along the way"), or just the jump. "Development and shuffling" and "Nothing
+breaks" are gone.
+
+**The finish.** The outro says how the game ended ("Black won by checkmate on move 33.") and, when the largest swing
+lost 12 or more and changed the mover's band, which move decided it ("The decisive moment was White's blunder on move 28,
+which took White from about level to losing."); otherwise "There was no single decisive mistake." No accuracy, no rating
+estimate and no error count is spoken: they stay on the final-numbers card and the Summary screen. There is **one
+takeaway**, tied to the viewer's worst error (else the error of the largest swing): a missed tactic ("At move 28, White
+missed an x-ray. Rook to e one was the move." and the habit for that motif), a move that let something in ("Move 28 let
+Black in. It allowed a forced mate in three." and "Before you commit, ask one question: what does this let them do
+next?"), or what the move gave up with the habit for the standing it was played from; "White got mated at the end, but
+the mate wasn't the mistake. Move 28 was." when that is the case.
+
+**Rhythm.** The sentences differ in length on purpose: bare moves of two to four words (a mating step, an excursion move
+with no reason of its own, a mating move), comma-linked cause and effect where the data gives one, and an inaccuracy told
+in two shapes that alternate ("White plays X, a small slip. Instead, Y." / "White plays X. Y was the move."). A question is
+asked only where it is true that something was missed (above). An exclamation mark is used for exactly two things, the
+checkmate ("Game over. White wins!") and a Brilliant move ("A brilliant move! ..."). A lead-in is never glued to an
+interjection ("Two moves on, Stop."): the pivot beats take none. Phrasings still rotate through `PhrasePicker`, a pure
+function of the report; `thinned` says a remark on every second occurrence only ("No material changes hands yet, but the
+pressure is on."). Nothing here changes the §9.7 budget or the §9.8 pace.
+
+**Measured (Stockfish 19, MultiPV 3, recordings of `core/src/test/resources/pacing`, NORMAL pace, no side).** Story time
+against the old script: the Immortal Game 396 s (463 s), Byrne-Fischer 437 s (576 s), game01 597 s (616 s), the Opera
+Game 253 s (342 s), the scholar's mate 50 s (54 s). Everything told is shorter, so fewer beats are demoted by the budget
+and the key-move lead-ins of §9.8 are more of the total; one consequence is that game01 has no key moment left that
+only names the better move, so it plays no best line (`BestLineVideoTest`).
 
 ## 10. Tactic reference library
 

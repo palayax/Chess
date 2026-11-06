@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import net.palaya.chessanalyzer.core.narration.Delivery
 import net.palaya.chessanalyzer.core.narration.VideoScript
 
 /**
@@ -217,7 +218,13 @@ class NarrationSynthesizer(context: Context) {
      * [segmentIndex] is only carried through to the returned [Result] for the caller's bookkeeping
      * — pass `-1` for an ad-hoc call not tied to a script segment.
      */
-    suspend fun synthesizeSegment(text: String, outFile: File, estimatedMs: Long, segmentIndex: Int = -1): Result {
+    suspend fun synthesizeSegment(
+        text: String,
+        outFile: File,
+        estimatedMs: Long,
+        segmentIndex: Int = -1,
+        delivery: Delivery = Delivery.NEUTRAL,
+    ): Result {
         val engine = tts
         if (!engineUsable || engine == null) {
             return Result.Silent(segmentIndex, estimatedMs.coerceAtLeast(400L), "TTS engine/voice unavailable")
@@ -225,7 +232,7 @@ class NarrationSynthesizer(context: Context) {
         if (text.isBlank()) {
             return Result.Silent(segmentIndex, estimatedMs.coerceAtLeast(400L), "empty narration")
         }
-        return synthesizeOne(engine, segmentIndex, text, estimatedMs, outFile)
+        return synthesizeOne(engine, segmentIndex, text, estimatedMs, outFile, delivery)
     }
 
     /**
@@ -242,7 +249,7 @@ class NarrationSynthesizer(context: Context) {
         for (segment in script.segments) {
             if (cancelled.get()) break
             val outFile = File(outputDir, "segment_%03d.wav".format(segment.index))
-            val result = synthesizeSegment(segment.narration, outFile, segment.estimatedSpeechMs, segment.index)
+            val result = synthesizeSegment(segment.narration, outFile, segment.estimatedSpeechMs, segment.index, segment.delivery)
             results.add(result)
             _progress.value = Progress(results.size, script.segments.size, segment.caption)
         }
@@ -280,12 +287,13 @@ class NarrationSynthesizer(context: Context) {
         text: String,
         estimatedMs: Long,
         outFile: File,
+        delivery: Delivery,
     ): Result {
         val sentences = splitIntoSentences(text)
         return if (sentences.size <= 1) {
-            synthesizeSingleUtterance(tts, segmentIndex, text, estimatedMs, outFile)
+            synthesizeSingleUtterance(tts, segmentIndex, text, estimatedMs, outFile, delivery.speed)
         } else {
-            synthesizePaced(tts, segmentIndex, sentences, estimatedMs, outFile)
+            synthesizePaced(tts, segmentIndex, sentences, estimatedMs, outFile, delivery)
         }
     }
 
@@ -312,6 +320,7 @@ class NarrationSynthesizer(context: Context) {
         sentences: List<String>,
         estimatedMs: Long,
         outFile: File,
+        delivery: Delivery,
     ): Result {
         val workDir = outFile.parentFile ?: appContext.cacheDir
         val perSentenceEstimate = (estimatedMs / sentences.size.coerceAtLeast(1)).coerceAtLeast(300L)
@@ -325,7 +334,7 @@ class NarrationSynthesizer(context: Context) {
                 continue
             }
             val tmpFile = File(workDir, "${outFile.nameWithoutExtension}_s$i.wav")
-            val result = synthesizeSingleUtterance(tts, segmentIndex, sentence, perSentenceEstimate, tmpFile)
+            val result = synthesizeSingleUtterance(tts, segmentIndex, sentence, perSentenceEstimate, tmpFile, delivery.speed)
             rendered.add(SentenceAudio((result as? Result.Synthesized)?.wavFile, sentence))
         }
 
@@ -345,7 +354,7 @@ class NarrationSynthesizer(context: Context) {
             pcmParts.add(samples)
             entry.file?.delete()
             if (i < rendered.size - 1) {
-                val gapMs = if (entry.text.trimEnd().endsWith("?")) QUESTION_GAP_MS else SENTENCE_GAP_MS
+                val gapMs = delivery.gapMs(if (entry.text.trimEnd().endsWith("?")) QUESTION_GAP_MS else SENTENCE_GAP_MS)
                 pcmParts.add(ShortArray(silenceSampleCount(gapMs, targetSampleRate)))
             }
         }
@@ -380,6 +389,7 @@ class NarrationSynthesizer(context: Context) {
         text: String,
         estimatedMs: Long,
         outFile: File,
+        speed: Float = 1f,
     ): Result {
         val utteranceId = "seg-$segmentIndex-${outFile.name}"
         val done = CompletableDeferred<Boolean>()
@@ -400,6 +410,8 @@ class NarrationSynthesizer(context: Context) {
 
         return try {
             tts.setOnUtteranceProgressListener(listener)
+            // NC: the beat's speed multiplies the base rate chosen at engine setup, set before every utterance.
+            runCatching { tts.setSpeechRate(SPEECH_RATE * speed.coerceIn(Delivery.MIN_SPEED, Delivery.MAX_SPEED)) }
             val queued = tts.synthesizeToFile(text, Bundle(), outFile, utteranceId)
             if (queued != TextToSpeech.SUCCESS) {
                 return Result.Silent(segmentIndex, estimatedMs.coerceAtLeast(400L), "synthesizeToFile rejected the request")

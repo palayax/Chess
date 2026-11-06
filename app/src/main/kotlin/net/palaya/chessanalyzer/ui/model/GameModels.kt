@@ -155,6 +155,8 @@ data class AnalysisProgress(
     val runNodes: Long = 0L,
     val runSearchMs: Long = 0L,
     val runPositionsSearched: Int = 0,
+    /** An Elo-level run's engine time budget for THIS run in ms (spec §8.6); 0 for a legacy fixed-depth run. */
+    val engineBudgetMs: Long = 0L,
     /** Monotonic time this analysis run started (set by the ViewModel); 0 when unknown. */
     val runStartedAtMs: Long = 0L,
     /** "About N min left", measured (set by the ViewModel, see [AnalysisTimeLeftTracker]). */
@@ -320,10 +322,10 @@ sealed interface PracticeEntryState {
 
 data class EngineSettings(
     /**
-     * Search depth. Settings offers the presets 12 / 14 / 18; any stored value 6..30 is still honoured. With
-     * [autoDepth] it is the depth of Auto's first pass (14).
+     * The engine level code (2500 / 2700 / 2900 / 3100 / 4000 = Max, ANALYSIS_SPEC §8.6), or a legacy fixed depth
+     * 6..30 (an old game being reopened or resumed). With the legacy [autoDepth] it is the depth of Auto's first pass.
      */
-    val depth: Int = 14,
+    val depth: Int = EngineLevel.DEFAULT.code,
     /** Not a user setting any more (kept at 3: the tactic gate needs the second-best line). */
     val multiPv: Int = 3,
     val username: String = "",
@@ -356,7 +358,10 @@ data class EngineSettings(
     /** The per-position node and time limits that go with [depth] (ANALYSIS_SPEC §8.1); Auto's first pass. */
     val searchBudget: SearchBudget get() = SearchBudget.forDepth(depth)
 
-    /** The named strength these settings are, or null for an old custom depth. */
+    /** The Elo level when [depth] is a level code (spec §8.6); null for a legacy fixed depth. */
+    val level: EngineLevel? get() = EngineLevel.fromCode(depth)
+
+    /** The legacy named strength these settings are, or null for a level or an old custom depth. */
     val strength: AnalysisStrength? get() = AnalysisStrength.of(depth, autoDepth)
 }
 

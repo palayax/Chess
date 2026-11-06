@@ -22,6 +22,13 @@ interface NarrationVoiceProvider {
     /** Synthesizes [text] into [outFile]. Never throws — failures come back as [SynthesisResult.Failure]. */
     suspend fun synthesize(text: String, outFile: File): SynthesisResult
 
+    /**
+     * [synthesize] at [speed] times the voice's normal speed (NC, ANALYSIS_SPEC 9.10; 1 = normal, within
+     * [net.palaya.chessanalyzer.core.narration.Delivery.MIN_SPEED]..MAX_SPEED). A provider that can vary its speed
+     * overrides this; the default ignores it (a test double, a future provider), so the clip is simply at normal speed.
+     */
+    suspend fun synthesize(text: String, outFile: File, speed: Float): SynthesisResult = synthesize(text, outFile)
+
     /** Releases any held resources (engine session, HTTP connections). Safe to call unconditionally. */
     fun release()
 }

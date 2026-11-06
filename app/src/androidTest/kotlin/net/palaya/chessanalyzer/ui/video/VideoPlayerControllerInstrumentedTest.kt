@@ -15,6 +15,7 @@ import net.palaya.chessanalyzer.core.narration.ScriptSegment
 import net.palaya.chessanalyzer.core.narration.SegmentKind
 import net.palaya.chessanalyzer.core.narration.VideoScript
 import net.palaya.chessanalyzer.video.DeviceTtsProvider
+import net.palaya.chessanalyzer.video.NarrationKeys
 import net.palaya.chessanalyzer.video.NarrationStore
 import net.palaya.chessanalyzer.video.WavUtil
 import net.palaya.chessanalyzer.video.narrationCacheFingerprint
@@ -66,7 +67,7 @@ class VideoPlayerControllerInstrumentedTest {
         // cache lookups — mirror that exactly so the key this test writes is the key playback reads.
         val store = NarrationStore.forApp(context)
         val identity = DeviceTtsProvider(context)
-        val key = store.keyFor(narrationText, identity.displayName, identity.narrationCacheFingerprint())
+        val key = NarrationKeys.segmentKey(script.segments.single(), identity.displayName, identity.narrationCacheFingerprint())
         val cachedFile = store.fileFor(key)
         WavUtil.writeSilentWav(cachedFile, 1500, 22050)
 

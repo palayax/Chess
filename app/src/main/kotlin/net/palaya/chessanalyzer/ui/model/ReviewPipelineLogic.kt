@@ -38,6 +38,19 @@ enum class ReviewStage {
     val skippable: Boolean get() = this != ENGINE
 }
 
+/**
+ * The most time [this] stage can take in a review (EL2, spec §8.4 and §8.6): what the Review options screen adds for a stage
+ * this phone has never measured, so the figure shown is an upper bound and not a guess. [wordingInEffect] = the game's
+ * Natural wording runs (the narration stage then also rewords its beats).
+ */
+fun ReviewStage.boundMs(wordingInEffect: Boolean): Long = when (this) {
+    ReviewStage.ENGINE -> GAME_ENGINE_BUDGET_MS
+    ReviewStage.POLISH_COMMENTARY -> WORDING_STAGE_BUDGET_MS
+    ReviewStage.WRITE_NARRATION -> if (wordingInEffect) WORDING_STAGE_BUDGET_MS else NARRATION_WRITE_RESERVE_MS
+    // Runs until the deadline; what is not recorded by then is recorded in the background.
+    ReviewStage.RECORD_VOICE -> REVIEW_TOTAL_BUDGET_MS
+}
+
 enum class StageStatus { PENDING, CURRENT, DONE, SKIPPED }
 
 /** One row of the checklist. [done] of [total] items (positions, texts, beats, segments); [total] 0 = not known yet. */
@@ -148,17 +161,23 @@ data class ReviewSpeeds(
         return copy(msPerPly = msPerPly + (stage to if (old == null) rate else (old + rate) / 2.0))
     }
 
-    /** The engine's measured time per node from one run, blended like [withStage]. */
+    /**
+     * The engine's measured time per node from one run, blended towards the latest run (0.7 new / 0.3 old, spec §8.4):
+     * the phone's speed changes with heat and charge, and the newest run says most about the next one.
+     */
     fun withEngine(runMs: Long, runNodes: Long, runPositions: Int): ReviewSpeeds {
         if (runPositions < MIN_POSITIONS_FOR_ESTIMATE || runNodes <= 0L || runMs <= 0L) return this
         val rate = runMs.toDouble() / runNodes
         val old = engineMsPerNode
-        return copy(engineMsPerNode = if (old == null) rate else (old + rate) / 2.0)
+        return copy(engineMsPerNode = if (old == null) rate else NEW_RUN_WEIGHT * rate + (1.0 - NEW_RUN_WEIGHT) * old)
     }
 
     companion object {
         /** A stage that took less than this did no real work (everything was cached): it measures nothing. */
         const val MIN_STAGE_MS_TO_RECORD = 1_000L
+
+        /** The weight of the latest run in the engine's blended milliseconds per node. */
+        const val NEW_RUN_WEIGHT = 0.7
     }
 }
 

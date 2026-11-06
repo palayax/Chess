@@ -1,6 +1,7 @@
 package net.palaya.chessanalyzer.core.narration
 
 import net.palaya.chessanalyzer.core.analysis.MoveClassification
+import net.palaya.chessanalyzer.core.analysis.PhaseStanding
 import net.palaya.chessanalyzer.core.analysis.TacticType
 import net.palaya.chessanalyzer.core.chess.Color
 import net.palaya.chessanalyzer.core.chess.PieceType
@@ -175,6 +176,46 @@ enum class PayoffKind {
 
 /** The prize a puzzle prompt promises. */
 enum class PuzzlePrize { FORCES_MATE, WINS_ROOK_OR_BETTER, WINS_PIECE, WINS_MATERIAL }
+
+/**
+ * Why a game's standing changed at a phase boundary, when the boards prove it (ANALYSIS_SPEC §9.9). Absent when
+ * nothing on the boards says so: the narration then states the new standing and no reason.
+ */
+sealed interface PhaseCause {
+    /** The side that lost ground ([color]) played a [classification] move at full move [moveNumber]. */
+    data class Error(val color: Color, val classification: MoveClassification, val moveNumber: Int) : PhaseCause
+
+    /** The side that gained ground ([color]) came out ahead on material across the move; [gain] null reads "material". */
+    data class WonMaterial(val color: Color, val gain: MaterialGain?) : PhaseCause
+
+    /** The side that gained ground ([color]) found a forced mate in [mateIn]. */
+    data class MateFound(val color: Color, val mateIn: Int) : PhaseCause
+}
+
+/**
+ * What the better move of an error did, as far as the boards prove it (ANALYSIS_SPEC §9.9): it mated in [Mates.mateIn],
+ * it won [Wins.gain] (null reads "material") along the engine's line, or nothing more can be said than the move.
+ */
+sealed interface BetterResult {
+    data class Mates(val mateIn: Int) : BetterResult
+    data class Wins(val gain: MaterialGain?) : BetterResult
+    data object Plain : BetterResult
+}
+
+/** What the moves a "skip ahead" passes over were like, as far as the boards prove it (ANALYSIS_SPEC §9.9). */
+enum class SkipKind {
+    /** No capture and no check in the skipped moves, and the evaluation barely moved. */
+    QUIET,
+
+    /** At least two captures in the skipped moves. */
+    TRADES,
+
+    /** Nothing more can be said than that moves were skipped. */
+    PLAIN
+}
+
+/** What followed a turning move (see [StoryArc.Aftermath]). */
+enum class AftermathKind { NEVER_BACK, FOUGHT_BACK }
 
 /**
  * Opening families the narration has a plan blurb for, matched by substring of the book name
@@ -380,16 +421,34 @@ sealed interface Sentence {
     /** "You were White here, so that's the side we're watching." — always second person. */
     data class IntroYouWere(val subject: Subject) : Sentence
 
+    /** "Black won, but for 16 moves this was White's game." — [winner] won and the other side was clearly better for [moves] moves in a row. */
+    data class StakesComeback(val winner: Color, val moves: Int) : Sentence
+
+    /** "White was on top from the opening and never let go." / "It was level until move 11, and then White took over for good." */
+    data class StakesTookOver(val winner: Color, val moveNumber: Int, val fromTheStart: Boolean) : Sentence
+
+    /** "Neither side ever got more than a slight edge." — a draw. */
+    data object StakesTightDraw : Sentence
+
+    /** "White was clearly better for 12 moves, but it ended in a draw." */
+    data class StakesWastedLead(val leader: Color, val moves: Int) : Sentence
+
+    /** "It ended in mate on move 33." — said after a stakes sentence, which has already named the winner. */
+    data class ResultEndsInMate(val fullMoves: Int) : Sentence
+
+    /** "It lasted 40 moves." — the same, for a game that did not end in mate. */
+    data class ResultLasted(val fullMoves: Int) : Sentence
+
     /** "And somewhere in here there's a forced mate that never got played. We'll get to it." */
     data object HookMissedMate : Sentence
 
-    /** "But this whole game turns on one move, around move 23, and I'd bet most people walk straight past it." */
+    /** "One move, around move 23, swings the whole game, and it's easy to walk past." */
     data class HookBigTurn(val moveNumber: Int) : Sentence
 
-    /** "It's closer than the result makes it look. One moment, around move 23, decides it." */
+    /** "One moment, around move 23, matters more than any other." */
     data class HookClose(val moveNumber: Int) : Sentence
 
-    /** "This one is clean from both sides, but there's still a crack in it, and we're going to find it." */
+    /** "This one is clean from both sides. The biggest slip is small, but it is worth a look." */
     data object HookClean : Sentence
 
     /** "Not a mistake in sight from either player. So let's talk about what they both got right." */
@@ -415,18 +474,24 @@ sealed interface Sentence {
     /** "Both sides just developed." — an empty game. */
     data object OpeningBothDeveloped : Sentence
 
-    /** "Theory runs out around move 8." */
-    data class TheoryRunsOut(val moveNumber: Int) : Sentence
+    /** "Theory runs out around move 8, and the position is about level." — the standing when the book ended. */
+    data class TheoryEnds(val moveNumber: Int, val standing: PhaseStanding) : Sentence
+
+    /** "Out of the opening, the position is about level." — a game with no book moves to speak of. */
+    data class OpeningVerdict(val standing: PhaseStanding) : Sentence
+
+    /** "White built a clear edge, after Black's blunder on move 11." — a phase boundary, told at the move that caused it. */
+    data class PhaseTurn(val from: PhaseStanding, val to: PhaseStanding, val cause: PhaseCause?) : Sentence
 
     // -- Connectives between beats ---------------------------------------------------------
 
-    /** "The next few moves are just development and shuffling. Nothing breaks, so let's jump to move 14." */
-    data class SkipAhead(val moveNumber: Int) : Sentence
+    /** "A few quiet moves, no captures and no checks, and we pick it up at move 14." */
+    data class SkipAhead(val moveNumber: Int, val kind: SkipKind) : Sentence
 
     /** Lead-in fragment before a beat in MISTAKES_ONLY: "Forward to move 14. " */
     data class JumpTo(val moveNumber: Int) : Sentence
 
-    /** Lead-in fragment before a beat: "A couple of moves later, " */
+    /** Lead-in fragment before a beat: "A little later, " */
     data object ALittleLater : Sentence
 
     // -- The move that was played ----------------------------------------------------------
@@ -469,10 +534,13 @@ sealed interface Sentence {
 
     // -- Mate -----------------------------------------------------------------------------
 
-    /** "And that's the game." */
-    data object MateClosing : Sentence
+    /** "This is a forced mate in three." — said once, at the first move of a mating sequence (the engine's own distance, counting that move). */
+    data class MateAnnounce(val mateIn: Int) : Sentence
 
-    /** "You finish it off." / "White wins." */
+    /** "Queen to f six, with check." — a later move of the same sequence, said bare. */
+    data class MateStep(val move: SpokenMove) : Sentence
+
+    /** "Game over. White wins!" / "You win it!" — the checkmate itself (the one place besides a brilliant move that exclaims). */
     data class MateFinish(val subject: Subject) : Sentence
 
     /** "And that's you on the receiving end of it." */
@@ -489,7 +557,7 @@ sealed interface Sentence {
     /** "That's a rook in the bank." */
     data class MaterialInTheBank(val payoff: MaterialPayoff) : Sentence
 
-    /** "It doesn't win material yet, but the pressure is real." */
+    /** "No material changes hands yet, but the pressure is real." */
     data object PressureNoMaterialYet : Sentence
 
     /** "Good, solid stuff." */
@@ -508,8 +576,31 @@ sealed interface Sentence {
     /** "White was winning before that. Now White is about level." */
     data class ConsequenceChanged(val subject: Subject, val before: Standing, val after: Standing) : Sentence
 
-    /** "Knight to f three was the move." */
-    data class BetterWas(val move: SpokenMove) : Sentence
+    /**
+     * "Knight to f three was the move, and it wins a rook." — the better move and, when the boards prove it, what
+     * it did: [BetterResult.Mates], [BetterResult.Wins], or nothing more than the move ([BetterResult.Plain]).
+     */
+    data class BetterHere(val move: SpokenMove, val result: BetterResult) : Sentence {
+        override val poolKey: String get() = "BetterHere.${result::class.simpleName}"
+    }
+
+    /** "That allows a forced mate in four." — the engine's mate for the opponent after the played move. */
+    data class AllowsMate(val mateIn: Int) : Sentence
+
+    /**
+     * "Black takes the bishop on b five with the pawn, and now White has queen takes the rook on a one, winning a
+     * rook." - the played move and, in the same breath, the engine's best answer to it ([reply]) and what that wins
+     * ([gain], null: nothing is named).
+     */
+    data class PlayedThenReply(
+        val subject: Subject,
+        val verb: MoveVerb,
+        val move: SpokenMove,
+        val recapture: Boolean,
+        val opponent: Subject,
+        val reply: SpokenMove,
+        val gain: MaterialGain?
+    ) : Sentence
 
     /** "There was mate in three on the board, starting with queen to h five." */
     data class MateWasAvailable(val mateIn: Int, val move: SpokenMove) : Sentence
@@ -520,16 +611,22 @@ sealed interface Sentence {
     /** "It's not losing, it's just loose." */
     data object InaccuracyNote : Sentence
 
+    /** "Black plays knight to h five, a small slip." - an inaccuracy, the move and its verdict in one sentence. */
+    data class PlayedSlip(val subject: Subject, val verb: MoveVerb, val move: SpokenMove, val recapture: Boolean = false) : Sentence
+
     /**
-     * "The evaluation moves in White's favour." - what a quiet move did, when it carried no tactic
-     * and did not change who is better, but did move the evaluation enough to be worth a line.
+     * "That helps White." / "That gives a little back." - what a quiet move did, when it carried no tactic,
+     * took nothing and gave no check, and moved the evaluation enough to be worth a line. [favours]: towards [subject].
      */
-    data class EvalShift(val subject: Subject, val favours: Boolean) : Sentence
+    data class SmallSwing(val subject: Subject, val favours: Boolean) : Sentence
 
     // -- The missed-tactic excursion ----------------------------------------------------------
 
     /** "Now hold on. Let's rewind, because there was something much better here." */
     data object PivotIn : Sentence
+
+    /** "Can you see what White missed?" — the opening of a missed tactic that gets no pause (a verified missed tactic). */
+    data class PivotQuestion(val side: Color) : Sentence
 
     /** "The move is knight to f three." */
     data class PivotReveal(val move: SpokenMove) : Sentence
@@ -551,14 +648,8 @@ sealed interface Sentence {
     /** "That is a rook off the board." — null gain reads "material". */
     data class MaterialTaken(val gain: MaterialGain?) : Sentence
 
-    /** "The king has to answer that first, which is the whole point of the move order." */
-    data object CheckMustBeAnswered : Sentence
-
-    /** "White is already a piece up here, and the pressure is not going away." */
+    /** "White is already a piece up here." */
     data class AlreadyUp(val subject: Subject, val gain: MaterialGain?) : Sentence
-
-    /** "No fireworks. It just keeps everything pointed at the same weakness." */
-    data object QuietMove : Sentence
 
     /** "There is nothing else legal." */
     data object OnlyLegalReply : Sentence
@@ -568,9 +659,6 @@ sealed interface Sentence {
 
     /** "Taking back is the natural answer, and it changes nothing." */
     data object RecaptureNatural : Sentence
-
-    /** "That is the best defence on offer." */
-    data object BestDefence : Sentence
 
     /** Lead-in fragment to the payoff: "And there it is. " */
     data object PayoffLead : Sentence
@@ -583,6 +671,9 @@ sealed interface Sentence {
 
     /** "White forces a draw by repetition." / "You end up completely on top." by [kind]. */
     data class PayoffOutcome(val subject: Subject, val kind: PayoffKind) : Sentence
+
+    /** "The line ends there, with White clearly better." — the engine's own evaluation of the best play, for a line that wins nothing. */
+    data class PayoffStanding(val subject: Subject, val standing: Standing) : Sentence
 
     /** "And there was mate in four behind it." */
     data class MateBehindIt(val mateIn: Int) : Sentence
@@ -619,12 +710,6 @@ sealed interface Sentence {
         override val poolKey: String get() = "TacticPoint.$type"
     }
 
-    /** The concrete takeaway for a motif: "Any time two of your opponent's big pieces sit a knight's jump apart ..." */
-    data class TacticLesson(val type: TacticType) : Sentence
-
-    /** "There's a clean textbook fork waiting in the game report if you want to see the pattern on its own." */
-    data class TextbookOffer(val type: TacticType) : Sentence
-
     // -- Puzzle prompt ---------------------------------------------------------------------
 
     /** "White to play. There is a move here that wins a whole piece. Pause the video. Can you find it?" */
@@ -632,34 +717,32 @@ sealed interface Sentence {
 
     // -- Turning point -----------------------------------------------------------------------
 
-    /** "And that is the turning point of the whole game. " */
-    data object TurningPointLead : Sentence
+    /** "That was the turning point. " — [significant]: the move cost at least 12 win-percent; otherwise "the biggest slip of the game". */
+    data class TurningPointLead(val significant: Boolean) : Sentence {
+        override val poolKey: String get() = "TurningPointLead.$significant"
+    }
 
-    /** "Nothing else in this game swings the evaluation like move 23." */
+    /** "No other move in this game cost as much as move 23." */
     data class TurningPointSwing(val moveNumber: Int) : Sentence
 
-    /** "White went from winning to about level on one move." */
-    data class TurningPointFromTo(val subject: Subject, val before: Standing, val after: Standing) : Sentence
+    /** "From there, Black never gave the lead back." / "It was not over: White was back to level by move 31." */
+    data class TurningAftermath(val kind: AftermathKind, val side: Color, val moveNumber: Int?, val standing: PhaseStanding?) : Sentence {
+        override val poolKey: String get() = "TurningAftermath.$kind"
+    }
 
     // -- Outro ------------------------------------------------------------------------------
 
-    /** "Right, numbers. " */
-    data object OutroLead : Sentence
+    /** "Black won by checkmate on move 33." / "White won after 40 moves." / "It ended in a draw after 40 moves." / "The game stops after 23 moves." */
+    data class OutroEnding(val winner: Color?, val drawn: Boolean, val byMate: Boolean, val fullMoves: Int) : Sentence
 
-    /** "MorphyFan finished on 85.0 percent accuracy, DukeAndCount on 80.1 percent." */
-    data class OutroAccuracy(val white: String, val whiteAccuracy: String, val black: String, val blackAccuracy: String) : Sentence
+    /**
+     * "The decisive moment was White's blunder on move 28, which took White from about level to losing." — the
+     * biggest swing of the game ([mover]'s move), in the mover's own bands.
+     */
+    data class OutroDecider(val mover: Subject, val classification: MoveClassification, val moveNumber: Int, val before: Standing, val after: Standing) : Sentence
 
-    /** "That's play at roughly 1650 and 1500." */
-    data class OutroRatings(val whiteRating: Int, val blackRating: Int) : Sentence
-
-    /** "MorphyFan did not make a single mistake the engine cares about." */
-    data class NoMistakes(val name: String) : Sentence
-
-    /** "MorphyFan had one blunder, two mistakes and one missed win." — zero counts are omitted. */
-    data class ErrorCounts(val name: String, val blunders: Int, val mistakes: Int, val misses: Int, val inaccuracies: Int) : Sentence
-
-    /** "It's a short game, so treat those rating estimates as a rough guide rather than gospel." */
-    data object ShortGameCaveat : Sentence
+    /** "There was no single decisive mistake." */
+    data object OutroNoDecider : Sentence
 
     // -- On-screen summary line ---------------------------------------------------------------
 
@@ -701,41 +784,37 @@ sealed interface Sentence {
     // -- Lessons ------------------------------------------------------------------------------
 
     /**
-     * Lead-in fragment before the first lesson: "So what do you take away from this? "
-     * [count] is how many lessons follow, so a lead that counts them ("Three things to take out of
-     * this game") is only ever used when it is true.
+     * Lead-in fragment before the one lesson: "Here's the one thing to take away. "
+     * [count] is how many lessons follow, so a lead that counts them is only ever used when it is true.
      */
     data class LessonLead(val count: Int) : Sentence
 
-    /** "You walked past three forks in this game. They were on e five, c seven and f three." */
-    data class LessonRepeatedMiss(val subject: Subject, val type: TacticType, val count: Int, val squares: List<Square>) : Sentence
+    /** "At move 28, White missed an x-ray: rook to e one was the move." — the lesson's first sentence, a missed tactic. */
+    data class TakeawayMissed(val subject: Subject, val moveNumber: Int, val type: TacticType, val better: SpokenMove?) : Sentence
 
-    /** "The one thing you left on the board was a fork at move 12. The one that hurt was on e five." */
-    data class LessonSingleMiss(val subject: Subject, val type: TacticType, val moveNumber: Int?, val square: Square?) : Sentence
+    /** "Move 28 let Black in: after it, Black could play queen takes the rook on a one." — the lesson's first sentence, a move that allowed something. */
+    data class TakeawayAllowed(val subject: Subject, val moveNumber: Int, val opponent: Color, val mateIn: Int?, val reply: SpokenMove?) : Sentence
 
-    /** "Every one of your three errors came after move 10, once the pieces were out ..." */
-    data class LessonLateErrors(val subject: Subject, val count: Int, val afterMove: Int) : Sentence
+    /** "Move 28 gave up most of the advantage, from clearly better to level." — the lesson's first sentence, when nothing more specific is proven. */
+    data class TakeawayCostly(val subject: Subject, val moveNumber: Int, val severity: LossSeverity, val before: Standing, val after: Standing) : Sentence
 
-    /** "Your mistakes ran from move 4 to move 30, so they're spread right across the game ..." */
-    data class LessonSpreadErrors(val subject: Subject, val firstMove: Int, val lastMove: Int) : Sentence
+    /** "Neither side made a decisive mistake, so the lesson is to keep it that way: check what each move allows." */
+    data object TakeawayClean : Sentence
 
-    /** "One mistake. Move 23 cost 31.5 percent of the position on its own, and everything else you played was fine. ..." */
-    data class LessonOneMistake(val subject: Subject, val moveNumber: Int, val lossPercent: String) : Sentence
+    /** "Before you commit, ask one question: what does this let them do next?" — the habit that goes with a move that allowed something. */
+    data object TakeawayHabitAllowed : Sentence
 
-    /** "You handed over a tactic three times in this game — moves that were fine in themselves but let something in. ..." */
-    data class LessonGifts(val subject: Subject, val count: Int) : Sentence
+    /** "When you're winning, slow down: check every capture and every check before you move." — the habit, tied to the standing before the move. */
+    data class TakeawayHabitStanding(val standing: Standing) : Sentence
 
-    /** "You got mated at the end, but the mate wasn't the mistake — move 23 was. ..." */
+    /** "White got mated at the end, but the mate wasn't the mistake. Move 28 was. Fix it and the mate never happens." */
     data class LessonMatedButNotTheMistake(val subject: Subject, val turningMove: Int) : Sentence
 
-    /** "Worth knowing: the other side left two forks on the board too, and you converted one chance of your own. ..." */
-    data class LessonOpponentMissedToo(val subject: Subject, val type: TacticType, val count: Int, val converted: Int) : Sentence
+    /** The concrete takeaway for a motif: "Any time two of your opponent's big pieces sit a knight's jump apart ..." */
+    data class TacticLesson(val type: TacticType) : Sentence
 
-    /** "You found the engine's top move five times out of 17, for 85.0 percent. ..." */
-    data class LessonPositive(val subject: Subject, val bestMoves: Int, val totalMoves: Int, val accuracy: String) : Sentence
-
-    /** "You came out of this at 85.0 percent, which the model reads as about 1650. ..." */
-    data class LessonRatingAnchor(val subject: Subject, val accuracy: String, val rating: Int) : Sentence
+    /** "There's a clean textbook fork waiting in the game report if you want to see the pattern on its own." */
+    data class TextbookOffer(val type: TacticType) : Sentence
 }
 
 /**

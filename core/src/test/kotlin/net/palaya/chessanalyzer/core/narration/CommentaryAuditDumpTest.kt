@@ -4,6 +4,7 @@ import net.palaya.chessanalyzer.core.analysis.BestLineCaption
 import net.palaya.chessanalyzer.core.analysis.BestLines
 import net.palaya.chessanalyzer.core.analysis.MoveAnnotation
 import net.palaya.chessanalyzer.core.analysis.TacticInstance
+import net.palaya.chessanalyzer.core.analysis.TacticSignificance
 import net.palaya.chessanalyzer.core.chess.Color
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -115,5 +116,79 @@ class CommentaryAuditDumpTest {
         File("build/commentary_audit/video_returns.jsonl").writeText(returns.toString())
         assertTrue("some returns to the game", returns.isNotEmpty())
         assertTrue("three games, three sides each", out.lines().count { it.isNotBlank() } == 3 * (45 + 33 + RealGameFixture.game01.pgn.moves.size))
+    }
+
+    /**
+     * NS (ANALYSIS_SPEC 9.9): every sentence of the narrated story that makes a claim of its own, for the four recorded
+     * games (the three audited ones and Byrne-Fischer) and each side, as JSON lines to
+     * `core/build/commentary_audit/story.jsonl` - the input of `scripts/audit_commentary.py story`. A `game` record per
+     * game and side carries what the generator took from the annotations and the audit may not re-derive (each ply's
+     * move, class and missed motif); a `part` record per sentence carries the words, the sentence kind and the plies it is
+     * about. Every claim in the sentence is re-derived from the recorded engine numbers and python-chess.
+     */
+    @Test
+    fun dumpStory() {
+        val out = StringBuilder()
+        // The four recorded games, and variants of them that bring the other story sentences out: a game cut short (no
+        // mate, an error with no missed motif), a clean one, and the same games with a drawn result.
+        fun withResult(g: RealGameFixture.Game, result: String) =
+            RealGameFixture.Game(g.pgn.copy(result = result, tags = g.pgn.tags + ("Result" to result)), g.evals)
+        val games = listOf(
+            Triple("immortal", "immortal", RealGameFixture.immortal), Triple("chesscom", "chesscom", RealGameFixture.chesscom),
+            Triple("game01", "game01", RealGameFixture.game01), Triple("byrne_fischer", "byrne_fischer", RealGameFixture.byrneFischer),
+            Triple("immortal first 36 plies, drawn", "immortal", withResult(RealGameFixture.immortal.firstPlies(36), "1/2-1/2")),
+            Triple("byrne_fischer first 20 plies, drawn", "byrne_fischer", withResult(RealGameFixture.byrneFischer.firstPlies(20), "1/2-1/2")),
+            Triple("game01 first 36 plies, drawn", "game01", withResult(RealGameFixture.game01.firstPlies(36), "1/2-1/2")),
+            Triple("immortal first 30 plies, White won", "immortal", withResult(RealGameFixture.immortal.firstPlies(30), "1-0")),
+            Triple("chesscom first 3 plies", "chesscom", RealGameFixture.chesscom.firstPlies(3)),
+            Triple("chesscom first 14 plies", "chesscom", RealGameFixture.chesscom.firstPlies(14)),
+            Triple("chesscom first 24 plies", "chesscom", RealGameFixture.chesscom.firstPlies(24)),
+            Triple("immortal first 24 plies", "immortal", RealGameFixture.immortal.firstPlies(24)),
+            Triple("game01 first 20 plies", "game01", RealGameFixture.game01.firstPlies(20)),
+            Triple("game01 first 28 plies", "game01", RealGameFixture.game01.firstPlies(28)),
+            Triple("game01 first 34 plies", "game01", RealGameFixture.game01.firstPlies(34)),
+            Triple("game01 first 40 plies", "game01", RealGameFixture.game01.firstPlies(40)),
+            Triple("game01 first 50 plies", "game01", RealGameFixture.game01.firstPlies(50)),
+            Triple("byrne_fischer first 40 plies", "byrne_fischer", RealGameFixture.byrneFischer.firstPlies(40)),
+            Triple("byrne_fischer first 60 plies", "byrne_fischer", RealGameFixture.byrneFischer.firstPlies(60))
+        )
+        fun norm(t: String) = t.trim().replace(Regex("\\s+"), " ").replace(" .", ".").lowercase()
+        var parts = 0
+        for ((label, base, game) in games) {
+            for (side in listOf<Color?>(null, Color.WHITE, Color.BLACK)) {
+                val report = game.report(side)
+                val options = NarrationOptions(speechWpm = 169, pace = VideoPace.NORMAL)
+                val (script, story) = VideoScriptGenerator(side).generateWithStory(report, game.pgn, options)
+                val pruned = TacticSignificance.prune(report, options.significanceThresholdCp)
+                val plies = pruned.annotations.joinToString(",") { a ->
+                    val best = a.bestMoveUci
+                    val missed = if (best != null && best != a.uci) {
+                        a.tacticsMissed.filter { it.confidence >= 0.6 }.maxWithOrNull(compareBy({ it.confidence }, { it.materialSwing }))
+                    } else null
+                    "{\"ply\":${a.ply},\"moveNumber\":${a.moveNumber},\"color\":${q(a.color.name)},\"san\":${q(a.san)},\"uci\":${q(a.uci)}," +
+                        "\"cls\":${q(a.classification.name)},\"best\":${q(a.bestMoveUci)},\"missed\":${q(missed?.type?.name)}}"
+                }
+                out.appendLine(
+                    "{\"rec\":\"game\",\"game\":${q(label)},\"base\":${q(base)},\"side\":${q(side?.name)},\"result\":${q(report.result)}," +
+                        "\"plies\":[$plies]}"
+                )
+                var cursor = 0
+                for (p in story) {
+                    val needle = norm(p.text)
+                    val idx = (cursor until script.segments.size).firstOrNull { needle in norm(script.segments[it].narration) }
+                        ?: script.segments.indices.firstOrNull { needle in norm(script.segments[it].narration) }
+                        ?: -1
+                    if (idx >= 0) cursor = idx
+                    val seg = script.segments.getOrNull(idx)
+                    out.appendLine(
+                        "{\"rec\":\"part\",\"game\":${q(label)},\"side\":${q(side?.name)},\"id\":${q(p.id)},\"text\":${q(p.text.trim().replace(Regex("\\s+"), " "))}," +
+                            "\"plies\":[${p.plies.joinToString(",")}],\"segment\":$idx,\"kind\":${q(seg?.kind?.name)},\"segPly\":${seg?.ply}}"
+                    )
+                    parts++
+                }
+            }
+        }
+        File("build/commentary_audit/story.jsonl").apply { parentFile.mkdirs() }.writeText(out.toString())
+        assertTrue("a story to audit: $parts parts", parts > 100)
     }
 }

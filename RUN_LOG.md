@@ -4979,3 +4979,198 @@ the main log that the emulator's shutdown lost before it was read; two repeats o
 
 APKs: `dist/PalayaChess-1.1-arm64-c480901.apk` (40,098,245 B) and `-universal-c480901.apk`, release cert SHA-256
 ca4f7b42….
+
+---
+
+## EL: Elo engine levels + game time budget (2026-10-14)
+
+Owner: "Auto mode takes half an hour on a Pixel 8; I need a review in up to 10 minutes on such phones. Change the analysis depth
+levels into Elo (2500 up to engine max), like DroidFish. The time estimation is far from correct." Design and numbers:
+ANALYSIS_SPEC §8.6 (new), §8.4 (estimates), §8.5 marked legacy.
+
+### What was built
+- `EngineLevel` (2500 / 2700 / 2900 / 3100 default / Max, codes stored in the old `depth` Int; legacy depths 6..30 unchanged),
+  `GameTimeBudget` + `GAME_ENGINE_BUDGET_MS` (5 min for the whole first pass), `SearchBudget.forLevel` (key `lvl<code>:n<nodes>:g<budget>`).
+- `AnalysisService`: a level searches `go depth 60 nodes N movetime T` with T from the budget (resumed run: its share); Max has no
+  node limit; `PositionEval.timeCapped` (core, cache JSON) replaces "depth below requested" for levels; start line logs level,
+  budget and native variant.
+- Estimates: sliding window of the last 8 positions (`RecentSpeed`), min(nodes x speed, budget left), Max = budget left from the
+  first position; the Review options screen shows the whole review (engine + measured other stages); `withEngine` blends 0.7/0.3;
+  the overall engine time-left now includes legacy Auto's second pass and keeps updating during it (it stopped once pass 1 ended).
+- UI: Settings "Engine level" (2500 / 2700 / 2900 / 3100 / Max), Review options lists the five levels, Summary card "Analysed at about
+  2900" / "Analysed at Max" (old games keep Quick / Standard / Deep / Auto). Auto is never offered again; its code path stays.
+- Settings default: new install 3100; a stored legacy depth (or Auto) is mapped with `forLegacyDepth` on read, not rewritten.
+
+### Verified (host only)
+Pure-Kotlin tests compiled and run with a scratch Gradle project over the repo sources (no Android SDK here): `PositionEvalCappedTest` 3,
+`EngineLevelTest` 7, `AnalysisTimeLeftTest` 17, `ReviewPipelineLogicTest` 10, `ReviewOptionsLogicTest` 15, `GameStrengthLogicTest` 9,
+`SearchBudgetTest` 13, `AnalysisFractionTest` 5: all passed. The pure `:core` change is a single field.
+
+### NOT verified
+- `:app` was not compiled (no Android SDK): `AnalysisService`, `AnalysisViewModel`, `SettingsRepository`, `GameRepository`, the three
+  screens and `strings.xml` are self-reviewed only. `SettingsLogicTest` and `GameRepositoryReviewOptionsTest` need Android classes and
+  were edited, not run. No device run: no real search at a level, no check that the 5-minute budget really gives ~10 minutes on a
+  Pixel 8, no check of the Elo labels (an approximation, spec §8.6; measure with a gauntlet on the app's binary).
+- The instrumented tests that drove Quick / Standard in the UI (`ReviewOptionsInstrumentedTest`, `A4AnalyticsInstrumentedTest`,
+  `FamousGames`, `RephraseFlow`) were edited to the 2500 / 2900 levels and labels but not run; `AutoDepthInstrumentedTest` and the
+  other direct `AnalysisService` tests still use legacy depths on purpose.
+
+
+## Narration recording at watch time (2026-10-14, branch worktree-agent-a399cba328c2a4b0d) — NOT device-verified
+
+Owner's report: "after the analysis finished, watching the video review does an additional process that takes forever".
+Causes found by reading the code, fixed in this branch (no Gradle/Android SDK in the container: nothing here was compiled or run):
+
+1. The background card wording kept running during a recording and its `LlamaRephraser` reloaded the 1.1 GB model after a release.
+   Now every recording (`AnalysisViewModel.recordNarration`) cancels and joins the background wording first, releases the wording model,
+   and the wording starts again afterwards; `RephraseBackend.release()` retires the instance (`LlamaRephraser.retire`), so a holder gets "no result".
+2. Answering "Which side were you?" rewrote the sentences, and the whole narration was recorded when Video opened. The Summary now starts that
+   recording at once in the background (`prepareNarrationInBackground`), also after a plain reopen with `prepareVideo` on and the voice installed;
+   it uses `ensureNarrationPrepared` and its state, so the Video screen shows it; a running recording of the same game and voice is not restarted.
+3. Segments that fell back to the device voice are remembered per voice identity on disk (`review/prepared_narration.json`,
+   `PreparedNarrationStore`, `PreparedNarrationLedger`), and no longer count as missing for it; "Prepare the narration" (force) retries.
+4. Kokoro's threads: `kokoroThreads` = the wording model's fast-core heuristic held to 2..4 (was a fixed 4 on all cores).
+5. `runAnalysis` no longer reports completion while its own stages still run (`runRequestAction`).
+6. The Cancel button of the recording is now labelled "Watch now" (it already was exactly that: Incomplete, the device voice reads the rest).
+
+Host tests added (not run): `NarrationPrepLogicTest`, `PreparedNarrationStoreTest`, `NarrationFallbackIndexesTest`, `LlamaRephraserTest.aRetiredRephraser...`.
+To verify on a phone: a Pixel 8 timing of review + video; side answer then Video (should be recording already or done); restart then Video
+(no new Kokoro load when only fallbacks are missing); the LLM not loading during a recording (log "rephrase: model released", no new load).
+
+
+---
+
+## NS: narration story + rhythm (2026-10-14)
+
+Owner's phone test: "The narration voice is great but the script is pretty terrible: it's not clear what is going on during the
+game, everything is read with the same intonation." Parts A (story) and B (rhythm) approved; part C (per-beat TTS speed) not in
+scope, `app/` untouched. Design and rules: ANALYSIS_SPEC 9.9, COMMENTARY_STYLE 8.
+
+What changed (all in `:core`): `GamePhases` (new, pure: seven standings from the White win-percent series, 3-point hysteresis,
+merging of phases under four positions, shifts on the move that caused them), `StoryArc` (stakes: comeback / took over / tight
+draw / wasted lead; what followed the turning move), and the generator: a cold open with the stakes and how it ended (the hook
+keeps its data, the unprovable "closer than the result makes it look" is gone); the opening ends with where the book left the
+game; every phase boundary is told at its move with the cause when the boards prove one (error / forced mate / settled material),
+promoted to BRIEF and kept by the budget; errors as cause and consequence (what the move let in: the engine's mate or best
+capture; the better move and what it did: mate or settled material over four plies; "gives nothing away" removed); mating
+sequences announced once with the engine's distance then said bare; skipped stretches described by what the board shows;
+turning point with its aftermath; outro = how it ended + the decisive move (no accuracy, rating or counts spoken); one takeaway
+tied to the worst error. Rhythm: bare moves next to comma-linked cause and effect, two shapes for an inaccuracy, one question
+(before a missed move that gets no pause), "!" only for the checkmate and a Brilliant move, no lead-in glued to an interjection,
+filler removed or thinned. Removed sentences: OutroAccuracy/OutroRatings/ErrorCounts/NoMistakes/ShortGameCaveat/OutroLead,
+Lesson* (7), EvalShift, MateClosing, BetterWas, QuietMove, BestDefence, CheckMustBeAnswered, TurningPointFromTo, TheoryRunsOut.
+The "That's losing turning into decisively lost" read for an EXCELLENT move was not a bug: a mover-relative band change across a
+cut-off by a hair was narrated as a turn; the beat now says a band change only for an error, and a phase boundary otherwise.
+
+Verification: `:core:test` 642 tests, 0 failed, 0 skipped (was 613). `audit_commentary.py`: `after` 144 texts / 0 WRONG, `lines`
+2604 checks / 0 WRONG, `mutate` (cards, lines, story) 0 not flagged, `story` 1397 sentences / 0 WRONG, `mutate-story` 0 not flagged,
+`rephrase` and `mutate-rephrase` agree with Kotlin (8690 mutation lines, 287 / 287 / 578 / 287 recorded-run lines: 0 differences).
+ClaimChecker/rephrase_check.py unchanged. Found by the checker: the first wording of the "what it let in" sentence used "lets /
+allows / can play", which ClaimChecker reads as a charge and mis-attributes (14 mutations rejected for the wrong reason); the
+sentence uses "now X has" instead (CLAUDE.md gotcha).
+
+Test expectations changed (not weakened): `PacingTiersTest` sacrifices/brilliancies (a nine-second proxy for DWELL replaced by
+the beat's kind, the key-move hold and the word "brilliant"/"forced mate"), `PacingTinyGameTest` (one lesson; no statistics in the
+outro; 23 moves now 6 to 8 minutes), `VideoScriptGeneratorTest` (one takeaway; a question to the viewer is not an address to a
+player), `BestLineVideoTest` (game01 has no key moment left that only names the better move: the budget no longer thins its
+errors), `NarrationTacticGateTest` (the fixture's missed-tactic move now is not the engine's best move), `NarrationClaimsTest`
+(two removed lesson sentences), `RephraseMeasurementDumpTest` (see below).
+
+Length (Normal pace, no side; story+pace seconds, old in brackets): Immortal 396 (463), Byrne-Fischer 437 (576), game01 597 (616),
+Opera 253 (342), scholar's mate 50 (54). All inside the section 9.7 budget.
+
+Remains / not done:
+- The recorded wording-model runs (`docs/audit/rephrase/raw_*.jsonl`) are of the old narration; their NARRATION rows are judged but
+  stale (the test now holds only the CARD rows to the 2 % bar and says so in the report). They must be re-run with
+  `scripts/rephrase_measure.py` on a host with llama.cpp and the models; I could not here.
+- Three story verifiers are untested on real data (`OpeningVerdict`, `TakeawayAllowed`, `TakeawayHabitAllowed`, COMMENTARY_AUDIT NS).
+- Not run: `:app` / `:engine` / device tests (no Android SDK here). `:app` code does not reference any removed sentence (grep), and
+  `SpokenRespellingTest` only needs the catalogue to keep a zwischenzug and an en prise sentence, which it does.
+- The spoken script is longer on bare beats in a decided position (a 50 cp swing still earns its beat, 9.2); a "nothing to say"
+  SKIP was tried and reverted because it contradicts 9.2 and `NarrationSignificanceTest`.
+- Owner's ear: the new prose is unheard; part C (per-beat speed) would add the intonation the text can only hint at.
+
+
+---
+
+## EL2: whole-review deadline (2026-10-14) — NOT device-verified
+
+Owner goal: a whole review (engine + wording + narration + voice) within about 10 minutes on a Pixel 8, with honest time estimates.
+A gap review of the Elo-levels branch found that only the engine stage was bounded. No Android SDK here: `:app` was NOT compiled; only the
+host subset ran.
+
+What changed (spec §8.4, §8.6; CLAUDE.md gotcha 10 and the RF bullets):
+1. `ReviewBudget.kt` (new, pure): `REVIEW_TOTAL_BUDGET_MS` 600 s, `wordingStageBudgetMs` (min(90 s, time to the deadline - reserve)), reserves,
+   `levelEngineEstimate`, `wholeReviewEstimate`, `TimeEstimate`. `AnalysisViewModel.runRemainingStages` budgets POLISH_COMMENTARY and the beat
+   rewording of WRITE_NARRATION (`withStageBudget`: a timeout keeps the original texts, cached rewordings stay), stops RECORD_VOICE at the
+   deadline and records the rest in the background after the Summary opens (`prepareNarrationInBackground(afterDeadline = true)`). A stage cut
+   short is shown as skipped and does not feed `ReviewSpeedStore`. Each stage logs its time, budget and whether it hit it.
+2. Max: `MAX_LEVEL_MOVETIME_CEILING_MS` 8 s per position (`GameTimeBudget.ceilingMs`, passed by `AnalysisService`); a short game finishes early.
+   The cache key is unchanged on purpose (an older, longer Max search stays a valid result).
+3. Estimates: before anything is measured the Review options screen shows an upper bound ("Up to about N min for the whole review", new plural);
+   an unmeasured stage adds `ReviewStage.boundMs`, not 0; the figures are recomputed on the screen from the CURRENT options
+   (`ReviewEstimateInputs` + `levelEstimates`), so the video, wording and voice switches change them.
+4. `ChessAnalyzerNavHost`: the Summary no longer starts a background recording on every open of a reopened game.
+5. `startBackgroundWording` clears `wordingResume` only while the job is still active.
+6. `GameRepository.loadPendingOptions`: a legacy pending `AUTO` strength maps to level code 3100 (was depth 14 -> 2900).
+7. `runAnalysis` KEEP_WAITING keeps the newest `onComplete` (`pendingOnComplete`), called on the main thread at the run's end.
+
+Note on the prior: the request wrote "1/250_000 ms per node, i.e. 250k nodes/s"; those differ by 1000x. 250k nodes/s is 1/250 ms per node
+(0.004), which is what the code and spec use.
+
+Host tests: see the report of the change (`ReviewBudgetTest` and the extended `EngineLevelTest` run in the :app-model subset; the edited
+`ReviewOptionsLogicTest` and `GameRepositoryReviewOptionsTest` need classes the host subset cannot compile and were edited, not run).
+To verify on a Pixel 8: a 40-move game at 3100 and at Max with wording + video + Kokoro, first review and a later one: total wall time vs 10 min,
+the stage log lines, the background recording after the deadline, and the "Up to about" line on a fresh install.
+
+---
+
+## NC (2026-10-14): per-beat delivery (speed and pauses vary with the beat)
+
+**Owner's report:** the narration is "read with the same intonation". Parts A and B (story arc, rhythm) fixed the words; NC
+varies how they are said. **Not device-verified: nothing here has been heard.** The owner should listen to a game with the
+Kokoro voice and a game with the device voice; every number below is a first guess to tune by ear.
+
+**Reference.** chess.com's coach slows down and leaves a beat before the decisive move and moves briskly through a played-out
+line (pattern only, our own numbers).
+
+**What changed**
+- `core/.../narration/Delivery.kt`: `Delivery(speed, gapScale)` (speed within 0.90..1.10, refused otherwise), the named
+  values CALM 0.94/1.25, SETUP 0.90/1.4, BRISK 1.08/0.8, WEIGHTY 0.95/1.5, and `DeliveryPlan` (a pure function of the story;
+  rules and measured effect in ANALYSIS_SPEC 9.10). `ScriptSegment.delivery` (default neutral). `ScriptBuilder.build` applies it
+  before the 9.7 budget measures the story; `estimateSpeechMs(text, wpm, delivery)` divides the speech by the speed and scales
+  the sentence pauses by the gap scale; the best line's spoken moves are BRISK; `RephrasedScript` re-estimates with the
+  segment's delivery.
+- `app`: `NarrationVoiceProvider.synthesize(text, file, speed)` (default method, so test doubles still compile); Kokoro passes it
+  as `OfflineTts.generate(speed=)`, the device voice as `setSpeechRate(base * speed)` per utterance; the coordinator stitches
+  the sentence gap as `Delivery.gapMs(base)` (clamped 120..600 ms). The stitched segment WAV is what the player and the
+  exporter play, so neither computes gaps itself and `leadIn` is untouched (TimelineBuilder, SegmentFrameBuilder, the
+  exporter's PCM track and the player were not changed).
+- **Cache keys:** one pure function, `video/NarrationKeys` (`sentenceKey`: `/spd0.94` when speed != 1; `segmentKey`: that and
+  `/gap1.25` when gapScale != 1; neutral adds nothing, so every clip made before NC is still found). Callers moved to it:
+  `NarrationCoordinator` (sentence key, segment key, `isFullyPrepared`), `NarrationPreparer.missingSegments`,
+  `VideoPlayerController`; `NarrationStore.keyFor` delegates its hash to it. Two instrumented tests that looked clips up by
+  `keyFor(seg.narration, ...)` now use `NarrationKeys.segmentKey(seg, ...)`. This tree has no `NarrationPrepLogic` or
+  `PreparedNarrationStore` (the S5/EL2 ledger lives on another branch): when it is merged, its keys must go through
+  `NarrationKeys` too (CLAUDE.md bullet).
+- Desktop producer: compiles unchanged (default argument); it does not use `delivery` and keeps its own 220/320 ms gaps.
+
+**Tests (host, 7 min; the repo's script reads /home/user/Chess, so a copy pointing at this worktree was run):** `:core` 621 / 0
+/ 0 (612 before; `DeliveryTest` 9 new), the app `ui/model` subset plus `NarrationKeysTest` 56 / 0 / 0 (52 before; 4 new).
+Existing tests changed honestly: the 17-move game's total (story + pace) is now 6.01 min at the default pace, so the ceilings in
+`PacingTiersTest` / `PacingTinyGameTest` went from 6.0 to 6.25 min (the story still fits its 9.7 budget in both);
+`RephrasedScriptTest` passes the segment's delivery to its expected estimates and gives its cap tests 60 s of budget room
+(the Immortal Game's story now sits 8 s under its budget). A first draft made the beat before every key move slow, which put
+40 % of the beats at 0.90; the set-up now applies only to a beat that is not itself a key move.
+
+**Unverified:** how any of it sounds (the speeds and gaps are guesses; Kokoro artefacts at 0.90 and 1.08 are not ruled out);
+that `OfflineTts.generate(speed=)` behaves as the sherpa-onnx docs say on the device; `:app` and `:engine` were not compiled (no
+Android SDK here), only reviewed; no instrumented test was run; the device-voice rate per utterance (`setSpeechRate` before
+`synthesizeToFile`) is untested. Budget effect: the story gets about 3 to 6 % longer in the recorded games.
+
+**Merge into main (2026-10-14).** NC was written on 4f35dd4 and merged after S5/EL2 and NS. Integration: the preparer's `segmentKeys`/`fallbackKeys`
+(and so `NarrationPrepLogic`'s missing count and the `PreparedNarrationStore` ledger, which only store what the preparer returns) use
+`NarrationKeys.segmentKey(segment, ...)`, so a segment recorded with a non-neutral delivery is not "missing" on the Video screen; the two
+instrumented tests that built keys by hand now use `NarrationKeys`. NS beats in `DeliveryPlan`: new `ScriptSegment.mateStep` (a bare move of an
+announced forced mate) is BRISK; the final mate stays WEIGHTY, the cold open (INTRO) and takeaways (lessons) CALM, phase shifts and the mate
+announcement normal (spec 9.10). `PacingTinyGameTest` bounds kept at 17 moves 4.0..6.0 and 23 moves 6.0..8.0 (measured 4.42 and 6.87 min).
